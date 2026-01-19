@@ -399,6 +399,9 @@ void init_webserver() {
       "WIFIAPENABLED", "MQTTENABLED",  "NOINVDISC",   "HADISC",       "MQTTTOPICS",   "MQTTCELLV",    "INVICNT",
       "GTWRHD",        "DIGITALHVIL",  "PERFPROFILE", "INTERLOCKREQ", "SOCESTIMATED", "PYLONOFFSET",  "PYLONORDER",
       "DEYEBYD",       "NCCONTACTOR",  "TRIBTR",      "CNTCTRLTRI",
+#ifndef SMALL_FLASH_DEVICE
+      "GVRETENABLED",
+#endif
   };
 
   const char* uintSettingNames[] = {
@@ -408,6 +411,9 @@ void init_webserver() {
       "SOFAR_ID",  "PYLONSEND",  "INVCELLS",   "INVMODULES", "INVCELLSPER", "INVVLEVEL", "INVCAPACITY",
       "INVBTYPE",  "CANFREQ",    "CANFDFREQ",  "PRECHGMS",   "PWMFREQ",     "PWMHOLD",   "GTWCOUNTRY",
       "GTWMAPREG", "GTWCHASSIS", "GTWPACK",    "LEDMODE",    "GPIOOPT1",    "GPIOOPT2",  "GPIOOPT3",
+#ifndef SMALL_FLASH_DEVICE
+      "GVRETPORT",
+#endif
   };
 
   const char* stringSettingNames[] = {"APNAME",       "APPASSWORD", "HOSTNAME",        "MQTTSERVER",     "MQTTUSER",

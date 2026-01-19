@@ -29,6 +29,9 @@
 #include "src/devboard/webserver/webserver.h"
 #include "src/devboard/wifi/wifi.h"
 #include "src/inverter/INVERTERS.h"
+#ifndef SMALL_FLASH_DEVICE
+#include "src/devboard/gvret/gvret.h"
+#endif
 
 #if !defined(HW_LILYGO) && !defined(HW_LILYGO2CAN) && !defined(HW_STARK) && !defined(HW_3LB) && !defined(HW_DEVKIT)
 #error You must select a target hardware!
@@ -655,6 +658,12 @@ void setup() {
     xTaskCreatePinnedToCore((TaskFunction_t)&mqtt_loop, "mqtt_loop", 4096, NULL, TASK_MQTT_PRIO, &mqtt_loop_task,
                             esp32hal->WIFICORE());
   }
+
+#ifndef SMALL_FLASH_DEVICE
+  if (gvret_enabled) {
+    init_gvret();
+  }
+#endif
 
   xTaskCreatePinnedToCore((TaskFunction_t)&core_loop, "core_loop", 4096, NULL, TASK_CORE_PRIO, &main_loop_task,
                           esp32hal->CORE_FUNCTION_CORE());

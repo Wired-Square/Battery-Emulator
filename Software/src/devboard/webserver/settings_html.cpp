@@ -572,6 +572,16 @@ String raw_settings_processor(const String& var, BatteryEmulatorSettingsStore& s
     return settings.getBool("HADISC") ? "checked" : "";
   }
 
+#ifndef SMALL_FLASH_DEVICE
+  if (var == "GVRETENABLED") {
+    return settings.getBool("GVRETENABLED") ? "checked" : "";
+  }
+
+  if (var == "GVRETPORT") {
+    return String(settings.getUInt("GVRETPORT", 23));
+  }
+#endif
+
   if (var == "MANUAL_BAL_CLASS") {
     if (battery && battery->supports_manual_balancing()) {
       return "";
@@ -1161,6 +1171,11 @@ const char* getCANInterfaceName(CAN_Interface interface) {
       display: contents;
     }
 
+    form .if-gvret { display: none; }
+    form[data-gvretenabled="true"] .if-gvret {
+      display: contents;
+    }
+
     </style>
 )rawliteral"
 
@@ -1594,7 +1609,35 @@ const char* getCANInterfaceName(CAN_Interface interface) {
 
         </div>
         </div>
+)rawliteral"
 
+#ifndef SMALL_FLASH_DEVICE
+#define GVRET_SETTINGS_HTML \
+  R"rawliteral(
+        <div class="settings-card">
+        <h3>GVRET CAN Server</h3>
+        <div style='display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px; align-items: center;'>
+
+        <label>Enable GVRET TCP server: </label>
+        <input type='checkbox' name='GVRETENABLED' value='on' %GVRETENABLED%
+              title="Enable GVRET TCP server for SavvyCAN/CANdor connectivity. Streams CAN frames in real-time." />
+
+        <div class='if-gvret'>
+        <label>GVRET port: </label>
+        <input type='number' name='GVRETPORT' value="%GVRETPORT%"
+        min="1" max="65535" step="1"
+        title="TCP port for GVRET server (default: 23)" />
+        </div>
+
+        </div>
+        </div>
+)rawliteral"
+#else
+#define GVRET_SETTINGS_HTML ""
+#endif
+
+#define SETTINGS_HTML_DEBUG \
+  R"rawliteral(
         <div class="settings-card">
         <h3>Debug options</h3>
         <div style='display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px; align-items: center;'>
@@ -1736,5 +1779,5 @@ const char* getCANInterfaceName(CAN_Interface interface) {
 
 )rawliteral"
 
-const char settings_html[] =
-    INDEX_HTML_HEADER COMMON_JAVASCRIPT SETTINGS_STYLE SETTINGS_HTML_BODY SETTINGS_HTML_SCRIPTS INDEX_HTML_FOOTER;
+const char settings_html[] = INDEX_HTML_HEADER COMMON_JAVASCRIPT SETTINGS_STYLE SETTINGS_HTML_BODY GVRET_SETTINGS_HTML
+    SETTINGS_HTML_DEBUG SETTINGS_HTML_SCRIPTS INDEX_HTML_FOOTER;

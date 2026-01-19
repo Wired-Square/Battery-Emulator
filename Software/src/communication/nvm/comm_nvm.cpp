@@ -10,6 +10,9 @@
 #include "../contactorcontrol/comm_contactorcontrol.h"
 #include "../equipmentstopbutton/comm_equipmentstopbutton.h"
 #include "../precharge_control/precharge_control.h"
+#ifndef SMALL_FLASH_DEVICE
+#include "../../devboard/gvret/gvret.h"
+#endif
 
 // Parameters
 Preferences settings;  // Store user settings
@@ -200,6 +203,11 @@ void init_stored_settings() {
   mqtt_port = settings.getUInt("MQTTPORT", 0);
   mqtt_user = settings.getString("MQTTUSER").c_str();
   mqtt_password = settings.getString("MQTTPASSWORD").c_str();
+
+#ifndef SMALL_FLASH_DEVICE
+  gvret_enabled = settings.getBool("GVRETENABLED", false);
+  gvret_port = settings.getUInt("GVRETPORT", GVRET_DEFAULT_PORT);
+#endif
 
   settings.end();
 }

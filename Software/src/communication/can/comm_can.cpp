@@ -8,6 +8,9 @@
 #include "src/devboard/safety/safety.h"
 #include "src/devboard/sdcard/sdcard.h"
 #include "src/devboard/utils/logging.h"
+#ifndef SMALL_FLASH_DEVICE
+#include "src/devboard/gvret/gvret.h"
+#endif
 
 #include <esp_private/periph_ctrl.h>
 
@@ -249,6 +252,12 @@ void transmit_can_frame_to_interface(const CAN_frame* tx_frame, CAN_Interface in
     add_can_frame_to_buffer(*tx_frame, frameDirection(MSG_TX));
   }
 
+#ifndef SMALL_FLASH_DEVICE
+  if (gvret_enabled && gvret_client_count() > 0) {
+    gvret_send_can_frame(tx_frame, interface, MSG_TX);
+  }
+#endif
+
   switch (interface) {
     case CAN_NATIVE: {
 
@@ -426,6 +435,15 @@ void map_can_frame_to_variable(CAN_frame* rx_frame, CAN_Interface interface) {
       add_can_frame_to_buffer(*rx_frame, frameDirection(MSG_RX));
     }
   }
+
+#ifndef SMALL_FLASH_DEVICE
+  if (gvret_enabled && gvret_client_count() > 0) {
+    if (interface !=
+        CANFD_NATIVE) {  //Avoid sending twice due to receive_frame_canfd_addon sending to both FD interfaces
+      gvret_send_can_frame(rx_frame, interface, MSG_RX);
+    }
+  }
+#endif
 
   // Send the frame to all the receivers registered for this interface.
   auto receivers = can_receivers.equal_range(interface);
