@@ -9,38 +9,24 @@ void setup_shunt() {
   if (shunt) {
     return;
   }
-
   switch (user_selected_shunt_type) {
-    case ShuntType::None:
-      shunt = nullptr;
-      return;
     case ShuntType::BmwSbox:
       shunt = new BmwSbox();
       shunt->setup();
-      return;
+      break;
     case ShuntType::Inverter:
+      // The selected inverter supplies shunt values directly.
       if (inverter && inverter->provides_shunt()) {
         inverter->enable_shunt();
       }
-      return;
+      break;
     case ShuntType::CustomClamp:
-      shunt = nullptr;
-      return;
-    default:
-      return;
+      // CT/ADC clamp is set up and read inside the CHAdeMO battery driver.
+      break;
+    case ShuntType::None:
+    case ShuntType::Highest:
+      break;
   }
-}
-
-extern std::vector<ShuntType> supported_shunt_types() {
-  std::vector<ShuntType> types;
-  types.push_back(ShuntType::None);
-  types.push_back(ShuntType::BmwSbox);
-
-  if (inverter && inverter->provides_shunt())
-    types.push_back(ShuntType::Inverter);
-
-  types.push_back(ShuntType::CustomClamp);
-  return types;
 }
 
 extern const char* name_for_shunt_type(ShuntType type) {

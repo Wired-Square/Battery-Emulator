@@ -8,8 +8,6 @@
 #include "../../src/devboard/utils/types.h"
 #include "Arduino.h"
 
-#include <vector>
-
 enum class ShuntType { None = 0, BmwSbox = 1, Inverter = 2, CustomClamp = 3, Highest };
 
 class CanShunt : public Transmitter, CanReceiver {
@@ -19,7 +17,7 @@ class CanShunt : public Transmitter, CanReceiver {
   virtual void handle_incoming_can_frame(CAN_frame rx_frame) = 0;
 
   // The name of the comm interface the shunt is using.
-  virtual const char* interface_name() { return getCANInterfaceName(can_config.shunt); }
+  virtual const char* interface_name() { return can_config.shunt != nullptr ? descriptor_name(*can_config.shunt) : ""; }
 
   void transmit(unsigned long currentMillis) {
     if (allowed_to_send_CAN) {
@@ -30,7 +28,7 @@ class CanShunt : public Transmitter, CanReceiver {
   void receive_can_frame(CAN_frame* frame) { handle_incoming_can_frame(*frame); }
 
  protected:
-  CAN_Interface can_interface;
+  const InterfaceDescriptor* can_interface;
 
   CanShunt() {
     can_interface = can_config.shunt;
@@ -42,7 +40,6 @@ class CanShunt : public Transmitter, CanReceiver {
 };
 
 extern CanShunt* shunt;
-extern std::vector<ShuntType> supported_shunt_types();
 extern const char* name_for_shunt_type(ShuntType type);
 extern ShuntType user_selected_shunt_type;
 

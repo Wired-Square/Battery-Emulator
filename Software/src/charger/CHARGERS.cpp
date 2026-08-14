@@ -1,5 +1,5 @@
 #include "CHARGERS.h"
-#include <vector>
+#include <iterator>
 #include "CanCharger.h"
 
 CanCharger* charger = nullptr;
@@ -15,41 +15,47 @@ volatile float CHARGER_MAX_POWER = 3300;  // Max power capable of charger, as a 
 volatile float CHARGER_MAX_A = 11.5f;     // Max current output (amps) of charger
 volatile float CHARGER_END_A = 1.0f;      // Current at which charging is considered complete
 
-std::vector<ChargerType> supported_charger_types() {
-  std::vector<ChargerType> types;
-
-  for (int i = 0; i < (int)ChargerType::Highest; i++) {
-    types.push_back((ChargerType)i);
-  }
-
-  return types;
+template <typename T>
+static CanCharger* make() {
+  return new T();
 }
 
-extern const char* name_for_charger_type(ChargerType type) {
-  switch (type) {
-    case ChargerType::ChevyVolt:
-      return ChevyVoltCharger::Name;
-    case ChargerType::NissanLeaf:
-      return NissanLeafCharger::Name;
-    case ChargerType::None:
-    case ChargerType::Highest:
-      return "None";
-  }
+struct ChargerTypeInfo {
+  ChargerType id;
+  const char* name;
+  CanCharger* (*make)();  // nullptr => not constructible (None)
+};
 
+// A row's make<T> must construct the class its id and name denote; the pairing is convention, not compiler-checked.
+static constexpr ChargerTypeInfo kChargerRegistry[] = {
+    {ChargerType::None,       "None",                              nullptr},
+    {ChargerType::NissanLeaf, "Nissan LEAF 2013-2024 PDM charger", &make<NissanLeafCharger>},
+    {ChargerType::ChevyVolt,  "Chevy Volt Gen1 Charger",           &make<ChevyVoltCharger>},
+    // Highest is a count sentinel, not a selectable type
+};
+
+static constexpr bool registry_strictly_ascending() {
+  for (size_t i = 1; i < std::size(kChargerRegistry); i++)
+    if (kChargerRegistry[i - 1].id >= kChargerRegistry[i].id) return false;
+  return true;
+}
+static_assert(registry_strictly_ascending(),
+              "charger registry rows must be sorted by enum value with no duplicates");
+
+static const ChargerTypeInfo* find_charger_info(ChargerType type) {
+  for (const auto& info : kChargerRegistry)
+    if (info.id == type) return &info;
   return nullptr;
 }
 
-void setup_charger() {
+const char* name_for_charger_type(ChargerType type) {
+  const ChargerTypeInfo* info = find_charger_info(type);
+  return info ? info->name : nullptr;
+}
 
-  switch (user_selected_charger_type) {
-    case ChargerType::ChevyVolt:
-      charger = new ChevyVoltCharger();
-      break;
-    case ChargerType::NissanLeaf:
-      charger = new NissanLeafCharger();
-      break;
-    case ChargerType::None:
-    case ChargerType::Highest:
-      break;
+void setup_charger() {
+  const ChargerTypeInfo* info = find_charger_info(user_selected_charger_type);
+  if (info && info->make) {
+    charger = info->make();
   }
 }

@@ -12,7 +12,6 @@ enum class ChargerType { None, NissanLeaf, ChevyVolt, Highest };
 
 extern ChargerType user_selected_charger_type;
 
-extern std::vector<ChargerType> supported_charger_types();
 extern const char* name_for_charger_type(ChargerType type);
 
 // Generic base class for all chargers
@@ -20,7 +19,7 @@ class Charger {
  public:
   ChargerType type() { return m_type; }
 
-  virtual const char* name() = 0;
+  const char* name() { return name_for_charger_type(type()); }
 
   virtual float outputPowerDC() = 0;
 
@@ -57,10 +56,10 @@ class CanCharger : public Charger, Transmitter, CanReceiver {
 
   void receive_can_frame(CAN_frame* frame) { map_can_frame_to_variable(*frame); }
 
-  CAN_Interface interface() { return can_interface; }
+  const InterfaceDescriptor* interface() { return can_interface; }
 
  protected:
-  CAN_Interface can_interface;
+  const InterfaceDescriptor* can_interface;
 
   CanCharger(ChargerType type) : Charger(type) {
     can_interface = can_config.charger;

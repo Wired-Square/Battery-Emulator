@@ -10,9 +10,6 @@ class NissanLeafCharger : public CanCharger {
  public:
   NissanLeafCharger() : CanCharger(ChargerType::NissanLeaf) {}
 
-  const char* name() { return Name; }
-  static constexpr const char* Name = "Nissan LEAF 2013-2024 PDM charger";
-
   void map_can_frame_to_variable(CAN_frame rx_frame);
   void transmit_can(unsigned long currentMillis);
 
@@ -20,13 +17,13 @@ class NissanLeafCharger : public CanCharger {
 
   float HVDC_output_current() {
     // P/U=I
-    if (datalayer.battery.status.voltage_dV > 0) {
-      return outputPowerDC() / (datalayer.battery.status.voltage_dV / 10);
+    if (datalayer.battery.combined.status.voltage_dV > 0) {
+      return outputPowerDC() / (datalayer.battery.combined.status.voltage_dV / 10);
     }
     return 0;
   }
 
-  float HVDC_output_voltage() { return static_cast<float>(datalayer.battery.status.voltage_dV / 10); }
+  float HVDC_output_voltage() { return static_cast<float>(datalayer.battery.combined.status.voltage_dV / 10); }
 
  private:
   /* CAN cycles and timers */
