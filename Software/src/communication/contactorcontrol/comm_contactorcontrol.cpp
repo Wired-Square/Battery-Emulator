@@ -1,5 +1,6 @@
 #include "comm_contactorcontrol.h"
 #include "../../battery/BATTERIES.h"
+#include "../../devboard/hal/GpioOutput.h"
 #include "../../devboard/hal/hal.h"
 #include "../../devboard/safety/safety.h"
 #include "../../devboard/utils/led_handler.h"
@@ -24,11 +25,7 @@ bool periodic_bms_reset_defer_low_soc = false;          //Defer the reset while 
 bool periodic_bms_reset_skip_balancing = false;         //Skip one period if the pack is balancing
 
 // Parameters
-enum State { DISCONNECTED, START_PRECHARGE, PRECHARGE, POSITIVE, PRECHARGE_OFF, COMPLETED, SHUTDOWN_REQUESTED };
-State contactorStatus = DISCONNECTED;
-
-const uint8_t ON = 1;
-const uint8_t OFF = 0;
+ContactorState contactorStatus = ContactorState::DISCONNECTED;
 
 #define MAX_ALLOWED_FAULT_TICKS 1000  //1000 = 10 seconds
 #define NEGATIVE_CONTACTOR_TIME_MS \
@@ -39,21 +36,16 @@ const uint8_t OFF = 0;
   7000  // Equipment stop: max time to wait for the pause to reach zero current before opening contactors anyway
 uint16_t pwm_frequency = 20000;
 uint16_t pwm_hold_duty = 250;
-#define PWM_ON_DUTY 1023
-#define PWM_RESOLUTION 10
-#define PWM_OFF_DUTY 0  //No need to have this userconfigurable
-#define PWM_Positive_Channel 0
-#define PWM_Negative_Channel 1
 static uint32_t prechargeStartTime = 0;
-uint32_t negativeStartTime = 0;
-uint32_t prechargeCompletedTime = 0;
-uint32_t timeSpentInFaultedMode = 0;
-uint32_t currentTime = 0;
+static uint32_t negativeStartTime = 0;
+static uint32_t prechargeCompletedTime = 0;
+static uint32_t timeSpentInFaultedMode = 0;
 uint32_t lastPowerRemovalTime = 0;
+static uint32_t bmsPowerOnTime = 0;
+uint32_t currentTime = 0;
 static uint32_t estop_open_wait_start_ms = 0;
 bool periodicResetDeferred = false;   //True while a due periodic reset is waiting for SOC to recover
 bool balancingPeriodSkipped = false;  //True once balancing has cost the reset a period
-uint32_t bmsPowerOnTime = 0;
 const uint32_t bmsWarmupDuration = 3000;
 #define BMS_RESET_DEFER_SOC_PPTT 1500  // 15.00%, below this the low-SOC guard defers the periodic reset
 
@@ -64,27 +56,8 @@ const uint32_t bmsWarmupDuration = 3000;
    ourselves while the reset runs. Refreshing one second before the window closes keeps
    the counter from ever reaching zero. Durations that fit inside the window are left
    alone and keep the original, unmasked behaviour. */
-#define BMS_RESET_CAN_KEEPALIVE_INTERVAL_MS ((unsigned long)(CAN_STILL_ALIVE - 1) * 1000UL)
-unsigned long lastCanKeepaliveTime = 0;
-
-void set(uint8_t pin, bool direction, uint32_t pwm_freq = 0xFFFF) {
-
-  if (contactor_control_inverted_logic) {
-    direction = !direction;  //Invert direction for NC contactors
-  }
-
-  if (pwm_contactor_control) {
-    if (pwm_freq != 0xFFFF) {
-      ledcWrite(pin, pwm_freq);
-      return;
-    }
-  }
-  if (direction == 1) {
-    digitalWrite(pin, HIGH);
-  } else {  // 0
-    digitalWrite(pin, LOW);
-  }
-}
+#define BMS_RESET_CAN_KEEPALIVE_INTERVAL_MS ((uint32_t)(CAN_STILL_ALIVE - 1) * 1000UL)
+uint32_t lastCanKeepaliveTime = 0;
 
 bool bms_power_is_active() {
   return periodic_bms_reset || remote_bms_reset || esp32hal->always_enable_bms_power();
@@ -94,71 +67,59 @@ bool bms_power_is_active() {
 
 const char* contactors = "Contactors";
 
-bool init_contactors() {
-  // Init contactor pins
-  if (contactor_control_enabled) {
-    auto posPin = esp32hal->POSITIVE_CONTACTOR_PIN();
-    auto negPin = esp32hal->NEGATIVE_CONTACTOR_PIN();
-    auto precPin = esp32hal->PRECHARGE_PIN();
+// Missing role row = feature not wired on this board.
+static SwitchedOutput* claim_output(OutputRole role, const char* owner) {
+  SwitchedOutput* output = esp32hal->switched_output(role);
+  if (output == nullptr) {
+    set_event(EVENT_GPIO_NOT_DEFINED, (uint8_t)GPIO_NUM_NC);
+    return nullptr;
+  }
+  return output->init(owner) ? output : nullptr;
+}
 
-    if (!esp32hal->alloc_pins(contactors, posPin, negPin, precPin)) {
+bool init_contactors() {
+  if (contactor_control_enabled) {
+    SwitchedOutput* positive = claim_output(OutputRole::PositiveContactor, contactors);
+    SwitchedOutput* negative = claim_output(OutputRole::NegativeContactor, contactors);
+    SwitchedOutput* precharge = claim_output(OutputRole::Precharge, contactors);
+    if (positive == nullptr || negative == nullptr || precharge == nullptr) {
       DEBUG_PRINTF("GPIO controlled contactor setup failed\n");
       return false;
     }
-
-    if (pwm_contactor_control) {
-      // Setup PWM Channel Frequency and Resolution
-      ledcAttachChannel(posPin, pwm_frequency, PWM_RESOLUTION, PWM_Positive_Channel);
-      ledcAttachChannel(negPin, pwm_frequency, PWM_RESOLUTION, PWM_Negative_Channel);
-      // Set all pins OFF (0% PWM)
-      ledcWrite(posPin, PWM_OFF_DUTY);
-      ledcWrite(negPin, PWM_OFF_DUTY);
-      set_indicator_led(IndicatorLed::CONTACTOR_POS, false);
-      set_indicator_led(IndicatorLed::CONTACTOR_NEG, false);
-    } else {  //Normal CONTACTOR_CONTROL
-      pinMode(posPin, OUTPUT);
-      set(posPin, OFF);
-      set_indicator_led(IndicatorLed::CONTACTOR_POS, false);
-      pinMode(negPin, OUTPUT);
-      set(negPin, OFF);
-      set_indicator_led(IndicatorLed::CONTACTOR_NEG, false);
-    }  // Precharge never has PWM regardless of setting
-    pinMode(precPin, OUTPUT);
-    set(precPin, OFF);
+    positive->set(false);
+    negative->set(false);
+    precharge->set(false);
+    set_indicator_led(IndicatorLed::CONTACTOR_POS, false);
+    set_indicator_led(IndicatorLed::CONTACTOR_NEG, false);
     set_indicator_led(IndicatorLed::PRECHARGE, false);
   }
 
   if (contactor_control_enabled_double_battery) {
-    auto second_contactors = esp32hal->SECOND_BATTERY_CONTACTORS_PIN();
-    if (!esp32hal->alloc_pins(contactors, second_contactors)) {
+    SwitchedOutput* second = claim_output(OutputRole::SecondBatteryContactors, contactors);
+    if (second == nullptr) {
       DEBUG_PRINTF("Secondary battery contactor control setup failed\n");
       return false;
     }
-
-    pinMode(second_contactors, OUTPUT);
-    set(second_contactors, OFF);
+    second->set(false);
   }
 
   if (contactor_control_enabled_triple_battery) {
-    auto triple_contactors = esp32hal->TRIPLE_BATTERY_CONTACTORS_PIN();
-    if (!esp32hal->alloc_pins(contactors, triple_contactors)) {
+    SwitchedOutput* third = claim_output(OutputRole::ThirdBatteryContactors, contactors);
+    if (third == nullptr) {
       DEBUG_PRINTF("Triple battery contactor control setup failed\n");
       return false;
     }
-
-    pinMode(triple_contactors, OUTPUT);
-    set(triple_contactors, OFF);
+    third->set(false);
   }
 
   // Init BMS contactor
   if (bms_power_is_active()) {
-    auto pin = esp32hal->BMS_POWER();
-    if (!esp32hal->alloc_pins("BMS power", pin)) {
+    SwitchedOutput* bms_power = claim_output(OutputRole::BmsPower, "BMS power");
+    if (bms_power == nullptr) {
       DEBUG_PRINTF("BMS power setup failed\n");
       return false;
     }
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, HIGH);
+    bms_power->set_raw(true);
     set_indicator_led(IndicatorLed::BMS_POWER, true);
   }
 
@@ -178,14 +139,21 @@ void handle_contactors() {
     datalayer.system.status.inverter_allows_contactor_closing = inverter->allows_contactor_closing();
   }
 
-  auto posPin = esp32hal->POSITIVE_CONTACTOR_PIN();
-  auto negPin = esp32hal->NEGATIVE_CONTACTOR_PIN();
-  auto prechargePin = esp32hal->PRECHARGE_PIN();
-  auto bms_power_pin = esp32hal->BMS_POWER();
-
-  if (bms_power_pin != GPIO_NUM_NC) {
+  if (esp32hal->switched_output(OutputRole::BmsPower) != nullptr) {
     handle_BMSpower();  // Some batteries need to be periodically power cycled
   }
+
+#ifdef BOARD_HAS_LOAD_SWITCH
+  // A hardware fault on any bound output (VDS/power-limit/thermal or
+  // latch-off on a VN9D channel) feeds the same FAULT latch as any other
+  // ERROR event; GPIO outputs never report one.
+  SwitchedOutputList outputs = esp32hal->switched_outputs();
+  for (size_t i = 0; i < outputs.count; i++) {
+    if (outputs.data[i].output->fault()) {
+      set_event(EVENT_LOAD_SWITCH_FAULT, (uint8_t)i);
+    }
+  }
+#endif
 
   if (contactor_control_enabled_double_battery) {
     handle_contactors_battery2();
@@ -196,9 +164,15 @@ void handle_contactors() {
   }
 
   if (contactor_control_enabled) {
+    SwitchedOutput* positive = esp32hal->switched_output(OutputRole::PositiveContactor);
+    SwitchedOutput* negative = esp32hal->switched_output(OutputRole::NegativeContactor);
+    SwitchedOutput* precharge = esp32hal->switched_output(OutputRole::Precharge);
+    if (positive == nullptr || negative == nullptr || precharge == nullptr) {
+      return;
+    }
     // DC is only live to the inverter once precharge is fully complete (COMPLETED). Re-evaluated every
     // call, so any transition (open, fault-latch, precharge) is reflected within one 10 ms tick.
-    datalayer.system.status.dc_bus_live = (contactorStatus == COMPLETED);
+    datalayer.system.status.dc_bus_live = (contactorStatus == ContactorState::COMPLETED);
 
     // First check if we have any active errors, incase we do, turn off the battery
     if (datalayer.system.status.system_status == FAULT) {
@@ -209,13 +183,13 @@ void handle_contactors() {
 
     //handle contactor control SHUTDOWN_REQUESTED
     if (timeSpentInFaultedMode > MAX_ALLOWED_FAULT_TICKS) {
-      contactorStatus = SHUTDOWN_REQUESTED;
+      contactorStatus = ContactorState::SHUTDOWN_REQUESTED;
     }
 
-    if (contactorStatus == SHUTDOWN_REQUESTED) {
-      set(prechargePin, OFF);
-      set(negPin, OFF, PWM_OFF_DUTY);
-      set(posPin, OFF, PWM_OFF_DUTY);
+    if (contactorStatus == ContactorState::SHUTDOWN_REQUESTED) {
+      precharge->set(false);
+      negative->set(false);
+      positive->set(false);
       set_indicator_led(IndicatorLed::PRECHARGE, false);
       set_indicator_led(IndicatorLed::CONTACTOR_NEG, false);
       set_indicator_led(IndicatorLed::CONTACTOR_POS, false);
@@ -225,26 +199,26 @@ void handle_contactors() {
     }
 
     // After that, check if we are OK to start turning on the battery
-    if (contactorStatus == DISCONNECTED) {
-      set(prechargePin, OFF);
-      set(negPin, OFF, PWM_OFF_DUTY);
-      set(posPin, OFF, PWM_OFF_DUTY);
+    if (contactorStatus == ContactorState::DISCONNECTED) {
+      precharge->set(false);
+      negative->set(false);
+      positive->set(false);
       set_indicator_led(IndicatorLed::PRECHARGE, false);
       set_indicator_led(IndicatorLed::CONTACTOR_NEG, false);
       set_indicator_led(IndicatorLed::CONTACTOR_POS, false);
       datalayer.system.status.contactors_engaged = 0;
 
       if (datalayer.system.status.inverter_allows_contactor_closing && !datalayer.system.info.equipment_stop_active) {
-        contactorStatus = START_PRECHARGE;
+        contactorStatus = ContactorState::START_PRECHARGE;
       }
     }
 
     // In case the inverter or the equipment stop requests contactors to open, jump to Disconnected (recoverable)
-    if (contactorStatus == COMPLETED) {
+    if (contactorStatus == ContactorState::COMPLETED) {
       if (!datalayer.system.status.inverter_allows_contactor_closing) {
         // Inverter-commanded opening stays immediate: the inverter has already
         // stopped power transfer before revoking its permission
-        contactorStatus = DISCONNECTED;
+        contactorStatus = ContactorState::DISCONNECTED;
       } else if (datalayer.system.info.equipment_stop_active) {
         // Equipment stop: every e-stop entry point also issues a battery pause,
         // so hold the contactors until the pause state machine reports PAUSED
@@ -264,7 +238,7 @@ void handle_contactors() {
             set_event(EVENT_ERROR_OPEN_CONTACTOR, 1);
           }
           estop_open_wait_start_ms = 0;
-          contactorStatus = DISCONNECTED;
+          contactorStatus = ContactorState::DISCONNECTED;
         }
       } else {
         estop_open_wait_start_ms = 0;
@@ -273,9 +247,9 @@ void handle_contactors() {
       return;
     }
 
-    currentTime = millis();
+    uint32_t currentTime = millis();
 
-    if ((currentTime < INTERVAL_10_S) || !battery_detected) {
+    if ((currentTime < INTERVAL_10_S) || !battery_slot_detected(0)) {
       // Skip running the state machine before system has started up. Conditions are 10sec post boot, and battery comms established
       // Gives the system some time to detect any faults from battery before blindly just engaging the contactors
       return;
@@ -283,45 +257,45 @@ void handle_contactors() {
 
     // Handle actual state machine. This first turns on Negative, then Precharge, then Positive, and finally turns OFF precharge
     switch (contactorStatus) {
-      case START_PRECHARGE:
-        set(negPin, ON, PWM_ON_DUTY);
+      case ContactorState::START_PRECHARGE:
+        negative->set(true);
         set_indicator_led(IndicatorLed::CONTACTOR_NEG, true);
         dbg_contactors("NEGATIVE");
         prechargeStartTime = currentTime;
-        contactorStatus = PRECHARGE;
+        contactorStatus = ContactorState::PRECHARGE;
         datalayer.system.status.contactors_engaged = 3;
         break;
 
-      case PRECHARGE:
+      case ContactorState::PRECHARGE:
         if (currentTime - prechargeStartTime >= NEGATIVE_CONTACTOR_TIME_MS) {
-          set(prechargePin, ON);
+          precharge->set(true);
           set_indicator_led(IndicatorLed::PRECHARGE, true);
           dbg_contactors("PRECHARGE");
           negativeStartTime = currentTime;
-          contactorStatus = POSITIVE;
+          contactorStatus = ContactorState::POSITIVE;
           datalayer.system.status.contactors_engaged = 3;
         }
         break;
 
-      case POSITIVE:
+      case ContactorState::POSITIVE:
         if (currentTime - negativeStartTime >= precharge_time_ms) {
-          set(posPin, ON, PWM_ON_DUTY);
+          positive->set(true);
           set_indicator_led(IndicatorLed::CONTACTOR_POS, true);
           dbg_contactors("POSITIVE");
           prechargeCompletedTime = currentTime;
-          contactorStatus = PRECHARGE_OFF;
+          contactorStatus = ContactorState::PRECHARGE_OFF;
           datalayer.system.status.contactors_engaged = 3;
         }
         break;
 
-      case PRECHARGE_OFF:
+      case ContactorState::PRECHARGE_OFF:
         if (currentTime - prechargeCompletedTime >= PRECHARGE_COMPLETED_TIME_MS) {
-          set(prechargePin, OFF);
-          set(negPin, ON, pwm_hold_duty);
-          set(posPin, ON, pwm_hold_duty);
+          precharge->set(false);
+          negative->set_hold();
+          positive->set_hold();
           set_indicator_led(IndicatorLed::PRECHARGE, false);
           dbg_contactors("PRECHARGE_OFF");
-          contactorStatus = COMPLETED;
+          contactorStatus = ContactorState::COMPLETED;
           datalayer.system.status.contactors_engaged = 1;
         }
         break;
@@ -332,25 +306,31 @@ void handle_contactors() {
 }
 
 void handle_contactors_battery2() {
-  auto second_contactors = esp32hal->SECOND_BATTERY_CONTACTORS_PIN();
+  SwitchedOutput* second = esp32hal->switched_output(OutputRole::SecondBatteryContactors);
+  if (second == nullptr) {
+    return;
+  }
 
-  if ((contactorStatus == COMPLETED) && datalayer.system.status.battery2_allowed_contactor_closing) {
-    set(second_contactors, ON);
+  if ((contactorStatus == ContactorState::COMPLETED) && datalayer.system.status.battery2_allowed_contactor_closing) {
+    second->set(true);
     datalayer.system.status.contactors_battery2_engaged = true;
   } else {  // Closing contactors on secondary battery not allowed
-    set(second_contactors, OFF);
+    second->set(false);
     datalayer.system.status.contactors_battery2_engaged = false;
   }
 }
 
 void handle_contactors_battery3() {
-  auto third_contactors = esp32hal->TRIPLE_BATTERY_CONTACTORS_PIN();
+  SwitchedOutput* third = esp32hal->switched_output(OutputRole::ThirdBatteryContactors);
+  if (third == nullptr) {
+    return;
+  }
 
-  if ((contactorStatus == COMPLETED) && datalayer.system.status.battery3_allowed_contactor_closing) {
-    set(third_contactors, ON);
+  if ((contactorStatus == ContactorState::COMPLETED) && datalayer.system.status.battery3_allowed_contactor_closing) {
+    third->set(true);
     datalayer.system.status.contactors_battery3_engaged = true;
   } else {  // Closing contactors on secondary battery not allowed
-    set(third_contactors, OFF);
+    third->set(false);
     datalayer.system.status.contactors_battery3_engaged = false;
   }
 }
@@ -364,12 +344,16 @@ During that time we also set the emulator state to paused in order to not try an
 Feature is only used if user has enabled PERIODIC_BMS_RESET */
 
 void bms_power_off() {
-  digitalWrite(esp32hal->BMS_POWER(), LOW);
+  if (SwitchedOutput* bms_power = esp32hal->switched_output(OutputRole::BmsPower)) {
+    bms_power->set_raw(false);
+  }
   set_indicator_led(IndicatorLed::BMS_POWER, false);
 }
 
 void bms_power_on() {
-  digitalWrite(esp32hal->BMS_POWER(), HIGH);
+  if (SwitchedOutput* bms_power = esp32hal->switched_output(OutputRole::BmsPower)) {
+    bms_power->set_raw(true);
+  }
   set_indicator_led(IndicatorLed::BMS_POWER, true);
 }
 
@@ -400,11 +384,22 @@ static PeriodicResetVerdict periodic_bms_reset_verdict(const char** reason) {
   // Low SOC defers: there is little point recalibrating against a nearly empty pack, and we
   // want the reset to happen as soon as it is worthwhile rather than a whole period later.
   if (periodic_bms_reset_defer_low_soc) {
-    if (datalayer.battery.status.real_soc < BMS_RESET_DEFER_SOC_PPTT) {
+    uint16_t min_real_soc = UINT16_MAX;
+    uint16_t min_reported_soc = UINT16_MAX;
+    for (uint8_t slot = 0; slot < active_battery_slots(); slot++) {
+      auto& status = datalayer.battery_slot(slot).status;
+      if (status.real_soc < min_real_soc) {
+        min_real_soc = status.real_soc;
+      }
+      if (status.reported_soc < min_reported_soc) {
+        min_reported_soc = status.reported_soc;
+      }
+    }
+    if (min_real_soc < BMS_RESET_DEFER_SOC_PPTT) {
       *reason = "real SOC below 15 percent";
       return PeriodicResetVerdict::Defer;
     }
-    if (datalayer.battery.status.reported_soc < BMS_RESET_DEFER_SOC_PPTT) {
+    if (min_reported_soc < BMS_RESET_DEFER_SOC_PPTT) {
       *reason = "scaled SOC below 15 percent";
       return PeriodicResetVerdict::Defer;
     }
@@ -415,17 +410,11 @@ static PeriodicResetVerdict periodic_bms_reset_verdict(const char** reason) {
      or less permanently cannot suppress the reset indefinitely.
      Batteries that are not present report BALANCING_STATUS_UNKNOWN, so they never skip. */
   if (periodic_bms_reset_skip_balancing && !balancingPeriodSkipped) {
-    if (datalayer.battery.status.balancing_status == BALANCING_STATUS_ACTIVE) {
-      *reason = "balancing active on battery";
-      return PeriodicResetVerdict::SkipPeriod;
-    }
-    if (datalayer.battery2.status.balancing_status == BALANCING_STATUS_ACTIVE) {
-      *reason = "balancing active on battery 2";
-      return PeriodicResetVerdict::SkipPeriod;
-    }
-    if (datalayer.battery3.status.balancing_status == BALANCING_STATUS_ACTIVE) {
-      *reason = "balancing active on battery 3";
-      return PeriodicResetVerdict::SkipPeriod;
+    for (uint8_t slot = 0; slot < active_battery_slots(); slot++) {
+      if (datalayer.battery_slot(slot).status.balancing_status == BALANCING_STATUS_ACTIVE) {
+        *reason = "balancing active on battery";
+        return PeriodicResetVerdict::SkipPeriod;
+      }
     }
   }
 
@@ -443,26 +432,22 @@ static bool bms_reset_needs_can_keepalive() {
 /* Pretends the batteries were just heard from, and restarts the keepalive interval.
    Batteries that are not configured are skipped, since the safety layer does not look at
    their counters either. */
-static void bms_reset_refresh_can_alive() {
-  lastCanKeepaliveTime = currentTime;
-  datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
-  if (battery2) {
-    datalayer.battery2.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
-  }
-  if (battery3) {
-    datalayer.battery3.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+static void bms_reset_refresh_can_alive(uint32_t now) {
+  lastCanKeepaliveTime = now;
+  for (uint8_t slot = 0; slot < active_battery_slots(); slot++) {
+    datalayer.battery_slot(slot).status.CAN_battery_still_alive = CAN_STILL_ALIVE;
   }
 }
 
 // Called on every pass through the powered-off and powering-on states of a long reset.
-static void bms_reset_can_keepalive_tick() {
+static void bms_reset_can_keepalive_tick(uint32_t now) {
   if (!bms_reset_needs_can_keepalive()) {
     return;
   }
-  if (currentTime - lastCanKeepaliveTime < BMS_RESET_CAN_KEEPALIVE_INTERVAL_MS) {
+  if (now - lastCanKeepaliveTime < BMS_RESET_CAN_KEEPALIVE_INTERVAL_MS) {
     return;
   }
-  bms_reset_refresh_can_alive();
+  bms_reset_refresh_can_alive(now);
 }
 
 void handle_BMSpower() {
@@ -472,7 +457,7 @@ void handle_BMSpower() {
   }
 
   if (periodic_bms_reset || remote_bms_reset) {
-    currentTime = millis();
+    uint32_t currentTime = millis();
 
     if (datalayer.system.status.bms_reset_status == BMS_RESET_IDLE) {
       // Idle state, no reset ongoing
@@ -512,9 +497,9 @@ void handle_BMSpower() {
     } else if (datalayer.system.status.bms_reset_status == BMS_RESET_WAITING_FOR_PAUSE) {
       // We've already issued a pause, now we're waiting for that to take effect.
 
-      int16_t battery_current_dA = datalayer.battery.status.current_dA;
-      int16_t battery2_current_dA = datalayer.battery2.status.current_dA;  // Should be 0 if no battery2
-      int16_t battery3_current_dA = datalayer.battery3.status.current_dA;  // Should be 0 if no battery3
+      int16_t battery_current_dA = datalayer.battery.pack[0].status.current_dA;
+      int16_t battery2_current_dA = datalayer.battery.pack[1].status.current_dA;  // Should be 0 if no battery2
+      int16_t battery3_current_dA = datalayer.battery.pack[2].status.current_dA;  // Should be 0 if no battery3
 
       if (
           // No current, safe to cut power
@@ -534,7 +519,7 @@ void handle_BMSpower() {
         clear_event(EVENT_PERIODIC_BMS_RESET_FAILURE);
       }
     } else if (datalayer.system.status.bms_reset_status == BMS_RESET_POWERED_OFF) {
-      bms_reset_can_keepalive_tick();
+      bms_reset_can_keepalive_tick(currentTime);
 
       // Check if the user configured duration has passed
       if (currentTime - lastPowerRemovalTime >= datalayer.battery.settings.user_set_bms_reset_duration_ms) {
@@ -544,12 +529,12 @@ void handle_BMSpower() {
            the BMS only a sliver of the window to get back on the bus. Refreshing here gives it
            the whole window from power-on, measured from the same moment for every off time. */
         if (bms_reset_needs_can_keepalive()) {
-          bms_reset_refresh_can_alive();
+          bms_reset_refresh_can_alive(currentTime);
         }
         datalayer.system.status.bms_reset_status = BMS_RESET_POWERING_ON;
       }
     } else if (datalayer.system.status.bms_reset_status == BMS_RESET_POWERING_ON) {
-      bms_reset_can_keepalive_tick();
+      bms_reset_can_keepalive_tick(currentTime);
 
       // Wait for BMS to start up before unpausing
       if (currentTime - bmsPowerOnTime >= bmsWarmupDuration) {
@@ -605,7 +590,8 @@ static bool should_hold_pin(gpio_num_t pin) {
   if (pin == GPIO_NUM_NC) {
     return false;
   }
-  if (pin == esp32hal->BMS_POWER()) {
+  auto* bms_power = esp32hal->switched_output(OutputRole::BmsPower);
+  if (bms_power != nullptr && pin == static_cast<GpioOutput*>(bms_power)->pin()) {
     return bms_power_is_active();
   }
   return false;  // unknown pins are not held until explicitly supported
@@ -624,9 +610,16 @@ void hold_pins_across_reset() {
       any_held = true;
     }
   }
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
+  // Chips that cannot hold an individual IO through deep sleep need the global
+  // enable to keep the per-pin holds engaged across the reset; C6-class chips
+  // hold each IO on their own and do not provide this call.
   if (any_held) {
-    gpio_deep_sleep_hold_en();  // keep the hold(s) engaged through the reset
+    gpio_deep_sleep_hold_en();
   }
+#else
+  (void)any_held;
+#endif
 #endif
 }
 

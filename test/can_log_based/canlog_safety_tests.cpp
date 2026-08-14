@@ -22,6 +22,14 @@ class CanLogTestFixture : public testing::Test {
   //   static void TearDownTestSuite() { ... }
 
   void SetUp() override {
+    // Reset the datalayer and events before each test
+    datalayer = DataLayer();
+    reset_all_events();
+    if (batteries[0]) {
+      delete batteries[0];
+      batteries[0] = nullptr;
+    }
+
     // Assume a 90s NMC pack for custom-BMS batteries
     user_selected_max_pack_voltage_dV = 378 + 10;
     user_selected_min_pack_voltage_dV = 261 - 10;
@@ -32,17 +40,24 @@ class CanLogTestFixture : public testing::Test {
     std::string filename = path_.filename().string();
     std::string batteryId = filename.substr(0, filename.find('_'));
     user_selected_battery_type = (BatteryType)std::stoi(batteryId);
-    battery = nullptr;
+    batteries[0] = nullptr;
     setup_battery();
 
     // Initialize datalayer to invalid values
-    datalayer.battery.status.voltage_dV = 0;
-    datalayer.battery.status.current_dA = INT16_MIN;
-    datalayer.battery.status.cell_min_voltage_mV = 0;
-    datalayer.battery.status.cell_max_voltage_mV = 0;
-    datalayer.battery.status.real_soc = UINT16_MAX;
-    datalayer.battery.status.temperature_max_dC = INT16_MIN;
-    datalayer.battery.status.temperature_min_dC = INT16_MIN;
+    datalayer.battery.pack[0].status.voltage_dV = 0;
+    datalayer.battery.pack[0].status.current_dA = INT16_MIN;
+    datalayer.battery.pack[0].status.cell_min_voltage_mV = 0;
+    datalayer.battery.pack[0].status.cell_max_voltage_mV = 0;
+    datalayer.battery.pack[0].status.real_soc = UINT16_MAX;
+    datalayer.battery.pack[0].status.temperature_max_dC = INT16_MIN;
+    datalayer.battery.pack[0].status.temperature_min_dC = INT16_MIN;
+  }
+
+  void TearDown() override {
+    if (batteries[0]) {
+      delete batteries[0];
+      batteries[0] = nullptr;
+    }
   }
 
   void HandleFrames() {
@@ -52,7 +67,7 @@ class CanLogTestFixture : public testing::Test {
     std::vector<CAN_frame> parsedMessages = parse_can_log_file(path_);
 
     for (const auto& msg : parsedMessages) {
-      dynamic_cast<CanBattery*>(battery)->handle_incoming_can_frame(msg);
+      dynamic_cast<CanBattery*>(batteries[0])->handle_incoming_can_frame(msg);
     }
 
     // When debugging, uncomment this to see the parsed values
@@ -63,7 +78,7 @@ class CanLogTestFixture : public testing::Test {
     // Run the battery update_values functions and apply safety protections. In
     // the emulator this happens every 1s.
 
-    dynamic_cast<CanBattery*>(battery)->update_values();
+    dynamic_cast<CanBattery*>(batteries[0])->update_values();
     update_machineryprotection();
   }
 
@@ -73,14 +88,14 @@ class CanLogTestFixture : public testing::Test {
   }
 
   void PrintValues() {
-    std::cout << "Battery voltage: " << (datalayer.battery.status.voltage_dV / 10.0) << " V" << std::endl;
-    std::cout << "Battery current: " << (datalayer.battery.status.current_dA / 10.0) << " A" << std::endl;
-    std::cout << "Battery cell min voltage: " << datalayer.battery.status.cell_min_voltage_mV << " mV" << std::endl;
-    std::cout << "Battery cell max voltage: " << datalayer.battery.status.cell_max_voltage_mV << " mV" << std::endl;
-    std::cout << "Battery real SoC: " << (datalayer.battery.status.real_soc / 100.0) << " %" << std::endl;
-    std::cout << "Battery temperature max: " << (datalayer.battery.status.temperature_max_dC / 10.0) << " C"
+    std::cout << "Battery voltage: " << (datalayer.battery.pack[0].status.voltage_dV / 10.0) << " V" << std::endl;
+    std::cout << "Battery current: " << (datalayer.battery.pack[0].status.current_dA / 10.0) << " A" << std::endl;
+    std::cout << "Battery cell min voltage: " << datalayer.battery.pack[0].status.cell_min_voltage_mV << " mV" << std::endl;
+    std::cout << "Battery cell max voltage: " << datalayer.battery.pack[0].status.cell_max_voltage_mV << " mV" << std::endl;
+    std::cout << "Battery real SoC: " << (datalayer.battery.pack[0].status.real_soc / 100.0) << " %" << std::endl;
+    std::cout << "Battery temperature max: " << (datalayer.battery.pack[0].status.temperature_max_dC / 10.0) << " C"
               << std::endl;
-    std::cout << "Battery temperature min: " << (datalayer.battery.status.temperature_min_dC / 10.0) << " C"
+    std::cout << "Battery temperature min: " << (datalayer.battery.pack[0].status.temperature_min_dC / 10.0) << " C"
               << std::endl;
   }
 
@@ -94,31 +109,31 @@ class BaseValuesPresentTest : public CanLogTestFixture {
  public:
   explicit BaseValuesPresentTest(fs::path path) : CanLogTestFixture(path) {}
   void TestBody() override {
-    datalayer.battery.status.CAN_battery_still_alive = 10;
+    datalayer.battery.pack[0].status.CAN_battery_still_alive = 10;
 
     // Set the charge/discharge power to a specific value
-    datalayer.battery.status.max_charge_power_W = 11;
-    datalayer.battery.status.max_discharge_power_W = 12;
+    datalayer.battery.pack[0].status.max_charge_power_W = 11;
+    datalayer.battery.pack[0].status.max_discharge_power_W = 12;
 
     // Handle the CAN frames. This shouldn't touch the above limits.
     HandleFrames();
-    EXPECT_EQ(datalayer.battery.status.max_charge_power_W, 11);
-    EXPECT_EQ(datalayer.battery.status.max_discharge_power_W, 12);
+    EXPECT_EQ(datalayer.battery.pack[0].status.max_charge_power_W, 11);
+    EXPECT_EQ(datalayer.battery.pack[0].status.max_discharge_power_W, 12);
 
     // Update the values, which should overwrite the above limits
     UpdateValues();
-    EXPECT_NE(datalayer.battery.status.max_charge_power_W, 11);
-    EXPECT_NE(datalayer.battery.status.max_discharge_power_W, 12);
+    EXPECT_NE(datalayer.battery.pack[0].status.max_charge_power_W, 11);
+    EXPECT_NE(datalayer.battery.pack[0].status.max_discharge_power_W, 12);
 
-    EXPECT_GT(datalayer.battery.status.CAN_battery_still_alive, 10);
-    EXPECT_NE(datalayer.battery.status.voltage_dV, 0);
+    EXPECT_GT(datalayer.battery.pack[0].status.CAN_battery_still_alive, 10);
+    EXPECT_NE(datalayer.battery.pack[0].status.voltage_dV, 0);
     // TODO: Current isn't actually a requirement? check power instead?
-    //EXPECT_NE(datalayer.battery.status.current_dA, INT16_MIN);
-    EXPECT_NE(datalayer.battery.status.cell_min_voltage_mV, 0);
-    EXPECT_NE(datalayer.battery.status.cell_max_voltage_mV, 0);
-    EXPECT_NE(datalayer.battery.status.real_soc, UINT16_MAX);
-    EXPECT_NE(datalayer.battery.status.temperature_max_dC, INT16_MIN);
-    EXPECT_NE(datalayer.battery.status.temperature_min_dC, INT16_MIN);
+    //EXPECT_NE(datalayer.battery.pack[0].status.current_dA, INT16_MIN);
+    EXPECT_NE(datalayer.battery.pack[0].status.cell_min_voltage_mV, 0);
+    EXPECT_NE(datalayer.battery.pack[0].status.cell_max_voltage_mV, 0);
+    EXPECT_NE(datalayer.battery.pack[0].status.real_soc, UINT16_MAX);
+    EXPECT_NE(datalayer.battery.pack[0].status.temperature_max_dC, INT16_MIN);
+    EXPECT_NE(datalayer.battery.pack[0].status.temperature_min_dC, INT16_MIN);
 
     EXPECT_EQ(get_event_pointer(EVENT_BATTERY_OVERVOLTAGE)->occurences, 0);
     EXPECT_EQ(get_event_pointer(EVENT_BATTERY_UNDERVOLTAGE)->occurences, 0);
@@ -168,8 +183,8 @@ class CellVoltageTest : public CanLogTestFixture {
     HandleFramesAndUpdateValues();
 
     // Target is 3123mV, but some integrations round strangely so need a margin
-    EXPECT_GT(datalayer.battery.status.cell_voltages_mV[cellnum_], 3121);
-    EXPECT_LT(datalayer.battery.status.cell_voltages_mV[cellnum_], 3125);
+    EXPECT_GT(datalayer.battery.pack[0].status.cell_voltages_mV[cellnum_], 3121);
+    EXPECT_LT(datalayer.battery.pack[0].status.cell_voltages_mV[cellnum_], 3125);
   }
 
  private:
@@ -182,12 +197,12 @@ class NoCanErrorsTest : public CanLogTestFixture {
  public:
   explicit NoCanErrorsTest(fs::path path) : CanLogTestFixture(path) {}
   void TestBody() override {
-    datalayer.battery.status.CAN_battery_still_alive = 0;
+    datalayer.battery.pack[0].status.CAN_battery_still_alive = 0;
 
     HandleFramesAndUpdateValues();
 
-    EXPECT_EQ(datalayer.battery.status.CAN_error_counter, 0);
-    EXPECT_GT(datalayer.battery.status.CAN_battery_still_alive, 0);
+    EXPECT_EQ(datalayer.battery.pack[0].status.CAN_error_counter, 0);
+    EXPECT_GT(datalayer.battery.pack[0].status.CAN_battery_still_alive, 0);
   }
 };
 

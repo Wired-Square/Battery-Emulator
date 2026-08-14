@@ -4,6 +4,19 @@
 #include "../../datalayer/datalayer.h"
 #include "../../devboard/utils/events.h"
 
+// Contactor closing sequence. Scoped so the state names cannot collide with the
+// identically spelled enumerators in the battery drivers and precharge control.
+enum class ContactorState {
+  DISCONNECTED,
+  START_PRECHARGE,
+  PRECHARGE,
+  POSITIVE,
+  PRECHARGE_OFF,
+  COMPLETED,
+  SHUTDOWN_REQUESTED
+};
+extern ContactorState contactorStatus;
+
 // Settings that can be changed at run-time
 extern bool contactor_control_enabled;
 extern bool contactor_control_inverted_logic;

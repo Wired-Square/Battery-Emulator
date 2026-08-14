@@ -17,9 +17,9 @@ extern battery_pause_status emulator_pause_status;
 extern bool allowed_to_send_CAN;
 //battery pause status end
 
-extern bool battery_detected;
-extern bool battery2_detected;
-extern bool battery3_detected;
+bool battery_slot_detected(uint8_t slot);
+extern bool battery_detected_slots[];
+void reset_battery_pack_safety_state();
 
 extern void store_settings_equipment_stop();
 

@@ -1,6 +1,7 @@
 #include "events.h"
 #include <Arduino.h>
 #include <string.h>  // memchr, for the notice_events lookup
+#include "../../communication/can/comm_can.h"
 #include "../../datalayer/datalayer.h"
 #include "../../devboard/hal/hal.h"
 #include "../../devboard/utils/logging.h"
@@ -16,11 +17,13 @@ static const char* EVENTS_ENUM_TYPE_STRING[] = {EVENTS_ENUM_TYPE(GENERATE_STRING
 static const char* EVENTS_LEVEL_TYPE_STRING[] = {EVENTS_LEVEL_TYPE(GENERATE_STRING)};
 static const char* EMULATOR_STATUS_STRING[] = {EMULATOR_STATUS(GENERATE_STRING)};
 
-// Timed "ignore CAN errors" window per interface. Uses the 64-bit clock so there is no wraparound.
-static uint64_t can_errors_ignore_until_ms[NO_CAN_INTERFACE] = {0};
+// Timed "ignore CAN errors" window per log-id slot. Uses the 64-bit clock so there is no wraparound.
+static constexpr uint8_t kCanErrorIgnoreSlots = 8;
+static uint64_t can_errors_ignore_until_ms[kCanErrorIgnoreSlots] = {0};
 
 /* Local function prototypes */
 static void set_event(EVENTS_ENUM_TYPE event, uint8_t data, bool latched);
+static bool can_error_ignored(EVENTS_ENUM_TYPE event);
 
 /* Offgrid downgrade.
  *
@@ -54,7 +57,6 @@ static EVENTS_LEVEL_TYPE effective_level(EVENTS_ENUM_TYPE event) {
   }
   return level;
 }
-static bool can_error_ignored(EVENTS_ENUM_TYPE event);
 static void update_event_level(void);
 static void update_bms_status(void);
 
@@ -161,6 +163,9 @@ void init_events(void) {
   events.entries[EVENT_CAN_BATTERY_MISSING].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_CAN_BATTERY2_MISSING].level = EVENT_LEVEL_WARNING;
   events.entries[EVENT_CAN_BATTERY3_MISSING].level = EVENT_LEVEL_WARNING;
+  events.entries[EVENT_BATTERY_INTERFACE_CONFLICT].level = EVENT_LEVEL_WARNING;
+  events.entries[EVENT_BATTERY_INTERFACE_UNSUPPORTED].level = EVENT_LEVEL_ERROR;
+  events.entries[EVENT_BATTERY_SLOT_UNSUPPORTED].level = EVENT_LEVEL_WARNING;
   events.entries[EVENT_CAN_CHARGER_MISSING].level = EVENT_LEVEL_INFO;
   events.entries[EVENT_CAN_CHARGER_DETECTED].level = EVENT_LEVEL_INFO;
   events.entries[EVENT_CAN_INVERTER_MISSING].level = EVENT_LEVEL_ERROR;
@@ -270,6 +275,12 @@ void init_events(void) {
   events.entries[EVENT_BATTERY_WARMED_UP].level = EVENT_LEVEL_INFO;
   events.entries[EVENT_PERIODIC_BMS_RESET_FAILURE].level = EVENT_LEVEL_WARNING;
   events.entries[EVENT_GPIO_CONFLICT].level = EVENT_LEVEL_ERROR;
+  events.entries[EVENT_IOEXPANDER_INIT_FAILURE].level = EVENT_LEVEL_ERROR;
+#ifdef BOARD_HAS_LOAD_SWITCH
+  events.entries[EVENT_LOAD_SWITCH_FAULT].level = EVENT_LEVEL_ERROR;
+  events.entries[EVENT_LOAD_SWITCH_INIT_FAILURE].level = EVENT_LEVEL_ERROR;
+  events.entries[EVENT_LOAD_SWITCH_ROLE_CONFLICT].level = EVENT_LEVEL_WARNING;
+#endif
   events.entries[EVENT_GPIO_NOT_DEFINED].level = EVENT_LEVEL_ERROR;
 }
 
@@ -289,12 +300,13 @@ void clear_event(EVENTS_ENUM_TYPE event) {
   }
 }
 
-void ignore_can_errors_for(CAN_Interface interface, uint32_t duration_ms) {
+void ignore_can_errors_for(const InterfaceDescriptor* interface, uint32_t duration_ms) {
   // Suppress the buffer-full / bus-error events of a single CAN interface for a while.
-  if ((uint8_t)interface >= NO_CAN_INTERFACE) {
+  uint8_t log_id = can_event_interface_id(interface);
+  if (log_id >= kCanErrorIgnoreSlots) {
     return;
   }
-  can_errors_ignore_until_ms[interface] = millis64() + duration_ms;
+  can_errors_ignore_until_ms[log_id] = millis64() + duration_ms;
 }
 
 void reset_all_events() {
@@ -347,6 +359,14 @@ String get_event_message_string(EVENTS_ENUM_TYPE event) {
       return "Secondary battery not sending messages via CAN for the last 60 seconds. Check wiring!";
     case EVENT_CAN_BATTERY3_MISSING:
       return "Third battery not sending messages via CAN for the last 60 seconds. Check wiring!";
+    case EVENT_BATTERY_INTERFACE_CONFLICT:
+      return "Extra battery not started: it is configured on the same CAN interface as a lower-numbered battery. "
+             "Assign each battery its own interface.";
+    case EVENT_BATTERY_INTERFACE_UNSUPPORTED:
+      return "Battery not started: the selected battery type needs a bus the assigned interface does not provide. "
+             "Assign a suitable interface, or select a battery type this hardware supports.";
+    case EVENT_BATTERY_SLOT_UNSUPPORTED:
+      return "Extra battery not started: the selected battery type does not support multiple packs.";
     case EVENT_CAN_CHARGER_DETECTED:
       return "Successfully communicating with charger. Charger detected!";
     case EVENT_CAN_CHARGER_MISSING:
@@ -576,6 +596,16 @@ String get_event_message_string(EVENTS_ENUM_TYPE event) {
     case EVENT_GPIO_NOT_DEFINED:
       return "Missing GPIO Assignment: The component '" + esp32hal->failed_allocator() +
              "' requires a GPIO pin that isn't configured. Please define a valid pin number in your settings.";
+    case EVENT_IOEXPANDER_INIT_FAILURE:
+      return "IO expander initialization failed. CAN transceivers and bus termination are inoperative. Check hardware.";
+#ifdef BOARD_HAS_LOAD_SWITCH
+    case EVENT_LOAD_SWITCH_FAULT:
+      return "Load switch reports a hardware fault on a contactor output. Investigate wiring and load before reboot.";
+    case EVENT_LOAD_SWITCH_INIT_FAILURE:
+      return "Load switch initialisation failed. Load switch outputs are disabled for this session. Check hardware.";
+    case EVENT_LOAD_SWITCH_ROLE_CONFLICT:
+      return "Duplicate load switch role: this channel runs as Disabled. First channel with the role wins.";
+#endif
     default:
       return "";
   }
@@ -627,17 +657,16 @@ const char* get_emulator_status_string(EMULATOR_STATUS status) {
 
 /* Local functions */
 
-// True if 'event' is one of the two comm-error events belonging to 'interface'.
-static bool is_can_error_of_interface(EVENTS_ENUM_TYPE event, CAN_Interface interface) {
-  switch (interface) {
-    case CAN_NATIVE:
+// True if 'event' is one of the two comm-error events belonging to 'log_id'.
+static bool is_can_error_of_log_id(EVENTS_ENUM_TYPE event, uint8_t log_id) {
+  switch (log_id) {
+    case CAN_LOG_ID_NATIVE:
       return event == EVENT_CAN_NATIVE_BUFFER_FULL || event == EVENT_CAN_NATIVE_BUS_ERROR;
-    case CANFD_NATIVE:  // routed through the MCP2518 path, shares the CANFD events
-    case CANFD_ADDON_MCP2518:
-      return event == EVENT_CANFD_BUFFER_FULL || event == EVENT_CANFD_BUS_ERROR;
-    case CAN_ADDON_MCP2515:
+    case CAN_LOG_ID_MCP2515:
       return event == EVENT_CANMCP2515_BUFFER_FULL || event == EVENT_CANMCP2515_BUS_ERROR;
-    case CANFD_ADDON_MCP2518_2:
+    case CAN_LOG_ID_MCP2517FD:
+      return event == EVENT_CANFD_BUFFER_FULL || event == EVENT_CANFD_BUS_ERROR;
+    case CAN_LOG_ID_MCP2517FD_2:
       return event == EVENT_CANFD_2_BUFFER_FULL || event == EVENT_CANFD_2_BUS_ERROR;
     default:
       return false;
@@ -648,8 +677,8 @@ static bool is_can_error_of_interface(EVENTS_ENUM_TYPE event, CAN_Interface inte
 // Checked per interface so several windows can be active at once.
 static bool can_error_ignored(EVENTS_ENUM_TYPE event) {
   uint64_t now = millis64();
-  for (uint8_t i = 0; i < NO_CAN_INTERFACE; i++) {
-    if (can_errors_ignore_until_ms[i] > now && is_can_error_of_interface(event, (CAN_Interface)i)) {
+  for (uint8_t i = 0; i < kCanErrorIgnoreSlots; i++) {
+    if (can_errors_ignore_until_ms[i] > now && is_can_error_of_log_id(event, i)) {
       return true;
     }
   }
