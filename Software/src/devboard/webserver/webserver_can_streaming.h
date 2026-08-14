@@ -4,4 +4,4 @@
 
 void can_dump_drain_tick();
 void register_dump_can_route(AsyncWebServer& server);
-void stream_can_frame(const CAN_frame& frame, CAN_Interface interface, frameDirection msgDir);
+void stream_can_frame(const CAN_frame& frame, uint8_t log_id, frameDirection msgDir);

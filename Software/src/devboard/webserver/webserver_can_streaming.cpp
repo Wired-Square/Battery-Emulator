@@ -228,13 +228,13 @@ void can_dump_drain_tick() {
 
 // Output a CAN frame to the active stream, if present. The line itself is
 // formatted by the shared format_can_frame() (see comm_can.h).
-void stream_can_frame(const CAN_frame& frame, CAN_Interface interface, frameDirection msgDir) {
+void stream_can_frame(const CAN_frame& frame, uint8_t log_id, frameDirection msgDir) {
   if (!datalayer.system.info.can_streaming_active) {
     return;
   }
 
   char line[230];
-  const size_t len = format_can_frame(line, sizeof(line), frame, interface, msgDir);
+  const size_t len = format_can_frame(line, sizeof(line), frame, log_id, msgDir);
   if (len > 0) {
     // Lock-free enqueue into the ring; the drain task handles the actual socket I/O.
     can_dump_ring_push(line, len);

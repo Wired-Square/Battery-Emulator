@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battery Emulator</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="Sections">
+    <div class="rail-brand"><a href="https://dalathegreat.github.io/Battery-Emulator-Wiki/" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">Battery<br>Emulator</a></div>
+    <a class="rail-item" href="#/" data-route="/">Dashboard</a>
+    <a class="rail-item" href="#/settings" data-route="/settings">Settings</a>
+    <a class="rail-item" href="#/cellmonitor" data-route="/cellmonitor">Cells</a>
+    <a class="rail-item" href="#/canlog" data-route="/canlog">CAN log</a>
+    <a class="rail-item" href="#/canreplay" data-route="/canreplay">CAN replay</a>
+    <a class="rail-item" href="#/advanced" data-route="/advanced">Advanced</a>
+    <a class="rail-item" href="#/events" data-route="/events">Events</a>
+    <a class="rail-item" id="nav-log" href="#/log" data-route="/log" hidden>Debug log</a>
+    <a class="rail-item" href="#/firmware" data-route="/firmware">Firmware</a>
+  </nav>
+  <div class="main">
+    <header class="topstrip">
+      <div class="ident"><span id="hw">—</span> <span class="muted" id="fw"></span></div>
+      <div class="topstrip-right">
+        <span class="heartbeat" id="heartbeat" role="img" aria-label="Waiting for device">●</span>
+        <button class="btn" id="theme-toggle" type="button">Theme</button>
+      </div>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

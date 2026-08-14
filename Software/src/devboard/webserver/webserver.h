@@ -56,15 +56,8 @@ void init_webserver();
  */
 void init_ElegantOTA();
 
-/**
- * @brief Replaces placeholder with content section in web page
- *
- * @param[in] var
- *
- * @return String
- */
-String processor(const String& var);
-String get_firmware_info_processor(const String& var);
+String capabilities_json();
+String state_json();
 
 /**
  * @brief Executes on OTA start 
@@ -93,19 +86,6 @@ void onOTAProgress(size_t current, size_t final);
  * @return bool success: success = true, failed = false
  */
 void onOTAEnd(bool success);
-
-/**
- * @brief Formats power values 
- *
- * @param[in] float or uint16_t 
- * 
- * @return string: values
- */
-template <typename T>
-String formatPowerValue(String label, T value, String unit, int precision, String color = "white");
-
-template <typename T>  // This function makes power values appear as W when under 1000, and kW when over
-String formatPowerValue(T value, String unit, int precision);
 
 extern void store_settings();
 

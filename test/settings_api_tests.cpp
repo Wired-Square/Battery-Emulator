@@ -1,0 +1,1243 @@
+#include <gtest/gtest.h>
+#include <cstring>
+#include <string>
+
+#include "../Software/src/communication/nvm/comm_nvm.h"
+#include "../Software/src/datalayer/datalayer.h"
+#include "../Software/src/devboard/hal/hal.h"
+#include "../Software/src/devboard/hal/hw_lilygo.h"
+#include "../Software/src/battery/BATTERIES.h"
+#include "../Software/src/battery/battery_slots.h"
+#include "../Software/src/devboard/webserver/settings_api.h"
+#include "../Software/src/devboard/webserver/web_json.h"
+#include "../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
+#include "emul/Preferences.h"
+
+extern std::string password;  // live WiFi STA password global, refreshed by apply on PASSWORD change
+String default_hostname();     // firmware wifi.cpp; host fake in emul/wifi.cpp
+
+// esp32hal is process-global; save and restore it so init_hal() in one test
+// cannot leak a live HAL into later, order-dependent tests.
+struct HalScope {
+  Esp32Hal* saved = esp32hal;
+  HalScope() { init_hal(); }
+  ~HalScope() { esp32hal = saved; }
+};
+
+struct NullHalScope {
+  Esp32Hal* saved = esp32hal;
+  NullHalScope() { esp32hal = nullptr; }
+  ~NullHalScope() { esp32hal = saved; }
+};
+
+// The Preferences fake is process-global; each test must start from a clean
+// "batterySettings" namespace.
+class SettingsApiTest : public ::testing::Test {
+ protected:
+  void SetUp() override { Preferences::resetAllForTests(); }
+
+  static JsonDocument parse_values(const String& json) {
+    JsonDocument doc;
+    const DeserializationError err = deserializeJson(doc, json.c_str());
+    EXPECT_FALSE(err) << err.c_str();
+    return doc;
+  }
+};
+
+TEST_F(SettingsApiTest, EmitsScalarsWithCorrectJsonTypes) {
+  {
+    BatteryEmulatorSettingsStore store;
+    store.saveBool("MQTTENABLED", true);
+    store.saveUInt("MQTTPORT", 8883);
+    store.saveUInt("BATTTYPE", 4);  // EnumUint (via alias "battery")
+    store.saveString("MQTTSERVER", "broker.local");
+    store.saveUInt("BATTPVMAX", 4125);      // FloatX10 -> 412.5
+    store.saveUInt("MQTTPUBLISHMS", 7000);  // SecondsToMs -> 7
+  }
+
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonObjectConst values = doc["values"];
+
+  EXPECT_TRUE(values["MQTTENABLED"].is<bool>());
+  EXPECT_TRUE(values["MQTTENABLED"].as<bool>());
+
+  EXPECT_TRUE(values["MQTTPORT"].is<unsigned int>());
+  EXPECT_EQ(values["MQTTPORT"].as<uint32_t>(), 8883u);
+
+  EXPECT_EQ(values["battery"].as<uint32_t>(), 4u);
+
+  EXPECT_STREQ(values["MQTTSERVER"].as<const char*>(), "broker.local");
+
+  EXPECT_DOUBLE_EQ(values["BATTPVMAX"].as<double>(), 412.5);
+
+  EXPECT_EQ(values["MQTTPUBLISHMS"].as<uint32_t>(), 7u);
+}
+
+TEST_F(SettingsApiTest, FloatStringCarriesNegativeSign) {
+  {
+    BatteryEmulatorSettingsStore store;
+    store.saveString("CTOFFSET", "-2.5");  // FloatString, the sole negative-carrying field
+  }
+
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  EXPECT_STREQ(doc["values"]["CTOFFSET"].as<const char*>(), "-2.5");
+}
+
+TEST_F(SettingsApiTest, AliasesUseJsonKeyNotNvsKey) {
+  {
+    BatteryEmulatorSettingsStore store;
+    store.saveUInt("INVTYPE", 3);
+  }
+
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonObjectConst values = doc["values"];
+
+  EXPECT_FALSE(values["inverter"].isNull());
+  EXPECT_EQ(values["inverter"].as<uint32_t>(), 3u);
+  EXPECT_TRUE(values["INVTYPE"].isNull());
+}
+
+TEST_F(SettingsApiTest, EmitsDefaultsForAbsentKeys) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonObjectConst values = doc["values"];
+
+  // WIFIAPENABLED defaults on even with no stored value.
+  EXPECT_TRUE(values["WIFIAPENABLED"].as<bool>());
+  EXPECT_EQ(values["PYLONBAUD"].as<uint32_t>(), 500u);
+  EXPECT_EQ(values["MQTTPORT"].as<uint32_t>(), 1883u);
+  // SecondsToMs default (5 s) survives the ms<->s transform with no stored key.
+  EXPECT_EQ(values["MQTTPUBLISHMS"].as<uint32_t>(), 5u);
+}
+
+TEST_F(SettingsApiTest, TeslaGatewayDefaultsMatchTheDriver) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonObjectConst values = doc["values"];
+
+  EXPECT_EQ(values["GTWCOUNTRY"].as<uint32_t>(), kTeslaGtwCountryDefault);
+  EXPECT_EQ(values["GTWRHD"].as<bool>(), kTeslaGtwRightHandDriveDefault);
+  EXPECT_EQ(values["GTWMAPREG"].as<uint32_t>(), kTeslaGtwMapRegionDefault);
+  EXPECT_EQ(values["GTWCHASSIS"].as<uint32_t>(), kTeslaGtwChassisTypeDefault);
+  EXPECT_EQ(values["GTWPACK"].as<uint32_t>(), kTeslaGtwPackEnergyDefault);
+}
+
+TEST_F(SettingsApiTest, EmitsBatteryOptionsNoneFirst) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonArrayConst battery = doc["options"]["battery"];
+
+  ASSERT_FALSE(battery.isNull());
+  ASSERT_GT(battery.size(), 0u);
+  EXPECT_EQ(battery[0]["v"].as<int>(), 0);
+  EXPECT_STREQ(battery[0]["n"].as<const char*>(), "None");
+  for (JsonObjectConst opt : battery) {
+    EXPECT_TRUE(opt["v"].is<int>());
+    EXPECT_TRUE(opt["n"].is<const char*>());
+  }
+}
+
+TEST_F(SettingsApiTest, EmitsMapAndEnumOptionLists) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonObjectConst options = doc["options"];
+
+  for (const char* key : {"chemistry", "inverter", "charger", "shunt", "attenuation", "ledmode"}) {
+    JsonArrayConst list = options[key];
+    ASSERT_FALSE(list.isNull()) << key;
+    ASSERT_GT(list.size(), 0u) << key;
+    EXPECT_TRUE(list[0]["v"].is<int>()) << key;
+    EXPECT_TRUE(list[0]["n"].is<const char*>()) << key;
+  }
+}
+
+// The interfaces array needs a live HAL; tests without a HalScope leave esp32hal null.
+TEST_F(SettingsApiTest, EmitsSelectableInterfacesWhenHalPresent) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonArrayConst interfaces = doc["interfaces"];
+
+  ASSERT_FALSE(interfaces.isNull());
+  ASSERT_GT(interfaces.size(), 0u);
+  for (JsonObjectConst iface : interfaces) {
+    EXPECT_TRUE(iface["id"].is<uint32_t>());
+    EXPECT_TRUE(iface["index"].is<unsigned int>());
+    EXPECT_TRUE(iface["name"].is<const char*>());
+  }
+}
+
+TEST_F(SettingsApiTest, InterfacesSortedAlphabeticallyByName) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonArrayConst interfaces = doc["interfaces"];
+
+  ASSERT_GT(interfaces.size(), 1u);
+  const char* previous = nullptr;
+  for (JsonObjectConst iface : interfaces) {
+    const char* name = iface["name"].as<const char*>();
+    if (previous != nullptr) {
+      EXPECT_LT(std::strcmp(previous, name), 0) << previous << " !< " << name;
+    }
+    previous = name;
+  }
+}
+
+TEST_F(SettingsApiTest, UnsetCommResolvesToASelectableInterface) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+
+  const uint32_t batt_comm = doc["values"]["BATTCOMM"].as<uint32_t>();
+  bool matches = false;
+  for (JsonObjectConst iface : doc["interfaces"].as<JsonArrayConst>()) {
+    if (iface["id"].as<uint32_t>() == batt_comm) {
+      matches = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(matches) << "BATTCOMM=" << batt_comm << " matches no interfaces[].id";
+}
+
+TEST_F(SettingsApiTest, BatteryOptionsHaveExactlyOneNoneFirst) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonArrayConst battery = doc["options"]["battery"];
+
+  ASSERT_GT(battery.size(), 0u);
+  EXPECT_EQ(battery[0]["v"].as<int>(), 0);
+  int none_count = 0;
+  for (JsonObjectConst opt : battery) {
+    if (opt["v"].as<int>() == 0) {
+      none_count++;
+    }
+  }
+  EXPECT_EQ(none_count, 1);
+}
+
+TEST_F(SettingsApiTest, BatteryOptionLabelsAscendingAfterNone) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonArrayConst battery = doc["options"]["battery"];
+
+  ASSERT_GT(battery.size(), 1u);
+  for (size_t i = 2; i < battery.size(); i++) {
+    const char* previous = battery[i - 1]["n"].as<const char*>();
+    const char* current = battery[i]["n"].as<const char*>();
+    EXPECT_LT(std::strcmp(previous, current), 0) << previous << " !< " << current;
+  }
+}
+
+TEST_F(SettingsApiTest, NullHalOmitsInterfacesAndDynamic) {
+  NullHalScope no_hal;
+  EXPECT_EQ(esp32hal, nullptr);
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+
+  EXPECT_TRUE(doc["interfaces"].isNull());
+  EXPECT_TRUE(doc["dynamic"].isNull());
+}
+
+TEST_F(SettingsApiTest, BuildReturnsNonEmptyOnSuccess) {
+  BatteryEmulatorSettingsStore reader(true);
+  EXPECT_GT(build_settings_json(reader).length(), 0u);
+}
+
+// POST echoes the applier's reboot_required through meta; GET (default arg) reports false.
+TEST_F(SettingsApiTest, MetaRebootRequiredReflectsArgument) {
+  BatteryEmulatorSettingsStore reader(true);
+
+  const JsonDocument on = parse_values(build_settings_json(reader, true));
+  EXPECT_TRUE(on["meta"]["reboot_required"].as<bool>());
+
+  const JsonDocument off = parse_values(build_settings_json(reader));
+  EXPECT_FALSE(off["meta"]["reboot_required"].as<bool>());
+}
+
+// A key the server omits is client-owned (CLIENT_OPTIONS in settings.js) and can't be told
+// apart here from a forgotten emit, so this only asserts emitted lists are non-empty; the
+// settings.js "Missing options" fallback is what catches an unresolved key.
+TEST_F(SettingsApiTest, ServerEmittedDropdownsAreNonEmpty) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonObjectConst options = doc["options"];
+  JsonArrayConst interfaces = doc["interfaces"];
+
+  for (size_t i = 0; i < kSettingFieldCount; i++) {
+    const SettingField& field = kSettingFields[i];
+    if (field.type == SettingType::EnumUint) {
+      EXPECT_NE(field.options_key, nullptr) << field.json_key;
+    }
+    if (field.type == SettingType::InterfacePacked) {
+      EXPECT_GT(interfaces.size(), 0u) << field.json_key;
+    } else if (field.options_key != nullptr) {
+      JsonArrayConst list = options[field.options_key];
+      if (!list.isNull()) {
+        EXPECT_GT(list.size(), 0u) << field.json_key << " -> options." << field.options_key;
+      }
+    }
+  }
+}
+
+// schema folds in the old optionsKeys map.
+TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonArrayConst schema = doc["schema"];
+
+  ASSERT_FALSE(schema.isNull());
+  // The board's GPIO-option rows are appended after the static fields, so the
+  // static rows stay index-aligned with kSettingFields.
+  ASSERT_EQ(schema.size(), kSettingFieldCount + esp32hal->gpio_options().group_count);
+
+  for (size_t i = 0; i < kSettingFieldCount; i++) {
+    const SettingField& field = kSettingFields[i];
+    JsonObjectConst entry = schema[i];
+    EXPECT_STREQ(entry["key"].as<const char*>(), field.json_key);
+    EXPECT_STREQ(entry["category"].as<const char*>(), field.category);
+
+    const char* expected_type = nullptr;
+    switch (field.type) {
+      case SettingType::Bool:
+        expected_type = "bool";
+        break;
+      case SettingType::Uint:
+        expected_type = "uint";
+        break;
+      case SettingType::Int:
+        expected_type = "int";
+        break;
+      case SettingType::StringVal:
+        expected_type = "string";
+        break;
+      case SettingType::EnumUint:
+        expected_type = "enum";
+        break;
+      case SettingType::FloatX10:
+        expected_type = "float";
+        break;
+      case SettingType::FloatString:
+        expected_type = "floatstring";
+        break;
+      case SettingType::SecondsToMs:
+        expected_type = "seconds";
+        break;
+      case SettingType::InterfacePacked:
+        expected_type = "interface";
+        break;
+    }
+    EXPECT_STREQ(entry["type"].as<const char*>(), expected_type) << field.json_key;
+
+    if (field.options_key != nullptr) {
+      EXPECT_STREQ(entry["options"].as<const char*>(), field.options_key) << field.json_key;
+    } else if (field.type == SettingType::InterfacePacked) {
+      EXPECT_STREQ(entry["options"].as<const char*>(), "interfaces") << field.json_key;
+    } else {
+      EXPECT_TRUE(entry["options"].isNull()) << field.json_key;
+    }
+  }
+
+  // The dropped optionsKeys map must not linger alongside its replacement.
+  EXPECT_TRUE(doc["optionsKeys"].isNull());
+}
+
+// HOSTNAME's placeholder carries the runtime-derived default (MAC-based) so the SPA
+// can hint it when the field is blank; it is not a static schema default_str.
+TEST_F(SettingsApiTest, HostnamePlaceholderCarriesDefaultHostname) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+
+  EXPECT_STREQ(doc["placeholders"]["HOSTNAME"].as<const char*>(), default_hostname().c_str());
+}
+
+// The canonical bool-wipe guard: a POST that omits a Bool row must leave the
+// stored value intact — the entire reason this migration exists.
+TEST_F(SettingsApiTest, MissingBoolKeyIsPreservedNotWiped) {
+  BatteryEmulatorSettingsStore store;
+  store.saveBool("MQTTENABLED", true);
+
+  JsonDocument body;
+  body["values"]["WEBENABLED"] = true;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_TRUE(store.getBool("MQTTENABLED", false));
+  EXPECT_TRUE(store.getBool("WEBENABLED", false));
+}
+
+TEST_F(SettingsApiTest, PresentFalseBoolIsWrittenFalse) {
+  BatteryEmulatorSettingsStore store;
+  store.saveBool("MQTTCELLV", true);
+
+  JsonDocument body;
+  body["values"]["MQTTCELLV"] = false;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_FALSE(store.getBool("MQTTCELLV", true));
+}
+
+TEST_F(SettingsApiTest, AliasWritesNvsKeyNotJsonKey) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["inverter"] = 3;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("INVTYPE", 0), 3u);
+  EXPECT_FALSE(store.settingExists("inverter"));
+}
+
+TEST_F(SettingsApiTest, SecondsToMsTransformOnApply) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["MQTTPUBLISHMS"] = 5;  // seconds in JSON
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("MQTTPUBLISHMS", 0), 5000u);
+}
+
+TEST_F(SettingsApiTest, FloatX10TransformOnApply) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["BATTPVMAX"] = 400.5;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("BATTPVMAX", 0), 4005u);
+}
+
+TEST_F(SettingsApiTest, FloatStringApplyKeepsSign) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["CTOFFSET"] = "-1.5";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("CTOFFSET", "").c_str(), "-1.5");
+}
+
+TEST_F(SettingsApiTest, PasswordMismatchRejectedNothingWritten) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["HTTPPASS"] = "one";
+  body["values"]["HTTPPASSCONFIRM"] = "two";
+  body["values"]["MQTTPORT"] = 9000;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok);
+  EXPECT_FALSE(store.settingExists("HTTPPASS"));
+  EXPECT_FALSE(store.settingExists("MQTTPORT"));
+}
+
+TEST_F(SettingsApiTest, WebauthWithEmptyPasswordRejected) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["WEBAUTH"] = true;
+  body["values"]["HTTPUSER"] = "admin";
+  body["values"]["HTTPPASS"] = "";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(std::string(r.error.c_str()).find("password"), std::string::npos) << r.error.c_str();
+}
+
+TEST_F(SettingsApiTest, MatchingPasswordAccepted) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["HTTPPASS"] = "secret";
+  body["values"]["HTTPPASSCONFIRM"] = "secret";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("HTTPPASS", "").c_str(), "secret");
+  EXPECT_FALSE(store.settingExists("HTTPPASSCONFIRM"));
+}
+
+// Stored secrets must never be served back to the client.
+TEST_F(SettingsApiTest, PasswordFieldsRedactedInBuild) {
+  {
+    BatteryEmulatorSettingsStore store;
+    store.saveString("HTTPPASS", "web-secret");
+    store.saveString("PASSWORD", "wifi-secret");
+    store.saveString("APPASSWORD", "ap-secret");
+    store.saveString("MQTTPASSWORD", "mqtt-secret");
+    store.saveString("MQTTSERVER", "broker.local");  // non-secret string is still emitted
+  }
+
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonObjectConst values = doc["values"];
+
+  EXPECT_STREQ(values["HTTPPASS"].as<const char*>(), "");
+  EXPECT_STREQ(values["PASSWORD"].as<const char*>(), "");
+  EXPECT_STREQ(values["APPASSWORD"].as<const char*>(), "");
+  EXPECT_STREQ(values["MQTTPASSWORD"].as<const char*>(), "");
+  EXPECT_STREQ(values["MQTTSERVER"].as<const char*>(), "broker.local");
+}
+
+// A blank password on POST means "keep the stored secret", not "clear it" — for
+// every secret key, and without spuriously flagging a reboot for the no-op.
+TEST_F(SettingsApiTest, EmptyPasswordPreservesStored) {
+  BatteryEmulatorSettingsStore store;
+  store.saveString("MQTTPASSWORD", "mqtt-kept");
+  store.saveString("PASSWORD", "wifi-kept");
+  store.saveString("APPASSWORD", "ap-kept");
+
+  JsonDocument body;
+  body["values"]["MQTTPASSWORD"] = "";
+  body["values"]["PASSWORD"] = "";
+  body["values"]["APPASSWORD"] = "";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_FALSE(r.reboot_required);
+  EXPECT_STREQ(store.getString("MQTTPASSWORD", "").c_str(), "mqtt-kept");
+  EXPECT_STREQ(store.getString("PASSWORD", "").c_str(), "wifi-kept");
+  EXPECT_STREQ(store.getString("APPASSWORD", "").c_str(), "ap-kept");
+}
+
+// A non-empty password overwrites the stored secret (positive write path).
+TEST_F(SettingsApiTest, NonEmptyPasswordOverwritesStored) {
+  BatteryEmulatorSettingsStore store;
+  store.saveString("MQTTPASSWORD", "old");
+
+  JsonDocument body;
+  body["values"]["MQTTPASSWORD"] = "new";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("MQTTPASSWORD", "").c_str(), "new");
+}
+
+// Upstream parity: a blank confirm copies the new password, so the match passes.
+// The SPA still enforces the confirm client-side; this pins the server behaviour.
+TEST_F(SettingsApiTest, BlankConfirmAcceptsNewPassword) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["HTTPPASS"] = "fresh";
+  body["values"]["HTTPPASSCONFIRM"] = "";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("HTTPPASS", "").c_str(), "fresh");
+}
+
+// With a password already stored, a blank field must not trip the webauth guard.
+TEST_F(SettingsApiTest, WebauthEmptyPasswordAcceptedWhenStored) {
+  BatteryEmulatorSettingsStore store;
+  store.saveString("HTTPPASS", "stored");
+
+  JsonDocument body;
+  body["values"]["WEBAUTH"] = true;
+  body["values"]["HTTPUSER"] = "admin";
+  body["values"]["HTTPPASS"] = "";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("HTTPPASS", "").c_str(), "stored");
+}
+
+// An explicit JSON null clears a stored secret (distinct from blank = preserve) and,
+// since the credential changed, flags a reboot.
+TEST_F(SettingsApiTest, NullPasswordClearsStored) {
+  BatteryEmulatorSettingsStore store;
+  store.saveString("MQTTPASSWORD", "old-secret");
+
+  JsonDocument body;
+  ASSERT_FALSE(deserializeJson(body, R"({"values":{"MQTTPASSWORD":null}})"));
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_TRUE(r.reboot_required);
+  EXPECT_STREQ(store.getString("MQTTPASSWORD", "sentinel").c_str(), "");
+}
+
+// Absent (not null) still preserves — the bool-wipe invariant must survive the clear feature.
+TEST_F(SettingsApiTest, AbsentPasswordPreservedNotCleared) {
+  BatteryEmulatorSettingsStore store;
+  store.saveString("MQTTPASSWORD", "kept");
+
+  JsonDocument body;
+  body["values"]["WEBENABLED"] = true;  // MQTTPASSWORD absent, not null
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("MQTTPASSWORD", "").c_str(), "kept");
+}
+
+// Clearing the web-interface password while auth stays enabled is refused (lockout guard),
+// and nothing is written.
+TEST_F(SettingsApiTest, ClearHttpPassWhileWebauthRejected) {
+  BatteryEmulatorSettingsStore store;
+  store.saveString("HTTPPASS", "stored");
+
+  JsonDocument body;
+  ASSERT_FALSE(deserializeJson(body, R"({"values":{"WEBAUTH":true,"HTTPUSER":"admin","HTTPPASS":null}})"));
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(std::string(r.error.c_str()).find("password"), std::string::npos) << r.error.c_str();
+  EXPECT_STREQ(store.getString("HTTPPASS", "").c_str(), "stored");
+}
+
+// The lockout guard must read the *stored* webauth state: a payload that clears HTTPPASS
+// while omitting WEBAUTH (already enabled in NVS) must still be refused, not fail open.
+TEST_F(SettingsApiTest, ClearHttpPassWithWebauthStoredButOmittedRejected) {
+  BatteryEmulatorSettingsStore store;
+  store.saveBool("WEBAUTH", true);
+  store.saveString("HTTPPASS", "stored");
+
+  JsonDocument body;
+  ASSERT_FALSE(deserializeJson(body, R"({"values":{"HTTPPASS":null}})"));
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(std::string(r.error.c_str()).find("password"), std::string::npos) << r.error.c_str();
+  EXPECT_STREQ(store.getString("HTTPPASS", "").c_str(), "stored");
+}
+
+// Null on a non-password key preserves it (not clear) and does not fail type validation.
+TEST_F(SettingsApiTest, NonPasswordNullPreserved) {
+  BatteryEmulatorSettingsStore store;
+  store.saveString("MQTTSERVER", "broker.local");
+
+  JsonDocument body;
+  ASSERT_FALSE(deserializeJson(body, R"({"values":{"MQTTSERVER":null}})"));
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("MQTTSERVER", "").c_str(), "broker.local");
+}
+
+// Clearing the WiFi password refreshes the live global so a reconnect sees the change.
+TEST_F(SettingsApiTest, ClearWifiPasswordRefreshesGlobal) {
+  BatteryEmulatorSettingsStore store;
+  store.saveString("PASSWORD", "wifipass");
+  password = "wifipass";
+
+  JsonDocument body;
+  ASSERT_FALSE(deserializeJson(body, R"({"values":{"PASSWORD":null}})"));
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("PASSWORD", "sentinel").c_str(), "");
+  EXPECT_TRUE(password.empty());
+}
+
+TEST_F(SettingsApiTest, StaticIpStoredAsDottedQuadString) {
+  {
+    BatteryEmulatorSettingsStore store;
+    JsonDocument body;
+    body["values"]["LOCALIP"] = "192.168.1.50";
+    body["values"]["GATEWAY"] = "192.168.1.1";
+    body["values"]["SUBNET"] = "255.255.255.0";
+    body["values"]["DNS"] = "1.1.1.1";
+    const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+    EXPECT_TRUE(r.ok) << r.error.c_str();
+    EXPECT_STREQ(store.getString("LOCALIP", "").c_str(), "192.168.1.50");
+    EXPECT_STREQ(store.getString("GATEWAY", "").c_str(), "192.168.1.1");
+    EXPECT_STREQ(store.getString("SUBNET", "").c_str(), "255.255.255.0");
+    EXPECT_STREQ(store.getString("DNS", "").c_str(), "1.1.1.1");
+  }
+
+  // IP fields are not secrets: they must round-trip through GET unredacted.
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  EXPECT_STREQ(doc["values"]["LOCALIP"].as<const char*>(), "192.168.1.50");
+  EXPECT_STREQ(doc["values"]["DNS"].as<const char*>(), "1.1.1.1");
+}
+
+// The wrong-type field (WEBENABLED) sits AFTER the valid sibling (MQTTPORT) in
+// kSettingFields order, so a single-pass reject-in-order would have written
+// MQTTPORT before hitting the bad key. Its survival pins two-pass atomicity.
+TEST_F(SettingsApiTest, WrongTypeRejectedNothingWritten) {
+  BatteryEmulatorSettingsStore store;
+  store.saveUInt("MQTTPORT", 1234);
+
+  JsonDocument body;
+  body["values"]["MQTTPORT"] = 5678;
+  body["values"]["WEBENABLED"] = "yes";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(std::string(r.error.c_str()).find("WEBENABLED"), std::string::npos) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("MQTTPORT", 0), 1234u);
+}
+
+// A fresh device's GET emits each field's default; saving that unchanged form
+// back must not report a change on non-zero-default fields (spurious reboot).
+TEST_F(SettingsApiTest, NoRebootWhenSavingDisplayedDefaults) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["WIFIAPENABLED"] = true;  // default true
+  body["values"]["PYLONBAUD"] = 500;       // default 500
+  body["values"]["MQTTPORT"] = 1883;       // default 1883
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_FALSE(r.reboot_required);
+}
+
+TEST_F(SettingsApiTest, UnknownKeyIgnored) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["NOTAREALKEY"] = 42;
+  body["values"]["MQTTPORT"] = 8080;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("MQTTPORT", 0), 8080u);
+}
+
+// APNAME and the custom-MQTT-topic group are dead: nothing reads them (MQTT identity and AP SSID are hostname-derived).
+TEST_F(SettingsApiTest, RetiredKeysAbsentFromSchemaAndIgnoredOnApply) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonArrayConst schema = doc["schema"];
+  ASSERT_FALSE(schema.isNull());
+  ASSERT_GT(schema.size(), 0u);  // guard the absence checks below against a vacuous empty schema
+
+  const char* retired[] = {"APNAME",          "MQTTTOPICS",     "MQTTTOPIC",
+                           "MQTTOBJIDPREFIX", "MQTTDEVICENAME", "HADEVICEID"};
+  for (const char* key : retired) {
+    for (JsonObjectConst entry : schema) {
+      EXPECT_STRNE(entry["key"].as<const char*>(), key) << key << " still present in schema";
+    }
+  }
+
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  for (const char* key : retired) {
+    body["values"][key] = "leftover";
+  }
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  for (const char* key : retired) {
+    EXPECT_STREQ(store.getString(key, "").c_str(), "") << key << " persisted on apply";
+  }
+}
+
+// IFSCHEMA is an internal key, not a table row, so a full-set apply never touches it.
+TEST_F(SettingsApiTest, InternalIfschemaKeyUntouchedByApply) {
+  BatteryEmulatorSettingsStore store;
+  store.saveUInt("IFSCHEMA", 7);
+
+  JsonDocument body;
+  body["values"]["MQTTPORT"] = 1883;
+  body["values"]["WEBENABLED"] = true;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("IFSCHEMA", 0), 7u);
+}
+
+TEST_F(SettingsApiTest, RebootRequiredWhenBootFieldChanges) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["MQTTPORT"] = 9000;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_TRUE(r.changed);
+  EXPECT_TRUE(r.reboot_required);
+}
+
+TEST_F(SettingsApiTest, NoChangeNoRebootWhenValueMatchesStored) {
+  BatteryEmulatorSettingsStore store;
+  store.saveUInt("MQTTPORT", 9000);
+
+  BatteryEmulatorSettingsStore fresh;
+  JsonDocument body;
+  body["values"]["MQTTPORT"] = 9000;
+  const auto r = apply_settings_json(fresh, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_FALSE(r.changed);
+  EXPECT_FALSE(r.reboot_required);
+}
+
+// CHGTAPERFLOOR default mirrors comm_nvm's read (0), not the old form's 400.
+TEST_F(SettingsApiTest, ChargeTaperDefaultsEmitted) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonObjectConst values = doc["values"];
+
+  EXPECT_FALSE(values["CHGTAPERSOC"].as<bool>());
+  EXPECT_EQ(values["CHGTAPERSTART"].as<uint32_t>(), 95u);
+  EXPECT_EQ(values["CHGTAPERFLOOR"].as<uint32_t>(), 0u);
+}
+
+TEST_F(SettingsApiTest, ChargeTaperApplyWrites) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["CHGTAPERSOC"] = true;
+  body["values"]["CHGTAPERSTART"] = 90;
+  body["values"]["CHGTAPERFLOOR"] = 250;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_TRUE(store.getBool("CHGTAPERSOC", false));
+  EXPECT_EQ(store.getUInt("CHGTAPERSTART", 0), 90u);
+  EXPECT_EQ(store.getUInt("CHGTAPERFLOOR", 0), 250u);
+}
+
+TEST_F(SettingsApiTest, FoxessDefaultsEmittedAndApplyWrites) {
+  {
+    BatteryEmulatorSettingsStore reader(true);
+    const JsonDocument doc = parse_values(build_settings_json(reader));
+    JsonObjectConst values = doc["values"];
+    EXPECT_EQ(values["FOXESSTYPE"].as<uint32_t>(), 0u);
+    EXPECT_EQ(values["FOXESSSUBTYPE"].as<uint32_t>(), 0u);
+    EXPECT_EQ(values["FOXESSMODULES"].as<uint32_t>(), 0u);
+  }
+
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["FOXESSTYPE"] = 2;
+  body["values"]["FOXESSSUBTYPE"] = 1;
+  body["values"]["FOXESSMODULES"] = 4;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("FOXESSTYPE", 99), 2u);
+  EXPECT_EQ(store.getUInt("FOXESSSUBTYPE", 99), 1u);
+  EXPECT_EQ(store.getUInt("FOXESSMODULES", 99), 4u);
+}
+
+TEST_F(SettingsApiTest, HaDiscoveryTopicDefaultAndApply) {
+  {
+    BatteryEmulatorSettingsStore reader(true);
+    const JsonDocument doc = parse_values(build_settings_json(reader));
+    EXPECT_STREQ(doc["values"]["HADISCTOPIC"].as<const char*>(), "homeassistant");
+  }
+
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["HADISCTOPIC"] = "hass";
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_STREQ(store.getString("HADISCTOPIC", "").c_str(), "hass");
+}
+
+#ifndef SMALL_FLASH_DEVICE
+TEST_F(SettingsApiTest, SyslogFieldsPresentWithDefaultsAndApply) {
+  {
+    BatteryEmulatorSettingsStore reader(true);
+    const JsonDocument doc = parse_values(build_settings_json(reader));
+    JsonObjectConst values = doc["values"];
+    EXPECT_FALSE(values["SYSLOGEN"].as<bool>());
+    EXPECT_STREQ(values["SYSLOGIP"].as<const char*>(), "");
+    EXPECT_EQ(values["SYSLOGPORT"].as<uint32_t>(), 514u);
+    EXPECT_EQ(values["SYSLOGFAC"].as<uint32_t>(), 1u);
+  }
+
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["SYSLOGEN"] = true;
+  body["values"]["SYSLOGIP"] = "192.168.1.10";
+  body["values"]["SYSLOGPORT"] = 1514;
+  body["values"]["SYSLOGFAC"] = 16;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_TRUE(store.getBool("SYSLOGEN", false));
+  EXPECT_STREQ(store.getString("SYSLOGIP", "").c_str(), "192.168.1.10");
+  EXPECT_EQ(store.getUInt("SYSLOGPORT", 0), 1514u);
+  EXPECT_EQ(store.getUInt("SYSLOGFAC", 0), 16u);
+}
+#endif
+
+TEST_F(SettingsApiTest, SchemaEmitsNumericBoundsOnlyWhereSet) {
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+
+  bool saw_bounded = false, saw_unbounded = false;
+  for (JsonObjectConst entry : doc["schema"].as<JsonArrayConst>()) {
+    const char* key = entry["key"].as<const char*>();
+    if (std::strcmp(key, "CHGTAPERSTART") == 0) {
+      EXPECT_EQ(entry["min"].as<int>(), 50);
+      EXPECT_EQ(entry["max"].as<int>(), 99);
+      saw_bounded = true;
+    }
+    if (std::strcmp(key, "PYLONSEND") == 0) {  // numeric field left unbounded
+      EXPECT_TRUE(entry["min"].isNull());
+      EXPECT_TRUE(entry["max"].isNull());
+      saw_unbounded = true;
+    }
+  }
+  EXPECT_TRUE(saw_bounded);
+  EXPECT_TRUE(saw_unbounded);
+}
+
+TEST_F(SettingsApiTest, AboveMaxRejectedAtomically) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["CHGTAPERFLOOR"] = 500;  // valid, earlier in table order
+  body["values"]["MQTTPORT"] = 70000;     // max is 65535, later in table order
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(std::string(r.error.c_str()).find("MQTTPORT"), std::string::npos) << r.error.c_str();
+  EXPECT_FALSE(store.settingExists("CHGTAPERFLOOR"));
+}
+
+TEST_F(SettingsApiTest, BelowMinRejected) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["MQTTPORT"] = 0;  // min is 1
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(std::string(r.error.c_str()).find("MQTTPORT"), std::string::npos) << r.error.c_str();
+  EXPECT_FALSE(store.settingExists("MQTTPORT"));
+}
+
+TEST_F(SettingsApiTest, InclusiveBoundariesAndSecondsDomainAccepted) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["CHGTAPERSTART"] = 99;   // inclusive max
+  body["values"]["RAMPDOWNSOC"] = 7000;   // inclusive min
+  body["values"]["MQTTPUBLISHMS"] = 300;  // seconds-domain max, stored as ms
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("CHGTAPERSTART", 0), 99u);
+  EXPECT_EQ(store.getUInt("RAMPDOWNSOC", 0), 7000u);
+  EXPECT_EQ(store.getUInt("MQTTPUBLISHMS", 0), 300000u);
+}
+
+TEST_F(SettingsApiTest, SecondsToMsAboveSecondsBoundRejected) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["MQTTPUBLISHMS"] = 301;  // max 300 s
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok);
+  EXPECT_NE(std::string(r.error.c_str()).find("MQTTPUBLISHMS"), std::string::npos) << r.error.c_str();
+  EXPECT_FALSE(store.settingExists("MQTTPUBLISHMS"));
+}
+
+namespace {
+// Exercises the generic gpio_options() emission the device cannot show while no
+// board declares a catalog: labels chosen so alphabetical order ("Pin 33" <
+// "Pin 5") differs from value order, plus a hidden (null-label) choice.
+constexpr GpioOptionChoice kTestGpioChoices[] = {
+    {0, "Pin 5", nullptr, 0, 0},
+    {1, "Pin 33", nullptr, 0, 0},
+    {2, nullptr, nullptr, 0, 0},
+};
+constexpr GpioOptionGroup kTestGpioGroups[] = {
+    {"GPIOOPT9", "Test option", kTestGpioChoices, 3, 0},
+};
+constexpr GpioOptionCatalog kTestGpioCatalog = make_gpio_option_catalog(kTestGpioGroups);
+
+class GpioOptionHal : public LilyGoHal {
+ public:
+  GpioOptionCatalog gpio_options() override { return kTestGpioCatalog; }
+};
+}  // namespace
+
+TEST_F(SettingsApiTest, EmitsGpioOptionGroupOrderedByLabel) {
+  GpioOptionHal hal;
+  Esp32Hal* saved = esp32hal;
+  esp32hal = &hal;
+
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+
+  EXPECT_EQ(doc["values"]["GPIOOPT9"].as<uint32_t>(), 0u);
+
+  JsonArrayConst opts = doc["options"]["GPIOOPT9"];
+  ASSERT_EQ(opts.size(), 2u);
+  EXPECT_STREQ(opts[0]["n"].as<const char*>(), "Pin 33");
+  EXPECT_EQ(opts[0]["v"].as<int>(), 1);
+  EXPECT_STREQ(opts[1]["n"].as<const char*>(), "Pin 5");
+  EXPECT_EQ(opts[1]["v"].as<int>(), 0);
+
+  bool found = false;
+  for (JsonObjectConst row : doc["schema"].as<JsonArrayConst>()) {
+    if (std::strcmp(row["key"].as<const char*>(), "GPIOOPT9") == 0) {
+      found = true;
+      EXPECT_STREQ(row["label"].as<const char*>(), "Test option");
+      EXPECT_STREQ(row["options"].as<const char*>(), "GPIOOPT9");
+      EXPECT_STREQ(row["type"].as<const char*>(), "enum");
+      EXPECT_STREQ(row["category"].as<const char*>(), "hardware");
+    }
+  }
+  EXPECT_TRUE(found);
+
+  esp32hal = saved;
+}
+
+TEST_F(SettingsApiTest, GpioOptionValueReportsClampedChoice) {
+  GpioOptionHal hal;
+  Esp32Hal* saved = esp32hal;
+  esp32hal = &hal;
+
+  {
+    BatteryEmulatorSettingsStore store;
+    store.saveUInt("GPIOOPT9", 7);  // no such choice -> reported as default 0
+  }
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  EXPECT_EQ(doc["values"]["GPIOOPT9"].as<uint32_t>(), 0u);
+
+  esp32hal = saved;
+}
+
+TEST_F(SettingsApiTest, GpioOptionApplyClampsUnknownValueToDefault) {
+  GpioOptionHal hal;
+  Esp32Hal* saved = esp32hal;
+  esp32hal = &hal;
+
+  {
+    BatteryEmulatorSettingsStore store;
+    JsonDocument body;
+    body["values"]["GPIOOPT9"] = 7;  // no such choice -> clamp to default 0
+    const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+    EXPECT_TRUE(r.ok) << r.error.c_str();
+    EXPECT_EQ(store.getUInt("GPIOOPT9", 99), 0u);
+  }
+  {
+    BatteryEmulatorSettingsStore store;
+    JsonDocument body;
+    body["values"]["GPIOOPT9"] = 1;  // valid choice -> stored verbatim
+    const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+    EXPECT_TRUE(r.ok) << r.error.c_str();
+    EXPECT_EQ(store.getUInt("GPIOOPT9", 99), 1u);
+  }
+  {
+    // 257 shares its low byte with choice 1; it must clamp, not alias onto it.
+    BatteryEmulatorSettingsStore store;
+    JsonDocument body;
+    body["values"]["GPIOOPT9"] = 257;
+    const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+    EXPECT_TRUE(r.ok) << r.error.c_str();
+    EXPECT_EQ(store.getUInt("GPIOOPT9", 99), 0u);
+  }
+
+  esp32hal = saved;
+}
+
+static JsonDocument balancing_body(const char* json) {
+  JsonDocument doc;
+  EXPECT_FALSE(deserializeJson(doc, json));
+  return doc;
+}
+
+namespace {
+class BatterySlotResolutionTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+      saved_batteries_[slot] = batteries[slot];
+    }
+    static int marker;
+    batteries[0] = reinterpret_cast<Battery*>(&marker);
+    batteries[1] = nullptr;
+    batteries[2] = nullptr;
+  }
+
+  void TearDown() override {
+    for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+      batteries[slot] = saved_batteries_[slot];
+    }
+  }
+
+  Battery* saved_batteries_[kMaxBatterySlots] = {};
+};
+}  // namespace
+
+TEST_F(BatterySlotResolutionTest, AbsentFieldMeansPrimary) {
+  uint8_t slot = 99;
+  EXPECT_EQ(validate_battery_slot(balancing_body("{}"), slot), nullptr);
+  EXPECT_EQ(slot, 0);
+}
+
+TEST_F(BatterySlotResolutionTest, RejectsNonIntegerField) {
+  uint8_t slot = 0;
+  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":"0"})"), slot), "Bad Request");
+  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":1.5})"), slot), "Bad Request");
+}
+
+TEST_F(BatterySlotResolutionTest, RejectsOutOfRangeSlots) {
+  uint8_t slot = 0;
+  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":-1})"), slot), "Invalid battery");
+  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":3})"), slot), "Invalid battery");
+}
+
+TEST_F(BatterySlotResolutionTest, RejectsUnconfiguredSecondarySlot) {
+  uint8_t slot = 0;
+  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":1})"), slot), "Invalid battery");
+}
+
+// Deliberate: settings can be staged before a battery type is selected.
+TEST_F(BatterySlotResolutionTest, PrimaryAcceptedWithNoDriverConfigured) {
+  batteries[0] = nullptr;
+  uint8_t slot = 99;
+  EXPECT_EQ(validate_battery_slot(balancing_body(R"({"battery":0})"), slot), nullptr);
+  EXPECT_EQ(slot, 0);
+}
+
+// The editcards emitter loops this predicate, so its rules must track the
+// resolver's exactly.
+TEST_F(BatterySlotResolutionTest, AddressablePredicateMatchesResolverRules) {
+  EXPECT_TRUE(battery_slot_addressable(0));
+  EXPECT_FALSE(battery_slot_addressable(1));
+  batteries[1] = batteries[0];
+  EXPECT_TRUE(battery_slot_addressable(1));
+  EXPECT_FALSE(battery_slot_addressable(kMaxBatterySlots));
+
+  batteries[0] = nullptr;
+  EXPECT_TRUE(battery_slot_addressable(0));
+}
+
+TEST_F(BatterySlotResolutionTest, ResolvesConfiguredSlots) {
+  uint8_t slot = 99;
+  EXPECT_EQ(validate_battery_slot(balancing_body(R"({"battery":0})"), slot), nullptr);
+  EXPECT_EQ(slot, 0);
+
+  batteries[1] = batteries[0];
+  EXPECT_EQ(validate_battery_slot(balancing_body(R"({"battery":1})"), slot), nullptr);
+  EXPECT_EQ(slot, 1);
+}
+
+TEST(BalancingValidationTest, AcceptsEmptyBody) {
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::Autodetect, balancing_body("{}")), nullptr);
+}
+
+TEST(BalancingValidationTest, AcceptsAllFieldsAtLfpCeilings) {
+  const auto doc = balancing_body(
+      R"({"max_time_min":300,"max_cell_mv":3650,"max_dev_mv":400,"max_pack_v":394.0,"float_power_w":2000})");
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::LFP, doc), nullptr);
+}
+
+TEST(BalancingValidationTest, AcceptsAllFieldsAtFloors) {
+  const auto doc = balancing_body(
+      R"({"max_time_min":1,"max_cell_mv":3400,"max_dev_mv":300,"max_pack_v":380.0,"float_power_w":100})");
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::LFP, doc), nullptr);
+}
+
+TEST(BalancingValidationTest, CellCeilingFollowsChemistry) {
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::LFP, balancing_body(R"({"max_cell_mv":3651})")),
+               "Cell voltage out of range");
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_cell_mv":3651})")),
+            nullptr);
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::NCA, balancing_body(R"({"max_cell_mv":4250})")),
+            nullptr);
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_cell_mv":4251})")),
+               "Cell voltage out of range");
+}
+
+TEST(BalancingValidationTest, DeviationCeilingFollowsChemistry) {
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::LFP, balancing_body(R"({"max_dev_mv":401})")),
+               "Cell deviation out of range");
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_dev_mv":500})")),
+            nullptr);
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_dev_mv":501})")),
+               "Cell deviation out of range");
+}
+
+TEST(BalancingValidationTest, PackCeilingIsChemistryMaxPlusHeadroom) {
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::LFP, balancing_body(R"({"max_pack_v":394.0})")),
+            nullptr);
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::LFP, balancing_body(R"({"max_pack_v":394.1})")),
+               "Pack voltage out of range");
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_pack_v":409.0})")),
+            nullptr);
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_pack_v":409.1})")),
+               "Pack voltage out of range");
+}
+
+TEST(BalancingValidationTest, RejectsBelowFloors) {
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_cell_mv":3399})")),
+               "Cell voltage out of range");
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_dev_mv":299})")),
+               "Cell deviation out of range");
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"max_pack_v":379.9})")),
+               "Pack voltage out of range");
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"float_power_w":99})")),
+               "Float power out of range");
+}
+
+TEST(BalancingValidationTest, FloatPowerRangeIsChemistryIndependent) {
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::LFP, balancing_body(R"({"float_power_w":2000})")),
+            nullptr);
+  EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::NMC, balancing_body(R"({"float_power_w":2001})")),
+               "Float power out of range");
+}
+
+// Mirrors the driver: autodetect can only ever conclude LFP, so anything that
+// is not LFP runs (and validates) as NCM.
+TEST(BalancingValidationTest, NonLfpChemistryValidatesAsNcm) {
+  EXPECT_EQ(
+      validate_balancing_update(battery_chemistry_enum::Autodetect, balancing_body(R"({"max_cell_mv":4250})")),
+      nullptr);
+  EXPECT_STREQ(
+      validate_balancing_update(battery_chemistry_enum::Autodetect, balancing_body(R"({"max_cell_mv":4251})")),
+      "Cell voltage out of range");
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::ZEBRA, balancing_body(R"({"max_cell_mv":4250})")),
+            nullptr);
+}
+
+TEST(BalancingValidationTest, TimeIsUnbounded) {
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::Autodetect, balancing_body(R"({"max_time_min":301})")),
+            nullptr);
+  EXPECT_EQ(validate_balancing_update(battery_chemistry_enum::LFP, balancing_body(R"({"max_time_min":0.5})")),
+            nullptr);
+}
+
+TEST(BalancingValidationTest, MalformedValuesAreBadRequest) {
+  for (const char* body : {R"({"max_cell_mv":"3650"})", R"({"max_cell_mv":3650.5})", R"({"float_power_w":-100})",
+                           R"({"max_pack_v":"394"})", R"({"max_time_min":true})", R"({"max_dev_mv":70000})"}) {
+    EXPECT_STREQ(validate_balancing_update(battery_chemistry_enum::LFP, balancing_body(body)), "Bad Request") << body;
+  }
+}
+
+TEST(BalancingApplyTest, WritesEveryPresentFieldWithUnitConversion) {
+  DATALAYER_BATTERY_SETTINGS_TYPE settings{};
+  apply_balancing_update(
+      settings,
+      balancing_body(R"({"max_time_min":90,"max_cell_mv":3650,"max_dev_mv":400,"max_pack_v":394.0,"float_power_w":1500})"));
+  EXPECT_EQ(settings.balancing_max_time_ms, 5400000u);
+  EXPECT_EQ(settings.balancing_max_cell_voltage_mV, 3650);
+  EXPECT_EQ(settings.balancing_max_deviation_cell_voltage_mV, 400);
+  EXPECT_EQ(settings.balancing_max_pack_voltage_dV, 3940);
+  EXPECT_EQ(settings.balancing_float_power_W, 1500);
+}
+
+TEST(BalancingApplyTest, PreservesAbsentFields) {
+  DATALAYER_BATTERY_SETTINGS_TYPE settings{};
+  settings.balancing_max_time_ms = 60000;
+  settings.balancing_max_cell_voltage_mV = 3600;
+  settings.balancing_max_pack_voltage_dV = 3900;
+  apply_balancing_update(settings, balancing_body(R"({"max_dev_mv":350})"));
+  EXPECT_EQ(settings.balancing_max_time_ms, 60000u);
+  EXPECT_EQ(settings.balancing_max_cell_voltage_mV, 3600);
+  EXPECT_EQ(settings.balancing_max_deviation_cell_voltage_mV, 350);
+  EXPECT_EQ(settings.balancing_max_pack_voltage_dV, 3900);
+}
+
+TEST(BalancingApplyTest, AckRoundTripsAppliedValues) {
+  DATALAYER_BATTERY_SETTINGS_TYPE settings{};
+  apply_balancing_update(
+      settings,
+      balancing_body(R"({"max_time_min":90,"max_cell_mv":3650,"max_dev_mv":400,"max_pack_v":394.0,"float_power_w":1500})"));
+  JsonDocument ack;
+  fill_balancing_ack(settings, ack.to<JsonObject>());
+  EXPECT_FLOAT_EQ(ack["max_time_min"].as<float>(), 90.0f);
+  EXPECT_EQ(ack["max_cell_mv"].as<uint16_t>(), 3650);
+  EXPECT_EQ(ack["max_dev_mv"].as<uint16_t>(), 400);
+  EXPECT_FLOAT_EQ(ack["max_pack_v"].as<float>(), 394.0f);
+  EXPECT_EQ(ack["float_power_w"].as<uint16_t>(), 1500);
+}
