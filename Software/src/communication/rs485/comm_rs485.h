@@ -5,35 +5,26 @@
 #include <HardwareSerial.h>
 #include <stdint.h>
 
-/**
- * @brief Initialization of RS485 control pins.
- *
- * @param[in] void
- *
- * @return Safe to call even if rs485 is not used
- */
+class Rs485Port;
+struct InterfaceDescriptor;
+
+// Parks every board RS-485 port's DE pin in receive state.
+// Safe to call even if rs485 is not used.
 bool init_rs485();
 
-/**
- * @brief Initialize a HardwareSerial port with the board-specific RS485 RX/TX pins.
- *
- * If the selected HAL exposes RS485_DE_PIN(), UART2 is configured in ESP-IDF
- * UART_MODE_RS485_HALF_DUPLEX so the UART driver controls RTS/DE around the
- * existing Serial2.write() calls.
- */
-bool rs485_begin(const char* owner, HardwareSerial& serial, uint32_t baud, uint32_t config = SERIAL_8N1);
-
-// Defines an interface for any object that needs to receive a signal to handle RS485 comm.
-// Can be extended later for more complex operation.
+// Interface for any object that needs to receive a signal to handle RS485
+// comm.
 class Rs485Receiver {
  public:
   virtual void receive() = 0;
 };
 
-// Forwards the call to all registered RS485 receivers
+// Polls every board RS-485 port that has receivers.
 void receive_rs485();
 
-// Registers the given object as a receiver.
-void register_receiver(Rs485Receiver* receiver);
+// The port behind a role's selected interface. Selections without a port
+// (CAN descriptors) fall back to the board's first RS-485 port, matching the
+// pre-descriptor behaviour where every RS-485 protocol shared one UART.
+Rs485Port* resolve_rs485_port(const InterfaceDescriptor* selected);
 
 #endif

@@ -2,49 +2,48 @@
 #define _COMM_CAN_H_
 
 #include "../../devboard/utils/types.h"
+#include "CanBus.h"
+#include "../../devboard/hal/interface_descriptor.h"
 
+extern bool use_canfd_as_can;
+extern bool use_canfd2_as_can;
 extern uint16_t user_selected_CAN_ID_cutoff_filter;
 
-void dump_can_frame(CAN_frame& frame, CAN_Interface interface, frameDirection msgDir);
-void transmit_can_frame_to_interface(const CAN_frame* tx_frame, CAN_Interface interface);
+void dump_can_frame(CAN_frame& frame, const InterfaceDescriptor* interface, frameDirection msgDir);
+void transmit_can_frame_to_interface(const CAN_frame* tx_frame, const InterfaceDescriptor* interface);
+
+// Shared frame-log sink (USB print, web dump, SD buffer). log_id is the
+// SavvyCAN bus slot (CAN_LOG_ID_* in CanBus.h).
+void log_can_frame(const CAN_frame& frame, uint8_t log_id, frameDirection msgDir);
 
 // Format CAN logs to the given buffer. Returns the number of bytes written, or
 // 0 if the buffer is too small.
 // Null-terminates the buffer if len > 0, but the return value does not include the NUL.
-size_t format_can_frame(char* buffer, size_t len, const CAN_frame& frame, CAN_Interface interface,
-                        frameDirection msgDir);
-
-//These defines are not used if user updates values via Settings page
-#define CRYSTAL_FREQUENCY_MHZ 8
+size_t format_can_frame(char* buffer, size_t len, const CAN_frame& frame, uint8_t log_id, frameDirection msgDir);
 
 class CanReceiver;
 
 typedef struct {
-  CAN_Interface battery;
-  CAN_Interface inverter;
-  CAN_Interface battery_double;
-  CAN_Interface battery_triple;
-  CAN_Interface charger;
-  CAN_Interface shunt;
+  const InterfaceDescriptor* battery;
+  const InterfaceDescriptor* inverter;
+  const InterfaceDescriptor* battery_double;
+  const InterfaceDescriptor* battery_triple;
+  const InterfaceDescriptor* charger;
+  const InterfaceDescriptor* shunt;
 } CAN_Configuration;
 
 extern volatile CAN_Configuration can_config;
 
-enum class CAN_Speed {
-  CAN_SPEED_100KBPS = 100,
-  CAN_SPEED_125KBPS = 125,
-  CAN_SPEED_200KBPS = 200,
-  CAN_SPEED_250KBPS = 250,
-  CAN_SPEED_500KBPS = 500,
-  CAN_SPEED_800KBPS = 800,
-  CAN_SPEED_1000KBPS = 1000
-};
-
-// Register a receiver object for a given CAN interface.
-// By default receivers expect the CAN interface to be operated at "fast" speed.
-// If halfSpeed is true, half speed is used.
-void register_can_receiver(CanReceiver* receiver, CAN_Interface interface,
+// Register a receiver for the given interface. The bus is initialised at the
+// first-registered receiver's speed.
+void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface,
                            CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS);
+
+// Event-data byte for interface-scoped events; preserves the legacy
+// interface numbering via the bus log id.
+inline uint8_t can_event_interface_id(const InterfaceDescriptor* interface) {
+  return (interface != nullptr && interface->can_bus != nullptr) ? interface->can_bus->log_id() : CAN_LOG_ID_NONE;
+}
 
 /**
  * @brief Initializes all CAN interfaces requested earlier by other modules (see register_can_receiver)
@@ -71,6 +70,6 @@ void stop_can();
 void restart_can();
 
 // Change the speed of the CAN interface. Returns true if successful.
-bool change_can_speed(CAN_Interface interface, CAN_Speed speed);
+bool change_can_speed(const InterfaceDescriptor* interface, CAN_Speed speed);
 
 #endif
