@@ -11,6 +11,7 @@
 #include "fonts.h"
 
 #include "Arduino.h"
+#include "WiFi.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -67,41 +68,6 @@ static void write_text(int x, int y, const char* str, bool invert) {
     }
   }
 }
-
-/*
-static void write_big_text(int x, int y, const char* str, bool invert) {
-  for (int r = 0; r < 2; r++) {
-    set_ram_pointer(x, y + r);
-
-    char* ptr = (char*)str;
-    while (*ptr) {
-      char c = *ptr++;
-      if (c < ' ' || c > '~') {
-        c = '!';  // Replace unsupported characters
-      }
-
-      char slice[16];
-      for (int col = 0; col < 6; col++) {
-        uint8_t byte = font6x8_basic[c - ' '][col];
-
-        byte = r == 0 ? (byte & 0xf) : (byte >> 4);
-        byte = (byte | (byte << 2)) & 0x33;
-        byte = (byte | (byte << 1)) & 0x55;
-        byte *= 0x03;
-
-        if(invert) {
-          byte = ~byte;
-        }
-
-        slice[col * 2] = byte;
-        slice[col * 2 + 1] = byte;
-      }
-
-      i2c_data((uint8_t*)slice, 12);
-    }
-  }
-}
-*/
 
 static void write_tall_text(int x, int y, const char* str, bool invert) {
   for (int r = 0; r < 2; r++) {
@@ -221,9 +187,9 @@ void init_display() {
   display_initialized = true;
 
   // Count configured batteries
-  if (battery2)
+  if (batteries[1])
     num_batteries++;
-  if (battery3)
+  if (batteries[2])
     num_batteries++;
 }
 
@@ -448,13 +414,7 @@ void update_display() {
   int page = (current_phase / num_batteries) % NUM_PAGES;
 
   // Print the battery status for current battery
-  if (battery_index == 0) {
-    print_battery_status(0, datalayer.battery.status, 1, page);
-  } else if (battery_index == 1) {
-    print_battery_status(0, datalayer.battery2.status, 2, page);
-  } else {
-    print_battery_status(0, datalayer.battery3.status, 3, page);
-  }
+  print_battery_status(0, datalayer.battery_slot(battery_index).status, battery_index + 1, page);
 
   write_text(0, 2, "---------------------", false);
 

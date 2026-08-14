@@ -1,4 +1,6 @@
 #include "led_handler.h"
+#include "../../communication/can/CanBus.h"
+#include "../../communication/rs485/Rs485Port.h"
 #include "../../datalayer/datalayer.h"
 #include "../../devboard/hal/hal.h"
 #include "events.h"
@@ -9,15 +11,6 @@
 #define COLOR_RED(x) (((uint32_t)x << 16) | ((uint32_t)0 << 8) | 0)
 #define COLOR_BLUE(x) (((uint32_t)0 << 16) | ((uint32_t)0 << 8) | x)
 
-// Scales a full-brightness 24-bit color's R/G/B channels by `brightness` (0-255).
-static uint32_t scale_color(uint32_t color, uint8_t brightness) {
-  uint8_t r = (uint8_t)(color >> 16), g = (uint8_t)(color >> 8), b = (uint8_t)color;
-  r = (uint16_t)r * brightness / 255;
-  g = (uint16_t)g * brightness / 255;
-  b = (uint16_t)b * brightness / 255;
-  return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
-}
-
 #define BPM_TO_MS(x) ((60000 / (x)))  // 60 * 1000 = 60000
 
 #define HEARTBEAT_BASE 150      // 0.15 * 1000
@@ -26,13 +19,21 @@ static uint32_t scale_color(uint32_t color, uint8_t brightness) {
 #define HEARTBEAT_DEVIATION 50  // 0.05 * 1000
 #define SCALE_FACTOR 1000
 
+static constexpr uint32_t COLOR_OFF = 0;
+
+#if defined(BOARD_HAS_INTERFACE_ACTIVITY_LEDS) || defined(BOARD_HAS_LOAD_SWITCH)
+// Hold a traffic LED lit after a frame so the ~20 ms render cadence in the
+// core loop cannot miss a single-frame blink.
+static constexpr uint32_t LED_ACTIVITY_HOLD_MS = 50;
+#endif
+
 static LED* led = nullptr;
+
+static bool indicator_led_state[kIndicatorLedCount] = {};
 
 static bool led_override_active = false;
 static uint32_t led_override_color = 0;
 static uint16_t led_override_period_ms = 0;
-
-static bool indicator_led_state[4] = {false, false, false, false};
 
 void set_led_override(bool active, uint32_t color, uint16_t period_ms) {
   if (led == nullptr) {
@@ -63,7 +64,8 @@ bool led_init(void) {
     return false;
   }
 
-  led = new LED(datalayer.battery.status.led_mode, led_pin, esp32hal->LED_MAX_BRIGHTNESS(), esp32hal->LED_COUNT());
+  led = new LED(datalayer.battery.pack[0].status.led_mode, led_pin, esp32hal->LED_MAX_BRIGHTNESS(), esp32hal->LED_COUNT(),
+                esp32hal->LED_STATUS_INDEX(), esp32hal->LED_COLOR_ORDER());
 
   return true;
 }
@@ -80,13 +82,13 @@ void LED::exe(void) {
   // Button-hold feedback: square-wave blink at full brightness, ahead of normal state.
   if (led_override_active && led_override_period_ms > 0) {
     const bool on = (millis() / (led_override_period_ms / 2)) % 2;
-    pixels.setPixelColor(on ? led_override_color : 0);
+    pixels.setPixelColor(esp32hal->LED_STATUS_INDEX(), on ? led_override_color : 0);
     pixels.show();
     return;
   }
 
   // Update brightness
-  switch (datalayer.battery.status.led_mode) {
+  switch (datalayer.battery.pack[0].status.led_mode) {
     case led_mode_enum::FLOW:
       flow_run();
       break;
@@ -95,15 +97,15 @@ void LED::exe(void) {
       break;
 #ifdef HW_LILYGO2CAN
     case led_mode_enum::GRB_FLOW:
-      pixels.setColorOrder(GRB);
+      pixels.setColorOrder(led_color_order::GRB);
       flow_run();
       break;
     case led_mode_enum::GRB_HEARTBEAT:
-      pixels.setColorOrder(GRB);
+      pixels.setColorOrder(led_color_order::GRB);
       heartbeat_run();
       break;
     case led_mode_enum::GRB_CLASSIC:
-      pixels.setColorOrder(GRB);
+      pixels.setColorOrder(led_color_order::GRB);
       classic_run();
       break;
 #endif
@@ -114,37 +116,67 @@ void LED::exe(void) {
   }
 
   // Set color
-  uint32_t status_hue = 0;  // full-brightness hue, reused below for the indicator LEDs
+  uint32_t indicator_color = COLOR_OFF;
   switch (get_emulator_status()) {
     case EMULATOR_STATUS::STATUS_OK:
-      status_hue = COLOR_GREEN(0xFF);
-      pixels.setPixelColor(COLOR_GREEN(brightness));  // Green pulsing LED
+      pixels.setPixelColor(status_index, COLOR_GREEN(brightness));
+      indicator_color = COLOR_GREEN(max_brightness);
       break;
     case EMULATOR_STATUS::STATUS_WARNING:
-      status_hue = COLOR_YELLOW(0xFF);
-      pixels.setPixelColor(COLOR_YELLOW(brightness));  // Yellow pulsing LED
+      pixels.setPixelColor(status_index, COLOR_YELLOW(brightness));
+      indicator_color = COLOR_YELLOW(max_brightness);
       break;
     case EMULATOR_STATUS::STATUS_ERROR:
-      status_hue = COLOR_RED(0xFF);
-      pixels.setPixelColor(COLOR_RED(esp32hal->LED_MAX_BRIGHTNESS()));  // Red LED full brightness
+      pixels.setPixelColor(status_index, COLOR_RED(esp32hal->LED_MAX_BRIGHTNESS()));
+      indicator_color = COLOR_RED(max_brightness);
       break;
     case EMULATOR_STATUS::STATUS_UPDATING:
-      status_hue = COLOR_BLUE(0xFF);
-      pixels.setPixelColor(COLOR_BLUE(brightness));  // Blue pulsing LED
+      pixels.setPixelColor(status_index, COLOR_BLUE(brightness));
+      indicator_color = COLOR_BLUE(max_brightness);
       break;
   }
 
-  // Indicator LEDs 1-4 mirror the STATUS LED's color, at a fixed (non-animated) brightness.
-  // Skipped entirely on boards with no RGB indicator LEDs (num_leds == 1), rather than relying
-  // on Adafruit_NeoPixel::setPixelColor()'s bounds check to make it a no-op.
-  if (num_leds > 1) {
-    uint32_t indicator_color = scale_color(status_hue, max_brightness);
-    for (uint8_t i = 0; i < 4; i++) {
-      pixels.setPixelColor(i + 1, indicator_led_state[i] ? indicator_color : 0);
-    }
-  }
+  render_indicators(indicator_color);
+
+#ifdef BOARD_HAS_INTERFACE_ACTIVITY_LEDS
+  render_interface_activity();
+#endif
+
+#ifdef BOARD_HAS_LOAD_SWITCH
+  render_load_switch_channels();
+#endif
 
   pixels.show();  // This sends the updated pixel color to the hardware.
+}
+
+#ifdef BOARD_HAS_INTERFACE_ACTIVITY_LEDS
+void LED::render_interface_activity(void) {
+  InterfaceList list = esp32hal->interfaces();
+  for (size_t i = 0; i < list.count; i++) {
+    int led_index = esp32hal->LED_INTERFACE_ACTIVITY_INDEX(i);
+    if (led_index < 0) {
+      continue;
+    }
+    bool active = false;
+    if (list.data[i].can_bus != nullptr) {
+      active = list.data[i].can_bus->recently_received(LED_ACTIVITY_HOLD_MS);
+    } else if (list.data[i].rs485_port != nullptr) {
+      active = list.data[i].rs485_port->recently_received(LED_ACTIVITY_HOLD_MS);
+    }
+    pixels.setPixelColor(led_index, active ? COLOR_BLUE(max_brightness) : COLOR_OFF);
+  }
+}
+#endif
+
+// Indicator LEDs mirror the STATUS LED's color, at a fixed (non-animated) brightness.
+void LED::render_indicators(uint32_t color) {
+  for (uint8_t i = 0; i < kIndicatorLedCount; i++) {
+    int led_index = esp32hal->LED_INDICATOR_INDEX(i);
+    if (led_index < 0) {
+      continue;
+    }
+    pixels.setPixelColor(led_index, indicator_led_state[i] ? color : COLOR_OFF);
+  }
 }
 
 void LED::classic_run(void) {
@@ -154,10 +186,10 @@ void LED::classic_run(void) {
 
 void LED::flow_run(void) {
   // Determine how bright the LED should be
-  if (datalayer.battery.status.active_power_W < -50) {
+  if (datalayer.battery.pack[0].status.active_power_W < -50) {
     // Discharging
     brightness = max_brightness - up_down(950);
-  } else if (datalayer.battery.status.active_power_W > 50) {
+  } else if (datalayer.battery.pack[0].status.active_power_W > 50) {
     // Charging
     brightness = up_down(950);
   } else {  // Idle
@@ -222,3 +254,26 @@ uint8_t LED::up_down(uint16_t middle_point_scaled) {
 
   return CONSTRAIN(brightness, 0, max_brightness);
 }
+
+#ifdef BOARD_HAS_LOAD_SWITCH
+void LED::render_load_switch_channels(void) {
+  LoadSwitch* load_switch = esp32hal->load_switch();
+  if (load_switch == nullptr) {
+    return;
+  }
+  const LoadSwitchStatus& status = load_switch->status();
+  for (uint8_t ch = 0; ch < status.channel_count; ch++) {
+    int led_index = esp32hal->LED_SWITCHED_OUTPUT_INDEX(ch);
+    if (led_index < 0) {
+      continue;
+    }
+    uint32_t color = COLOR_OFF;
+    if (status.channels[ch].fault || status.channels[ch].latched_off) {
+      color = COLOR_RED(max_brightness);
+    } else if (status.channels[ch].on) {
+      color = COLOR_GREEN(max_brightness);
+    }
+    pixels.setPixelColor(led_index, color);
+  }
+}
+#endif

@@ -7,21 +7,20 @@
 
 static const uint32_t LED_COLOR_WHITE = 0xFFFFFF;  // R=G=B=255
 
-// Indicator LEDs 1-4 in the chain, for boards that can replace their hardwired 12V-output LEDs
-// with RGB LEDs (pixel 0 is always the STATUS LED and is unaffected by this).
 enum class IndicatorLed : uint8_t { PRECHARGE = 0, CONTACTOR_NEG = 1, CONTACTOR_POS = 2, BMS_POWER = 3 };
+inline constexpr uint8_t kIndicatorLedCount = 4;
 
 class LED {
  public:
-  LED(gpio_num_t pin, uint8_t maxBrightness, uint8_t numLeds = 1)
-      : pixels(pin, numLeds),
+  LED(led_mode_enum mode, gpio_num_t pin, uint8_t maxBrightness, uint16_t pixel_count, uint16_t status_index,
+      led_color_order order)
+      : pixels(pin, pixel_count),
         max_brightness(maxBrightness),
         brightness(maxBrightness),
-        mode(led_mode_enum::CLASSIC),
-        num_leds(numLeds) {}
-
-  LED(led_mode_enum mode, gpio_num_t pin, uint8_t maxBrightness, uint8_t numLeds = 1)
-      : pixels(pin, numLeds), max_brightness(maxBrightness), brightness(maxBrightness), mode(mode), num_leds(numLeds) {}
+        mode(mode),
+        status_index(status_index) {
+    pixels.setColorOrder(order);
+  }
 
   void exe(void);
 
@@ -30,11 +29,18 @@ class LED {
   uint8_t max_brightness;
   uint8_t brightness;
   led_mode_enum mode;
-  uint8_t num_leds;  // 1 = STATUS only; >1 = STATUS + RGB indicator LEDs are present
+  uint16_t status_index;
 
   void classic_run(void);
   void flow_run(void);
   void heartbeat_run(void);
+  void render_indicators(uint32_t color);
+#ifdef BOARD_HAS_INTERFACE_ACTIVITY_LEDS
+  void render_interface_activity(void);
+#endif
+#ifdef BOARD_HAS_LOAD_SWITCH
+  void render_load_switch_channels(void);
+#endif
 
   uint8_t up_down(uint16_t middle_point_f);
   uint16_t LED_PERIOD_MS = 3000;

@@ -1,4 +1,5 @@
 #include "logging.h"
+#include <Arduino.h>
 #include "../../datalayer/datalayer.h"
 #include "../sdcard/sdcard.h"
 

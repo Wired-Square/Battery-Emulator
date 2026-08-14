@@ -8,6 +8,7 @@
  * Do NOT use this macro with operators or function calls, e.g.:
  * int x = MIN(y++, my_func());
 */
+#undef MIN
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 /** MAX macro, returns the largest of two values
  * Warning: Side effects. MUST be called using values and/or variables only, e.g.:
@@ -16,6 +17,7 @@
  * Do NOT use this macro with operators or function calls, e.g.:
  * int x = MAX(y++, my_func());
 */
+#undef MAX
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 /** CONSTRAIN macro, limits a value to a provided range
  * Warning: Side effects. MUST be called using values and/or variables only, e.g.:

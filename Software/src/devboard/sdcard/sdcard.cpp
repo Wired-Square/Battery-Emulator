@@ -58,7 +58,7 @@ void pause_log_writing() {
 // Reported as a gap marker in the log once the buffer has room again.
 static uint32_t can_frames_dropped = 0;
 
-void add_can_frame_to_buffer(CAN_frame frame, CAN_Interface interface, frameDirection msgDir) {
+void add_can_frame_to_buffer(CAN_frame frame, uint8_t log_id, frameDirection msgDir) {
 
   if (!sd_card_active)
     return;
@@ -76,7 +76,7 @@ void add_can_frame_to_buffer(CAN_frame frame, CAN_Interface interface, frameDire
 
   // Format the frame, as long as it fits
   size_t written =
-      format_can_frame(messagestr_buffer + size, sizeof(messagestr_buffer) - size, frame, interface, msgDir);
+      format_can_frame(messagestr_buffer + size, sizeof(messagestr_buffer) - size, frame, log_id, msgDir);
   if (written > 0) {
     size += written;
   }
@@ -185,13 +185,11 @@ void init_logging_buffers() {
 }
 
 void deinit_logging_buffers() {
-  if ((!datalayer.system.info.CAN_SD_logging_active) && (!datalayer.system.info.SD_logging_active)) {
-    if (can_bufferHandle != NULL) {
-      vRingbufferDelete(can_bufferHandle);
-    }
-    if (log_bufferHandle != NULL) {
-      vRingbufferDelete(log_bufferHandle);
-    }
+  if (can_bufferHandle != NULL) {
+    vRingbufferDelete(can_bufferHandle);
+  }
+  if (log_bufferHandle != NULL) {
+    vRingbufferDelete(log_bufferHandle);
   }
 }
 
