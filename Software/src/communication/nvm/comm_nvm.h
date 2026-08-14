@@ -40,6 +40,30 @@ void store_settings();
 
 void clear_wifi_sta_settings();
 
+// NVM key for one interface's termination toggle, keyed by descriptor index
+// (stable: per-board descriptor lists are append-only).
+inline String interface_termination_key(size_t interface_index) {
+  return String("TERMIF") + String(static_cast<unsigned>(interface_index));
+}
+
+#ifdef BOARD_HAS_LOAD_SWITCH
+inline String load_switch_role_key(uint8_t channel) {
+  return String("LSROLE") + String(channel);
+}
+inline String load_switch_duty_key(uint8_t channel) {
+  return String("LSDUTY") + String(channel);
+}
+inline String load_switch_divisor_key(uint8_t channel) {
+  return String("LSDIV") + String(channel);
+}
+#endif
+
+#ifdef BOARD_HAS_INTERFACE_TERMINATION
+// Requires board_init() to have run first (the expander must be up on
+// boards that switch termination through one).
+void apply_stored_interface_termination();
+#endif
+
 // Wraps the Preferences object begin/end calls, so that the scope of this object
 // runs them automatically (via constructor/destructor).
 class BatteryEmulatorSettingsStore {

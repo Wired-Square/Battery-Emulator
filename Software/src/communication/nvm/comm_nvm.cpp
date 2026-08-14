@@ -1,5 +1,6 @@
 #include "comm_nvm.h"
 #include <esp_phy_init.h>  // esp_phy_erase_cal_data_in_nvs()
+#include "../../devboard/hal/hal.h"
 #include "../../battery/BATTERIES.h"
 #include "../../battery/Battery.h"
 #include "../../battery/Shunt.h"
@@ -70,9 +71,10 @@ void init_stored_settings() {
 
   temp = settings.getUInt("BATTERY_WH_MAX", false);
   if (temp != 0) {
-    datalayer.battery.info.total_capacity_Wh = temp;
-    datalayer.battery2.info.total_capacity_Wh = temp;
-    datalayer.battery3.info.total_capacity_Wh = temp;
+    datalayer.battery.settings.user_set_total_capacity_Wh = temp;
+    for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+      datalayer.battery_slot(slot).info.total_capacity_Wh = temp;
+    }
   }
   temp = settings.getUInt("MAXPERCENTAGE", false);
   if (temp != 0) {
@@ -150,26 +152,30 @@ void init_stored_settings() {
   user_selected_tesla_GTW_packEnergy = settings.getUInt("GTWPACK", user_selected_tesla_GTW_packEnergy);
   user_selected_primo_gen24 = settings.getBool("PRIMOGEN24", false);
 
-  auto readIf = [&settings](const char* settingName) {
-    auto batt1If = (comm_interface)settings.getUInt(settingName, (int)comm_interface::CanNative);
-    switch (batt1If) {
-      case comm_interface::CanNative:
-        return CAN_Interface::CAN_NATIVE;
-      case comm_interface::CanFdNative:
-        return CAN_Interface::CANFD_NATIVE;
-      case comm_interface::CanAddonMcp2515:
-        return CAN_Interface::CAN_ADDON_MCP2515;
-      case comm_interface::CanFdAddonMcp2518:
-        return CAN_Interface::CANFD_ADDON_MCP2518;
-      case comm_interface::CanFdAddonMcp2518_2:
-        return CAN_Interface::CANFD_ADDON_MCP2518_2;
-      case comm_interface::RS485:
-      case comm_interface::Modbus:
-      case comm_interface::Highest:
-        return CAN_Interface::NO_CAN_INTERFACE;
+  // One-time re-encoding of the *COMM keys to packed descriptor identity.
+  if (settings.getUInt("IFSCHEMA", 0) < INTERFACE_SCHEMA_VERSION) {
+    InterfaceList list = esp32hal->interfaces();
+    static const char* const interface_keys[] = {"BATTCOMM", "BATT2COMM", "BATT3COMM",
+                                                 "INVCOMM",  "CHGCOMM",   "SHUNTCOMM"};
+    for (const char* key : interface_keys) {
+      if (settings.settingExists(key)) {
+        uint32_t packed = migrate_interface_config(list, settings.getUInt(key, 0));
+        settings.saveUInt(key, consolidate_modbus_config(list, packed));
+      }
     }
+    settings.saveUInt("IFSCHEMA", INTERFACE_SCHEMA_VERSION);
+  }
 
-    return CAN_Interface::CAN_NATIVE;  //Failed to determine, return CAN native
+  auto readIf = [&settings](const char* settingName) -> const InterfaceDescriptor* {
+    InterfaceList list = esp32hal->interfaces();
+    uint32_t packed = settings.getUInt(settingName, default_interface_config(list));
+    const InterfaceDescriptor* desc = resolve_interface_config(list, packed);
+    if (desc == nullptr) {
+      DEBUG_PRINTF("%s: stored interface 0x%X no longer matches the board table, using default.\n", settingName,
+                   packed);
+      desc = resolve_interface_config(list, default_interface_config(list));
+    }
+    return desc;
   };
 
   can_config.battery = readIf("BATTCOMM");
@@ -178,6 +184,9 @@ void init_stored_settings() {
   can_config.inverter = readIf("INVCOMM");
   can_config.charger = readIf("CHGCOMM");
   can_config.shunt = readIf("SHUNTCOMM");
+
+  datalayer.system.info.can_replay_interface =
+      default_interface_config(esp32hal->interfaces()) & INTERFACE_INDEX_MASK;
 
   equipment_stop_behavior = (STOP_BUTTON_BEHAVIOR)settings.getUInt("EQSTOP", (int)STOP_BUTTON_BEHAVIOR::NOT_CONNECTED);
   user_selected_second_battery = settings.getBool("DBLBTR", false);
@@ -208,17 +217,37 @@ void init_stored_settings() {
   remote_bms_reset = settings.getBool("REMBMSRESET", false);
   datalayer.system.info.CPU_measurement_enabled = settings.getBool("MEASURECPUTEMP", false);
   datalayer.system.info.CPU_temperature_calibration_offset = settings.getInt("CPUTEMPOFFSET", 0);
-#ifdef HW_LILYGO2CAN
-  user_selected_gpioopt1 = (GPIOOPT1)settings.getUInt("GPIOOPT1", 0);
-#endif
-  user_selected_gpioopt2 = (GPIOOPT2)settings.getUInt("GPIOOPT2", 0);
-  user_selected_gpioopt3 = (GPIOOPT3)settings.getUInt("GPIOOPT3", 0);
-  user_selected_gpioopt4 = (GPIOOPT4)settings.getUInt("GPIOOPT4", 0);
-#ifdef HW_STARK
-  user_selected_gpioopt5 = (GPIOOPT5)settings.getUInt("GPIOOPT5", 0);
-#endif
-#ifdef HW_WAVESHARE
-  user_selected_gpioopt6 = (GPIOOPT6)settings.getUInt("GPIOOPT6", 0);
+
+  if (esp32hal != nullptr) {
+    GpioOptionCatalog gpio_catalog = esp32hal->gpio_options();
+    for (size_t g = 0; g < gpio_catalog.group_count; g++) {
+      const GpioOptionGroup& group = gpio_catalog.groups[g];
+      const uint32_t stored = settings.getUInt(group.nvs_key, group.default_value);
+      // Only a hand-edited NVS can hold an unknown value; clamp it so an invalid
+      // choice lands on the default pin set, not whichever pins the raw uint hits.
+      const uint8_t applied = find_gpio_option_choice(group, stored) != nullptr ? (uint8_t)stored : group.default_value;
+      esp32hal->set_gpio_option_value(g, applied);
+    }
+  }
+
+#ifdef BOARD_HAS_LOAD_SWITCH
+  if (LoadSwitch* load_switch = esp32hal->load_switch()) {
+    for (uint8_t ch = 0; ch < kLoadSwitchConfigChannels; ch++) {
+      uint32_t role = settings.getUInt(load_switch_role_key(ch).c_str(), (uint32_t)LoadSwitchRole::Disabled);
+      if (role >= (uint32_t)LoadSwitchRole::Highest) {
+        role = (uint32_t)LoadSwitchRole::Disabled;
+      }
+      uint32_t duty = settings.getUInt(load_switch_duty_key(ch).c_str(), kLoadSwitchDutyMax);
+      if (duty > kLoadSwitchDutyMax) {
+        duty = kLoadSwitchDutyMax;
+      }
+      uint32_t divisor = settings.getUInt(load_switch_divisor_key(ch).c_str(), 0);
+      if (divisor >= kLoadSwitchDivisorCodes) {
+        divisor = 0;
+      }
+      load_switch->set_channel_config(ch, (LoadSwitchRole)role, (uint16_t)duty, (uint8_t)divisor);
+    }
+  }
 #endif
 
   precharge_control_enabled = settings.getBool("EXTPRECHARGE", false);
@@ -238,11 +267,14 @@ void init_stored_settings() {
   syslog_ip = settings.getString("SYSLOGIP").c_str();
   syslog_port = settings.getUInt("SYSLOGPORT", 514);
   syslog_facility = settings.getUInt("SYSLOGFAC", 1);
-  datalayer.battery.status.led_mode = (led_mode_enum)settings.getUInt("LEDMODE", false);
+  datalayer.battery.pack[0].status.led_mode = (led_mode_enum)settings.getUInt("LEDMODE", false);
 
   //Some early integrations need manually set allowed charge/discharge power
-  datalayer.battery.status.override_charge_power_W = settings.getUInt("CHGPOWER", 1000);
-  datalayer.battery.status.override_discharge_power_W = settings.getUInt("DCHGPOWER", 1000);
+  //All slots share the battery type, so the override applies to every pack
+  for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+    datalayer.battery_slot(slot).status.override_charge_power_W = settings.getUInt("CHGPOWER", 1000);
+    datalayer.battery_slot(slot).status.override_discharge_power_W = settings.getUInt("DCHGPOWER", 1000);
+  }
 
   // WIFI AP is enabled by default unless disabled in the settings
   wifiap_enabled = settings.getBool("WIFIAPENABLED", true);
@@ -332,7 +364,7 @@ void store_settings() {
   //  ATTENTION ! The maximum length for settings keys is 15 characters
   BatteryEmulatorSettingsStore settings(false);
 
-  settings.saveUInt("BATTERY_WH_MAX", datalayer.battery.info.total_capacity_Wh);
+  settings.saveUInt("BATTERY_WH_MAX", datalayer.battery.settings.user_set_total_capacity_Wh);
   settings.saveBool("USE_SCALED_SOC", datalayer.battery.settings.soc_scaling_active);
   settings.saveUInt("MAXPERCENTAGE", datalayer.battery.settings.max_percentage / 10);
   settings.saveInt("MINPERCENTAGE", datalayer.battery.settings.min_percentage / 10);
@@ -348,3 +380,15 @@ void store_settings() {
   settings.saveUInt("BYDAUTOCALDRFT2", datalayer_extended.bydAtto3_2.auto_calibrate_soc_drift_percent);
   settings.saveBool("BYDAUTOCALEN2", datalayer_extended.bydAtto3_2.auto_calibrate_soc_enabled);
 }
+
+#ifdef BOARD_HAS_INTERFACE_TERMINATION
+void apply_stored_interface_termination() {
+  BatteryEmulatorSettingsStore settings(true);
+  InterfaceList list = esp32hal->interfaces();
+  for (size_t i = 0; i < list.count; i++) {
+    if (esp32hal->supports_interface_termination(i)) {
+      esp32hal->set_interface_termination(i, settings.getBool(interface_termination_key(i).c_str(), false));
+    }
+  }
+}
+#endif
