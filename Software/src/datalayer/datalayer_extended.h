@@ -747,7 +747,7 @@ struct DATALAYER_INFO_TESLA {
   uint8_t battery_partNumber[12];    //stores raw HEX values for ASCII chars
   uint8_t PCS_partNumber[13];        //stores raw HEX values for ASCII chars
   uint8_t HVP_partNumber[13];        //stores raw HEX values for ASCII chars
-  char* battery_manufactureDate;
+  char battery_manufactureDate[11];  //"YYYY-MM-DD\0", empty until the serial number frame is parsed
 };
 
 struct DATALAYER_INFO_NISSAN_LEAF {
@@ -1019,10 +1019,6 @@ class DataLayerExtended {
     // All zero-initialized entries should go inside this union.
     // Double-battery repeats should go inside their own structs.
 
-    struct {
-      DATALAYER_INFO_BOLTAMPERA boltampera;
-      DATALAYER_INFO_BOLTAMPERA boltampera_2;
-    };
     DATALAYER_INFO_BMWPHEV bmwphev;
     DATALAYER_INFO_BMWIX bmwix;
     DATALAYER_INFO_CELLPOWER cellpower;
@@ -1031,16 +1027,8 @@ class DataLayerExtended {
     DATALAYER_INFO_ECMP stellantisECMP;
     DATALAYER_INFO_FORD_MACH_E fordMachE;
     DATALAYER_INFO_GEELY_GEOMETRY_C geometryC;
-    struct {
-      DATALAYER_INFO_KIAHYUNDAI64 KiaHyundai64;
-      DATALAYER_INFO_KIAHYUNDAI64 KiaHyundai64_2;
-    };
     DATALAYER_INFO_TESLA tesla;
-    struct {
-      DATALAYER_INFO_NISSAN_LEAF nissanleaf;
-      DATALAYER_INFO_NISSAN_LEAF nissanleaf_2;
-      DATALAYER_INFO_NISSAN_LEAF nissanleaf_3;
-    };
+    DATALAYER_INFO_NISSAN_LEAF nissanleaf;
     DATALAYER_INFO_MEB meb;
     DATALAYER_INFO_VOLVO_HYBRID VolvoHybrid;
     DATALAYER_INFO_ZOE zoe;
@@ -1055,7 +1043,7 @@ class DataLayerExtended {
   DATALAYER_INFO_ZOE_PH2 zoePH2;
 
   DataLayerExtended() {
-    memset(this, 0, sizeof(DataLayerExtended));
+    memset(static_cast<void*>(this), 0, sizeof(DataLayerExtended));
 
     // Non-zero defaults should be initialized here.
 

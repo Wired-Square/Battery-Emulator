@@ -62,7 +62,7 @@ struct DATALAYER_BATTERY_STATUS_TYPE {
   uint32_t remaining_capacity_Wh = 0;
   /** The remaining capacity reported to the inverter based on min percentage setting, in Watt-hours 
    * This value will either be scaled or not scaled depending on the value of
-   * battery.settings.soc_scaling_active
+   * datalayer.battery.settings.soc_scaling_active
    */
   uint32_t reported_remaining_capacity_Wh;
   /** Maximum allowed battery discharge power in Watts. Set by battery */
@@ -101,7 +101,7 @@ struct DATALAYER_BATTERY_STATUS_TYPE {
   uint16_t real_soc;
   /** The SOC reported to the inverter, in integer-percent x 100. 9550 = 95.50%.
    * This value will either be scaled or not scaled depending on the value of
-   * battery.settings.soc_scaling_active
+   * datalayer.battery.settings.soc_scaling_active
    */
   uint16_t reported_soc;
   /** A counter that increases incase a CAN CRC read error occurs */
@@ -153,7 +153,10 @@ struct DATALAYER_BATTERY_STATUS_TYPE {
   bool cell_balancing_status[MAX_AMOUNT_CELLS];
 };
 
-struct DATALAYER_BATTERY_SETTINGS_TYPE {
+/** Settings that describe the battery SYSTEM, not any one pack. One instance
+ * lives at datalayer.battery.settings; nothing here may be duplicated into
+ * per-pack state. */
+struct DATALAYER_BATTERY_SYSTEM_SETTINGS_TYPE {
 
   /** Last time a remote set command was received to enable timeout of settings */
   uint32_t remote_set_timestamp = 0;
@@ -165,15 +168,19 @@ struct DATALAYER_BATTERY_SETTINGS_TYPE {
   /* Emergency recovery charge max time & start timestamp */
   uint32_t recovery_charge_max_time_ms = 1800000;  //30min default, (30min*60sec*1000ms)
   uint32_t recovery_charge_start_time_ms = 0;      //For keeping track when recovery started
+  /** The user-configured pack capacity in Wh. Seeds each pack's live
+   * info.total_capacity_Wh, which BMS-capable drivers then overwrite with the
+   * pack's real capacity — this field keeps the user's intent. */
+  uint32_t user_set_total_capacity_Wh = 30000;
 
   /** Maximum percentage setting. Set this value to the highest real SOC
    * you want the inverter to be able to use. At this real SOC, the inverter
    * will "see" 100% Example 8000 = 80.0% */
   uint16_t max_percentage = 8000;
-  /** The user specified maximum allowed charge rate, in deciAmpere. 300 = 30.0 A, persisted to memory 
+  /** The user specified maximum allowed charge rate, in deciAmpere. 300 = 30.0 A, persisted to memory
    * Updates later on via Settings */
   uint16_t max_user_set_charge_dA = 300;
-  /** The user specified maximum allowed discharge rate, in deciAmpere. 300 = 30.0 A, persisted to memory 
+  /** The user specified maximum allowed discharge rate, in deciAmpere. 300 = 30.0 A, persisted to memory
    * Updates later on via Settings */
   uint16_t max_user_set_discharge_dA = 300;
   /** The remote specified maximum allowed charge rate, in deciAmpere. 300 = 30.0 A, NOT persisted to memory */
@@ -204,14 +211,14 @@ struct DATALAYER_BATTERY_SETTINGS_TYPE {
   /** Sofar CAN Battery ID (0-15) used to parallel multiple packs */
   uint8_t sofar_user_specified_battery_id = 0;
 
-  /** User is trying to recover charge a severely undercharged battery. Temporarily allow low power charging for 30 minutes and force ACTIVE mode 
+  /** User is trying to recover charge a severely undercharged battery. Temporarily allow low power charging for 30 minutes and force ACTIVE mode
    * Great caution must be taken while in this mode to avoid a battery fire, since we override any BMS value.
   */
   bool user_requests_forced_charging_recovery_mode = false;
   /** User specified discharge/charge voltages in use. Set to true to use user specified values */
   /** Some inverters like to see a specific target voltage for charge/discharge. Use these values to override automatic voltage limits*/
   bool user_set_voltage_limits_active = false;
-  /** SOC scaling setting. Increases battery life. 
+  /** SOC scaling setting. Increases battery life.
    * If true will rescale SOC between the configured min/max-percentage */
   bool soc_scaling_active = true;
   /** Parameters for keeping track of the limiting factor in the system */
@@ -221,6 +228,23 @@ struct DATALAYER_BATTERY_SETTINGS_TYPE {
   bool remote_settings_limit_charge = false;
   bool inverter_limits_discharge = false;
   bool inverter_limits_charge = false;
+};
+
+struct DATALAYER_BATTERY_SETTINGS_TYPE {
+
+  /* Forced balancing max time & start timestamp */
+  uint32_t balancing_max_time_ms = 3600000;  //1h default, (60min*60sec*1000ms)
+  uint32_t balancing_start_time_ms = 0;      //For keeping track when balancing started
+
+  /* Max cell voltage during forced balancing */
+  uint16_t balancing_max_cell_voltage_mV = 3650;
+  /* Max cell deviation allowed during forced balancing */
+  uint16_t balancing_max_deviation_cell_voltage_mV = 400;
+  /* Float max power during forced balancing */
+  uint16_t balancing_float_power_W = 1000;
+  /* Maximum voltage for entire battery pack during forced balancing */
+  uint16_t balancing_max_pack_voltage_dV = 3940;
+
   /** Tesla specific settings that are edited on the fly when manually forcing a balance charge for LFP chemistry */
   /* Bool for specifying if user has requested manual function */
   bool user_requests_balancing = false;
@@ -279,11 +303,6 @@ struct DATALAYER_SHUNT_TYPE {
   /** Average current from last 1s **/
   int32_t measured_avg1S_amperage_mA = 0;
 
-  /** measured voltage in deciVolts. 4200 = 420.0 V */
-  uint16_t measured_voltage_dV = 0;
-  /** measured amperage in deciAmperes. 300 = 30.0 A */
-  uint16_t measured_amperage_dA = 0;
-
   /** True if contactors are precharging state */
   bool precharging = false;
   /** True if the contactor controlled by battery-emulator is closed */
@@ -312,8 +331,9 @@ struct DATALAYER_SYSTEM_INFO_TYPE {
   /** ESP32 free heap amount, for displaying on webserver and for safeties */
   uint32_t CPU_free_heap = 0;
 
-  /** uint8_t, enumeration which CAN interface should be used for log playback */
-  uint8_t can_replay_interface = CAN_NATIVE;
+  /** uint8_t, board descriptor-table index of the CAN interface used for log
+   * playback; set to the native CAN index at settings load */
+  uint8_t can_replay_interface = 0;
 
   /** bool, determines if CAN messages should be logged for webserver */
   bool can_logging_active = false;
@@ -423,6 +443,25 @@ struct DATALAYER_SYSTEM_STATUS_TYPE {
   BMSResetState bms_reset_status = BMS_RESET_IDLE;
   /** The current system status, determined by which Events are active, usually pending between ACTIVE and FAULT, but there are more enums. Used to signal incase we have a critical fault active, or if we should proceed operating */
   system_status_enum system_status = ACTIVE;
+
+  /** Slot-indexed access to the per-battery contactor-permission flags.
+   * Slot 0 is the primary battery; out-of-range slots return the primary's flag. */
+  bool& slot_allows_contactor_closing(uint8_t slot) {
+    switch (slot) {
+      case 1:
+        return battery2_allowed_contactor_closing;
+      case 2:
+        return battery3_allowed_contactor_closing;
+      default:
+        return battery_allows_contactor_closing;
+    }
+  }
+
+  /** Slot-indexed access to the join-contactor engagement flags, valid for
+   * slots >= 1 only; slot 0's engagement is the multi-state contactors_engaged. */
+  bool& slot_contactors_engaged(uint8_t slot) {
+    return (slot == 2) ? contactors_battery3_engaged : contactors_battery2_engaged;
+  }
 };
 
 struct DATALAYER_SYSTEM_TYPE {
@@ -430,15 +469,29 @@ struct DATALAYER_SYSTEM_TYPE {
   DATALAYER_SYSTEM_STATUS_TYPE status;
 };
 
+struct DATALAYER_BATTERY_GROUP_TYPE {
+  DATALAYER_BATTERY_SYSTEM_SETTINGS_TYPE settings;
+  DATALAYER_BATTERY_TYPE pack[kMaxBatterySlots];
+  /** Consumer-facing view of all populated packs, composed once per values
+   * pass by update_reported_values(). Summable fields fold across packs;
+   * the rest mirror pack[0]. */
+  DATALAYER_BATTERY_TYPE combined;
+};
+
 class DataLayer {
  public:
-  DATALAYER_BATTERY_TYPE battery;
-  DATALAYER_BATTERY_TYPE battery2;
-  DATALAYER_BATTERY_TYPE battery3;
+  DATALAYER_BATTERY_GROUP_TYPE battery;
   DATALAYER_SHUNT_TYPE shunt;
   DATALAYER_CHARGER_TYPE charger;
   DATALAYER_SYSTEM_TYPE system;
+
+  /** Bounds-checked pack access; out-of-range slots return pack[0]. */
+  DATALAYER_BATTERY_TYPE& battery_slot(uint8_t slot) {
+    return battery.pack[(slot < kMaxBatterySlots) ? slot : 0];
+  }
 };
+
+static_assert(kMaxBatterySlots == 3, "slot accessors enumerate exactly three battery slots");
 
 extern DataLayer datalayer;
 

@@ -1,5 +1,6 @@
 #ifndef SYSTEM_SETTINGS_H_
 #define SYSTEM_SETTINGS_H_
+#include <stdint.h>
 /** TASKS
  * Higher number equals higher priority. Max 25 per core
  * 
@@ -37,6 +38,16 @@
  * Basically the length of the array used to hold individual cell voltages
 */
 #define MAX_AMOUNT_CELLS 192
+
+/** BATTERY SLOTS
+ *
+ * Parameter: kMaxBatterySlots
+ * Description:
+ * Number of battery slots the firmware can address (primary + extras).
+ * Slot state is allocated unconditionally, so every slot costs RAM
+ * whether or not the user enables it.
+*/
+inline constexpr uint8_t kMaxBatterySlots = 3;
 
 // AsyncTCP should only need a 4k stack (default is 16k)
 #define CONFIG_ASYNC_TCP_STACK_SIZE 4096

@@ -1,13 +1,21 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include <string>
+
 #include "../Software/src/battery/BATTERIES.h"
+#include "../Software/src/battery/battery_slots.h"
 #include "../Software/src/charger/CHARGERS.h"
 #include "../Software/src/datalayer/datalayer.h"
 #include "../Software/src/devboard/hal/hal.h"
 #include "../Software/src/devboard/safety/safety.h"
 #include "../Software/src/devboard/utils/events.h"
 #include "../Software/src/inverter/INVERTERS.h"
+
+// wifi.cpp is not linked host-side; the settings applier sets these live WiFi
+// credential globals, so the host build needs them.
+std::string ssid;
+std::string password;
 
 void RegisterCanLogTests(void);
 void RegisterStillAliveTests(void);
@@ -20,12 +28,10 @@ class DataLayerResetListener : public ::testing::EmptyTestEventListener {
 
     // Every instance holds pointers into the datalayer we just replaced, so
     // destroy them all.
-    delete battery;
-    battery = nullptr;
-    delete battery2;
-    battery2 = nullptr;
-    delete battery3;
-    battery3 = nullptr;
+    for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+      delete batteries[slot];
+      batteries[slot] = nullptr;
+    }
     delete charger;
     charger = nullptr;
     /* The inverter is the same kind of instance and was the one omission here.
