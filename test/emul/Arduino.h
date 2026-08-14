@@ -7,10 +7,12 @@
 #include <string.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #include "HardwareSerial.h"
 #include "Logging.h"
@@ -89,6 +91,13 @@ template <typename T>
 inline const T& max(const T& a, const T& b) {
   return (a > b) ? a : b;
 }
+struct GpioEvent {
+  enum Type { PinModeSet, DigitalWriteSet, LedcAttach, LedcWriteSet, LedcWriteTone } type;
+  uint8_t pin;
+  uint32_t value;
+};
+extern std::vector<GpioEvent> gpio_events;
+extern std::array<uint8_t, 256> gpio_levels;
 void pinMode(uint8_t pin, uint8_t mode);
 void digitalWrite(uint8_t pin, uint8_t val);
 int digitalRead(uint8_t pin);
@@ -142,6 +151,7 @@ int max(int a, int b);
 
 bool ledcAttachChannel(uint8_t pin, uint32_t freq, uint8_t resolution, int8_t channel);
 bool ledcWrite(uint8_t pin, uint32_t duty);
+uint32_t ledcWriteTone(uint8_t pin, uint32_t freq);
 
 class ESPClass {
  public:

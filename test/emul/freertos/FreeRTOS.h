@@ -18,6 +18,7 @@ BaseType_t xTaskCreatePinnedToCore(TaskFunction_t pxTaskCode, const char* const 
                                    const BaseType_t xCoreID);
 
 void vTaskDelete(TaskHandle_t xTaskToDelete);
+void vTaskDelay(const uint32_t xTicksToDelay);
 }
 
 #endif

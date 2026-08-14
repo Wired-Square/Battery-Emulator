@@ -1,30 +1,27 @@
-#include <vector>
-
 #include "../../Software/src/communication/Transmitter.h"
+#include "../../Software/src/communication/can/Mcp2515.h"
+#include "../../Software/src/communication/can/Mcp2517fd.h"
+#include "../../Software/src/communication/can/NativeTwai.h"
 #include "../../Software/src/communication/can/comm_can.h"
+#include "can_recorder.h"
 
-// Records every frame transmitted by the emulated CAN interface so unit tests
-// can assert what the firmware actually put on the wire (UDS requests, ISO-TP
-// flow control / consecutive frames, heartbeat frames, ...).
-std::vector<CAN_frame> g_emul_transmitted_frames;
+static std::vector<CAN_frame> g_recorded;
 
-void clear_transmitted_frames() {
-  g_emul_transmitted_frames.clear();
+std::vector<CAN_frame>& recorded_frames() {
+  return g_recorded;
 }
 
-const std::vector<CAN_frame>& get_transmitted_frames() {
-  return g_emul_transmitted_frames;
+void reset_recorded_frames() {
+  g_recorded.clear();
 }
 
-void transmit_can_frame_to_interface(const CAN_frame* tx_frame, CAN_Interface interface) {
-  if (tx_frame != nullptr) {
-    g_emul_transmitted_frames.push_back(*tx_frame);
-  }
+void transmit_can_frame_to_interface(const CAN_frame* tx_frame, const InterfaceDescriptor* interface) {
+  g_recorded.push_back(*tx_frame);
 }
 
-void register_can_receiver(CanReceiver* receiver, CAN_Interface interface, CAN_Speed speed) {}
+void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface, CAN_Speed speed) {}
 
-bool change_can_speed(CAN_Interface interface, CAN_Speed speed) {
+bool change_can_speed(const InterfaceDescriptor* interface, CAN_Speed speed) {
   return true;
 }
 
@@ -32,10 +29,44 @@ void stop_can() {}
 
 void restart_can() {}
 
-char const* getCANInterfaceName(CAN_Interface) {
-  return "Foobar";
-}
-
 void register_transmitter(Transmitter* transmitter) {}
 
-void dump_can_frame(CAN_frame& frame, CAN_Interface interface, frameDirection msgDir) {}
+void dump_can_frame(CAN_frame& frame, const InterfaceDescriptor* interface, frameDirection msgDir) {}
+
+void log_can_frame(const CAN_frame& frame, uint8_t log_id, frameDirection msgDir) {}
+
+bool NativeTwai::init_hw() {
+  return true;
+}
+void NativeTwai::receive() {}
+bool NativeTwai::transmit_frame(const CAN_frame&) {
+  return true;
+}
+bool NativeTwai::change_speed(CAN_Speed) {
+  return true;
+}
+void NativeTwai::stop() {}
+void NativeTwai::restart() {}
+
+bool Mcp2515::init_hw() {
+  return true;
+}
+void Mcp2515::receive() {}
+bool Mcp2515::transmit_frame(const CAN_frame&) {
+  return true;
+}
+bool Mcp2515::change_speed(CAN_Speed) {
+  return true;
+}
+void Mcp2515::stop() {}
+void Mcp2515::restart() {}
+
+bool Mcp2517fd::init_hw() {
+  return true;
+}
+void Mcp2517fd::receive() {}
+bool Mcp2517fd::transmit_frame(const CAN_frame&) {
+  return true;
+}
+void Mcp2517fd::stop() {}
+void Mcp2517fd::restart() {}

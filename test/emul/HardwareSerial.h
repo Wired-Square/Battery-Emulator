@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <cstddef>
+#include <deque>
 #include "Print.h"
 #include "Stream.h"
 
@@ -36,8 +37,16 @@ enum SerialConfig {
 class HardwareSerial : public Stream {
  public:
   // Implement ALL pure virtual functions from base classes
-  int available() override { return 0; }
-  int read() override { return -1; }
+  std::deque<uint8_t> rx_queue;
+  int available() override { return static_cast<int>(rx_queue.size()); }
+  int read() override {
+    if (rx_queue.empty()) {
+      return -1;
+    }
+    uint8_t byte = rx_queue.front();
+    rx_queue.pop_front();
+    return byte;
+  }
   int peek() override { return -1; }
   void flush() override {}                      // Implement flush from Print
   size_t write(uint8_t) override { return 0; }  // Implement write from Print
@@ -58,6 +67,7 @@ class HardwareSerial : public Stream {
   }
 };
 extern HardwareSerial Serial;
+extern HardwareSerial Serial0;
 extern HardwareSerial Serial1;
 extern HardwareSerial Serial2;
 
