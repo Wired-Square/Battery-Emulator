@@ -3,6 +3,8 @@
 
 #include "InverterProtocol.h"
 
+#include "../communication/can/comm_can.h"
+#include "../communication/rs485/Rs485Port.h"
 #include "../communication/rs485/comm_rs485.h"
 
 class Rs485InverterProtocol : public InverterProtocol, Rs485Receiver {
@@ -11,7 +13,14 @@ class Rs485InverterProtocol : public InverterProtocol, Rs485Receiver {
   InverterInterfaceType interface_type() { return InverterInterfaceType::Rs485; }
   virtual int baud_rate() = 0;
 
-  Rs485InverterProtocol() { register_receiver(this); }
+  Rs485InverterProtocol() : port_(resolve_rs485_port(can_config.inverter)) {
+    if (port_ != nullptr) {
+      port_->register_receiver(this);
+    }
+  }
+
+ protected:
+  Rs485Port* port_;
 };
 
 #endif

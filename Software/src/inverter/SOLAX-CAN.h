@@ -6,12 +6,10 @@
 
 class SolaxInverter : public CanInverterProtocol {
  public:
-  const char* name() override { return Name; }
   bool setup();
   void update_values();
   void transmit_can(unsigned long currentMillis);
   void map_can_frame_to_variable(CAN_frame rx_frame);
-  static constexpr const char* Name = "SolaX Triple Power LFP over CAN bus";
 
  private:
   static const uint8_t DEFAULT_NUMBER_OF_MODULES = 0;

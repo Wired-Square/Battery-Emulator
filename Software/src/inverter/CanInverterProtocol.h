@@ -11,7 +11,7 @@
 
 class CanInverterProtocol : public InverterProtocol, Transmitter, CanReceiver {
  public:
-  virtual const char* interface_name() { return getCANInterfaceName(can_interface); }
+  virtual const char* interface_name() { return can_interface != nullptr ? descriptor_name(*can_interface) : ""; }
   InverterInterfaceType interface_type() { return InverterInterfaceType::Can; }
 
   virtual void transmit_can(unsigned long currentMillis) = 0;
@@ -26,7 +26,7 @@ class CanInverterProtocol : public InverterProtocol, Transmitter, CanReceiver {
   void receive_can_frame(CAN_frame* frame) { map_can_frame_to_variable(*frame); }
 
  protected:
-  CAN_Interface can_interface;
+  const InterfaceDescriptor* can_interface;
 
   explicit CanInverterProtocol(CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS) {
     can_interface = can_config.inverter;
@@ -35,7 +35,7 @@ class CanInverterProtocol : public InverterProtocol, Transmitter, CanReceiver {
     logging.print("Requesting ");
     logging.print((uint32_t)speed);
     logging.print(" kbps for inverter CAN interface (");
-    logging.print(getCANInterfaceName(can_interface));
+    logging.print(can_interface != nullptr ? descriptor_name(*can_interface) : "");
     logging.println(")");
   }
 

@@ -5,16 +5,15 @@
 
 class KostalInverterProtocol : public Rs485InverterProtocol {
  public:
-  const char* name() override { return Name; }
   bool setup() override;
   void receive();
   void update_values();
-  static constexpr const char* Name = "BYD battery via Kostal RS485";
 
  private:
   int baud_rate() { return 57600; }
   void float2frame(uint8_t* arr, float value, uint8_t framepointer);
   bool check_kostal_frame_crc(int len);
+  void send_kostal(uint8_t* frame, int len);
   /* How many value updates we can go without inverter gets reported as missing
   e.g. value set to 12, 12*5sec=60seconds without comm before event is raised */
   const int RS485_HEALTHY = 12;

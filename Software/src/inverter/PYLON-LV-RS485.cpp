@@ -7,39 +7,39 @@
 #include "INVERTERS.h"
 
 bool PylonLV485InverterProtocol::setup() {
-  // Initialize Serial2 with proper pins from HAL
-  if (!rs485_begin(Name, Serial2, baud_rate(), SERIAL_8N1)) {
+  if (port_ == nullptr || !port_->begin(name(), baud_rate(), SERIAL_8N1)) {
     logging.println("Failed to initialize RS485 pins!");
     return false;
   }
-
-  //initialize safe defaults before we start receiving real data
-  datalayer.battery.status.voltage_dV = 480;  // 48.0V
 
   return true;
 }
 
 void PylonLV485InverterProtocol::update_values() {
+  // Until the battery reports a voltage, keep the members' safe defaults.
+  if (datalayer.battery.combined.status.voltage_dV == 0) {
+    return;
+  }
 
-  voltage_mv = datalayer.battery.status.voltage_dV * 100;
+  voltage_mv = datalayer.battery.combined.status.voltage_dV * 100;
 
-  current_ca = datalayer.battery.status.current_dA * 10;
+  current_ca = datalayer.battery.combined.status.reported_current_dA * 10;
 
-  soc_percent = datalayer.battery.status.reported_soc / 100;
+  soc_percent = datalayer.battery.combined.status.reported_soc / 100;
 
-  temp_deci_k = (datalayer.battery.status.temperature_max_dC + 273.15) * 10;
+  temp_deci_k = (datalayer.battery.combined.status.temperature_max_dC + 273.15) * 10;
 
-  max_cell_v = datalayer.battery.status.cell_max_voltage_mV;
+  max_cell_v = datalayer.battery.combined.status.cell_max_voltage_mV;
 
-  min_cell_v = datalayer.battery.status.cell_min_voltage_mV;
+  min_cell_v = datalayer.battery.combined.status.cell_min_voltage_mV;
 
-  max_charge_v_mv = datalayer.battery.info.max_design_voltage_dV * 100;
+  max_charge_v_mv = datalayer.battery.combined.info.max_design_voltage_dV * 100;
 
-  min_discharge_v_mv = datalayer.battery.info.min_design_voltage_dV * 100;
+  min_discharge_v_mv = datalayer.battery.combined.info.min_design_voltage_dV * 100;
 
-  max_charge_i_dA = datalayer.battery.status.max_charge_current_dA;
+  max_charge_i_dA = datalayer.battery.combined.status.max_charge_current_dA;
 
-  max_discharge_i_dA = datalayer.battery.status.max_discharge_current_dA;
+  max_discharge_i_dA = datalayer.battery.combined.status.max_discharge_current_dA;
 
   if (datalayer.system.status.system_status == FAULT) {
     //If we are in FAULT mode, do not allow charging or discharging
@@ -72,9 +72,13 @@ void PylonLV485InverterProtocol::update_values() {
 }
 
 void PylonLV485InverterProtocol::receive() {
+  if (port_ == nullptr) {
+    return;
+  }
+
   // Read incoming RS485 data
-  while (Serial2.available()) {
-    char byte = Serial2.read();
+  while (port_->serial().available()) {
+    char byte = port_->serial().read();
 
     if (byte == '~') {
       rx_buffer.clear();
@@ -117,6 +121,10 @@ void PylonLV485InverterProtocol::route_frame_request(const std::string& frame_st
 }
 
 void PylonLV485InverterProtocol::handle_command_61() {
+  if (port_ == nullptr) {
+    return;
+  }
+
   // Command 0x61: System Analog Value (26 values, 49 bytes total)
   // Uses safe defaults, overridden by datalayer values if available
 
@@ -135,14 +143,14 @@ void PylonLV485InverterProtocol::handle_command_61() {
   uint16_t min_bms_temp = temp_deci_k;
 
   // Override with real datalayer values if available
-  if (datalayer.battery.status.cell_max_voltage_mV > 0)
-    max_cell_v = datalayer.battery.status.cell_max_voltage_mV;
-  if (datalayer.battery.status.cell_min_voltage_mV > 0)
-    min_cell_v = datalayer.battery.status.cell_min_voltage_mV;
-  if (datalayer.battery.status.temperature_max_dC > -273)
-    max_cell_temp = (datalayer.battery.status.temperature_max_dC + 273.15) * 10;
-  if (datalayer.battery.status.temperature_min_dC > -273)
-    min_cell_temp = (datalayer.battery.status.temperature_min_dC + 273.15) * 10;
+  if (datalayer.battery.combined.status.cell_max_voltage_mV > 0)
+    max_cell_v = datalayer.battery.combined.status.cell_max_voltage_mV;
+  if (datalayer.battery.combined.status.cell_min_voltage_mV > 0)
+    min_cell_v = datalayer.battery.combined.status.cell_min_voltage_mV;
+  if (datalayer.battery.combined.status.temperature_max_dC > -273)
+    max_cell_temp = (datalayer.battery.combined.status.temperature_max_dC + 273.15) * 10;
+  if (datalayer.battery.combined.status.temperature_min_dC > -273)
+    min_cell_temp = (datalayer.battery.combined.status.temperature_min_dC + 273.15) * 10;
 
   // Log what we're sending for 0x61
   if (datalayer.system.info.web_logging_active) {
@@ -165,10 +173,14 @@ void PylonLV485InverterProtocol::handle_command_61() {
   std::string checksum = calculate_checksum(frame_data);
   std::string full_frame = "~" + frame_data + checksum + "\r";
 
-  Serial2.write((const uint8_t*)full_frame.c_str(), full_frame.length());
+  port_->serial().write((const uint8_t*)full_frame.c_str(), full_frame.length());
 }
 
 void PylonLV485InverterProtocol::handle_command_62() {
+  if (port_ == nullptr) {
+    return;
+  }
+
   // Command 0x62: System Alarm/Protection Status (4 bytes)
   // All bits start as 0 (no alarms/protections triggered)
 
@@ -191,7 +203,7 @@ void PylonLV485InverterProtocol::handle_command_62() {
   std::string checksum = calculate_checksum(frame_data);
   std::string full_frame = "~" + frame_data + checksum + "\r";
 
-  Serial2.write((const uint8_t*)full_frame.c_str(), full_frame.length());
+  port_->serial().write((const uint8_t*)full_frame.c_str(), full_frame.length());
 
   if (datalayer.system.info.web_logging_active) {
     // logging.printf("[FakePylontech485] Frame TX 0x62: %s\n", full_frame.c_str());
@@ -199,6 +211,10 @@ void PylonLV485InverterProtocol::handle_command_62() {
 }
 
 void PylonLV485InverterProtocol::handle_command_63() {
+  if (port_ == nullptr) {
+    return;
+  }
+
   // Command 0x63: Charge/Discharge Management (9 bytes)
   // Format: Max_Charge_Voltage(2) | Min_Discharge_Voltage(2) | Max_Charge_Current(2) | Max_Discharge_Current(2) | Status(1)
 
@@ -213,7 +229,7 @@ void PylonLV485InverterProtocol::handle_command_63() {
   std::string checksum = calculate_checksum(frame_data);
   std::string full_frame = "~" + frame_data + checksum + "\r";
 
-  Serial2.write((const uint8_t*)full_frame.c_str(), full_frame.length());
+  port_->serial().write((const uint8_t*)full_frame.c_str(), full_frame.length());
 
   last_cmd63_ms = millis();
 }

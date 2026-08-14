@@ -35,6 +35,20 @@ class SmaInverterBase : public CanInverterProtocol {
   }
 
  protected:
+  static constexpr uint8_t READY_STATE = 0x03;
+  static constexpr uint8_t STOP_STATE = 0x02;
+  static constexpr uint16_t THIRTY_MINUTES = 1200;
+
+  // current_dA is the per-model current source (reported_current_dA for H/HVS, current_dA for SBS).
+  void fill_measurement_frames(CAN_frame& f358, CAN_frame& f3D8, CAN_frame& f4D8, CAN_frame& f518, CAN_frame& f458,
+                               int16_t current_dA);
+
+  void check_enable_line();
+
+  int16_t temperature_average = 0;
+  uint16_t ampere_hours_remaining = 0;  // retained: recomputed only when voltage_dV > 10
+  uint16_t timeWithoutInverterAllowsContactorClosing = 0;
+
   void control_contactor_led() {
     if (contactorLedPin != GPIO_NUM_NC) {
       if (datalayer.system.status.inverter_allows_contactor_closing) {

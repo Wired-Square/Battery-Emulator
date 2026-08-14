@@ -7,14 +7,12 @@
 class BydModbusInverter : public ModbusInverterProtocol {
  public:
   BydModbusInverter() : ModbusInverterProtocol(21) {}
-  const char* name() override { return Name; }
   bool setup() override;
   void update_values();
-  static constexpr const char* Name = "BYD 11kWh HVM battery over Modbus RTU";
 
  private:
   void handle_static_data();
-  void verify_temperature();
+  int16_t fronius_capped_temperature_dC(int16_t temperature_dC);
   void verify_inverter_modbus();
   void handle_update_data_modbusp201_byd();
   void handle_update_data_modbusp301_byd();

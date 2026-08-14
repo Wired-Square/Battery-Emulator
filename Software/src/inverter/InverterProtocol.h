@@ -1,8 +1,6 @@
 #ifndef INVERTER_PROTOCOL_H
 #define INVERTER_PROTOCOL_H
 
-#include <vector>
-
 enum class InverterProtocolType {
   None = 0,
   AforeCan = 1,
@@ -33,7 +31,6 @@ enum class InverterProtocolType {
 
 extern InverterProtocolType user_selected_inverter_protocol;
 
-extern std::vector<InverterProtocolType> supported_inverter_protocols();
 extern const char* name_for_inverter_type(InverterProtocolType type);
 
 enum class InverterInterfaceType { Can, Rs485, Modbus };
@@ -41,7 +38,8 @@ enum class InverterInterfaceType { Can, Rs485, Modbus };
 // The abstract base class for all inverter protocols
 class InverterProtocol {
  public:
-  virtual const char* name() = 0;
+  const char* name() const { return name_; }
+  void set_name(const char* name) { name_ = name; }  // set by the registry factory
   virtual bool setup() { return true; }
   virtual const char* interface_name() = 0;
   virtual InverterInterfaceType interface_type() = 0;
@@ -61,6 +59,9 @@ class InverterProtocol {
 
   // Some inverters are slow to boot; suppress the CAN-missing fault during a startup grace window.
   virtual bool needs_can_startup_grace() { return false; }
+
+ private:
+  const char* name_ = nullptr;
 };
 
 extern InverterProtocol* inverter;

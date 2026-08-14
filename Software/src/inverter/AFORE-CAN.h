@@ -5,11 +5,9 @@
 
 class AforeCanInverter : public CanInverterProtocol {
  public:
-  const char* name() override { return Name; }
   void transmit_can(unsigned long currentMillis);
   void map_can_frame_to_variable(CAN_frame rx_frame);
   void update_values();
-  static constexpr const char* Name = "Afore battery over CAN";
 
  private:
   uint16_t cell_tweaked_max_voltage_mV = 3300;

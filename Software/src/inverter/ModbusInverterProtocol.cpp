@@ -1,15 +1,19 @@
 #include "ModbusInverterProtocol.h"
+#include "../communication/can/comm_can.h"
+#include "../communication/rs485/comm_rs485.h"
 #include "../devboard/utils/events.h"
 #include "../devboard/utils/logging.h"
 #include "../lib/eModbus-eModbus/ModbusServerRTU.h"
 
-// Fill up the RS485 DE pin with -1 if not available
-// The library ignores it if its defibe to -1
-#ifndef RS485_DE_PIN
-#define RS485_DE_PIN -1
-#endif
-// Creates a ModbusRTU server instance with 2000ms timeout
-ModbusInverterProtocol::ModbusInverterProtocol(int serverId) : MBserver(2000, RS485_DE_PIN) {
+namespace {
+// eModbus server timeout, and a negative RTS pin so RTUutils::RTSauto leaves
+// DE to the UART half-duplex driver.
+constexpr uint32_t MODBUS_TIMEOUT_MS = 2000;
+constexpr int MODBUS_RTS_UNUSED = -1;
+}  // namespace
+
+ModbusInverterProtocol::ModbusInverterProtocol(int serverId)
+    : MBserver(MODBUS_TIMEOUT_MS, MODBUS_RTS_UNUSED), port_(resolve_rs485_port(can_config.inverter)) {
   _serverId = serverId;
 
   MBserver.registerWorker(_serverId, READ_HOLD_REGISTER,
@@ -39,6 +43,9 @@ void ModbusInverterProtocol::notify_inverter_communication() {
 // Server function to handle FC 0x03
 ModbusMessage ModbusInverterProtocol::FC03(ModbusMessage request) {
   notify_inverter_communication();
+  if (port_ != nullptr) {
+    port_->mark_activity();
+  }
   ModbusMessage response;  // The Modbus message we are going to give back
   uint16_t addr = 0;       // Start address
   uint16_t words = 0;      // # of words requested
@@ -66,6 +73,9 @@ ModbusMessage ModbusInverterProtocol::FC03(ModbusMessage request) {
 // Server function to handle FC 0x06
 ModbusMessage ModbusInverterProtocol::FC06(ModbusMessage request) {
   notify_inverter_communication();
+  if (port_ != nullptr) {
+    port_->mark_activity();
+  }
   ModbusMessage response;  // The Modbus message we are going to give back
   uint16_t addr = 0;       // Start address
   uint16_t val = 0;        // value to write
@@ -91,6 +101,9 @@ ModbusMessage ModbusInverterProtocol::FC06(ModbusMessage request) {
 // Server function to handle FC 0x10 (FC16)
 ModbusMessage ModbusInverterProtocol::FC16(ModbusMessage request) {
   notify_inverter_communication();
+  if (port_ != nullptr) {
+    port_->mark_activity();
+  }
   ModbusMessage response;  // The Modbus message we are going to give back
   uint16_t addr = 0;       // Start address
   uint16_t words = 0;      // total words to write
@@ -130,6 +143,9 @@ ModbusMessage ModbusInverterProtocol::FC16(ModbusMessage request) {
 // Server function to handle FC 0x17 (FC23)
 ModbusMessage ModbusInverterProtocol::FC23(ModbusMessage request) {
   notify_inverter_communication();
+  if (port_ != nullptr) {
+    port_->mark_activity();
+  }
   ModbusMessage response;        // The Modbus message we are going to give back
   uint16_t read_addr = 0;        // Start address for read
   uint16_t read_words = 0;       // # of words requested for read

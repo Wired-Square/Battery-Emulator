@@ -5,11 +5,9 @@
 
 class VCUInverter : public CanInverterProtocol {
  public:
-  const char* name() override { return Name; }
   void update_values();
   void transmit_can(unsigned long currentMillis);
   void map_can_frame_to_variable(CAN_frame rx_frame);
-  static constexpr const char* Name = "VCU mode: Nissan LEAF battery";
 
  private:
   unsigned long previousMillis10ms = 0;

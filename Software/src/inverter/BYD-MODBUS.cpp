@@ -9,7 +9,6 @@
 // For modbus register definitions, see https://gitlab.com/pelle8/inverter_resources/-/blob/main/byd_registers_modbus_rtu.md
 
 void BydModbusInverter::update_values() {
-  verify_temperature();
   verify_inverter_modbus();
   handle_update_data_modbusp201_byd();
   handle_update_data_modbusp301_byd();
@@ -49,35 +48,35 @@ void BydModbusInverter::handle_static_data() {
 
 void BydModbusInverter::handle_update_data_modbusp201_byd() {
   mbPV[202] =
-      std::min(datalayer.battery.info.reported_total_capacity_Wh, static_cast<uint32_t>(57960u));  //Cap to 58kWh
+      std::min(datalayer.battery.combined.info.reported_total_capacity_Wh, static_cast<uint32_t>(57960u));  //Cap to 58kWh
   if (user_selected_primo_gen24) {
     mbPV[205] =  // Max Voltage, if higher Gen24 forces discharge, cap to 450.0V for Primo to avoid constant warning
-        std::min(datalayer.battery.info.max_design_voltage_dV, static_cast<uint16_t>(4500u));
+        std::min(datalayer.battery.combined.info.max_design_voltage_dV, static_cast<uint16_t>(4500u));
   } else {  //Symo inverter which can take up to 700V, so we can use the real max voltage of the battery without capping
-    mbPV[205] = datalayer.battery.info.max_design_voltage_dV;
+    mbPV[205] = datalayer.battery.combined.info.max_design_voltage_dV;
   }
-  mbPV[206] = (datalayer.battery.info.min_design_voltage_dV);  // Min Voltage, if lower Gen24 disables battery
+  mbPV[206] = (datalayer.battery.combined.info.min_design_voltage_dV);  // Min Voltage, if lower Gen24 disables battery
 }
 
 void BydModbusInverter::handle_update_data_modbusp301_byd() {
-  if (datalayer.battery.status.reported_current_dA == 0) {
+  if (datalayer.battery.combined.status.reported_current_dA == 0) {
     bms_char_dis_status = STANDBY;
-  } else if (datalayer.battery.status.reported_current_dA < 0) {  //Negative value = Discharging
+  } else if (datalayer.battery.combined.status.reported_current_dA < 0) {  //Negative value = Discharging
     bms_char_dis_status = DISCHARGING;
   } else {  //Positive value = Charging
     bms_char_dis_status = CHARGING;
   }
   // Convert max discharge Amp value to max Watt
   user_configured_max_discharge_W =
-      ((datalayer.battery.settings.max_user_set_discharge_dA * datalayer.battery.status.voltage_dV) / 100);
+      ((datalayer.battery.settings.max_user_set_discharge_dA * datalayer.battery.combined.status.voltage_dV) / 100);
   // Use the smaller value, battery reported value OR user configured value
-  max_discharge_W = std::min(datalayer.battery.status.max_discharge_power_W, user_configured_max_discharge_W);
+  max_discharge_W = std::min(datalayer.battery.combined.status.max_discharge_power_W, user_configured_max_discharge_W);
 
   // Convert max charge Amp value to max Watt
   user_configured_max_charge_W =
-      ((datalayer.battery.settings.max_user_set_charge_dA * datalayer.battery.status.voltage_dV) / 100);
+      ((datalayer.battery.settings.max_user_set_charge_dA * datalayer.battery.combined.status.voltage_dV) / 100);
   // Use the smaller value, battery reported value OR user configured value
-  max_charge_W = std::min(datalayer.battery.status.max_charge_power_W, user_configured_max_charge_W);
+  max_charge_W = std::min(datalayer.battery.combined.status.max_charge_power_W, user_configured_max_charge_W);
 
   // Don't advertise ACTIVE to the inverter until the DC bus is actually live. During the boot-gate +
   // precharge window the emulator drives contactors on its own schedule (BYD-Modbus has no inverter
@@ -91,68 +90,56 @@ void BydModbusInverter::handle_update_data_modbusp301_byd() {
 
   if (reported_status == ACTIVE) {
     // DC and Power values after contactors (outter values).
-    mbPV[308] = datalayer.battery.status.voltage_dV;  // DC outter voltage
-    mbPV[309] = static_cast<int16_t>(datalayer.battery.status.active_power_W);
+    mbPV[308] = datalayer.battery.combined.status.voltage_dV;  // DC outter voltage
+    mbPV[309] = static_cast<int16_t>(datalayer.battery.combined.status.active_power_W);
   } else {
     mbPV[308] = 0;
     mbPV[309] = 0;
   }
   mbPV[300] = reported_status;
   mbPV[302] = 128 + bms_char_dis_status;
-  if (datalayer.battery.status.reported_soc < 100) {
+  if (datalayer.battery.combined.status.reported_soc < 100) {
     mbPV[303] = 100;  //Force SOC to never go below 1% to avoid overdischarge
   } else {
-    mbPV[303] = datalayer.battery.status.reported_soc;
+    mbPV[303] = datalayer.battery.combined.status.reported_soc;
   }
-  if (battery2) {
-    mbPV[304] = std::min(datalayer.battery.info.total_capacity_Wh + datalayer.battery2.info.total_capacity_Wh,
-                         static_cast<uint32_t>(57960u));  //Cap to 58kWh
-  } else {
-    mbPV[304] = std::min(datalayer.battery.info.total_capacity_Wh, static_cast<uint32_t>(57960u));  //Cap to 58kWh
-  }
-  if (battery2) {
-    mbPV[305] = std::min(datalayer.battery.status.reported_remaining_capacity_Wh +
-                             datalayer.battery2.status.reported_remaining_capacity_Wh,
-                         static_cast<uint32_t>(57960u));  //Cap to 58kWh
-  } else {
-    mbPV[305] = std::min(datalayer.battery.status.reported_remaining_capacity_Wh,
-                         static_cast<uint32_t>(57960u));  //Cap to 58kWh
-  }
-  mbPV[306] = std::min(max_discharge_W, static_cast<uint32_t>(30000u));       //Cap to 30000 if exceeding
-  mbPV[307] = std::min(max_charge_W, static_cast<uint32_t>(30000u));          //Cap to 30000 if exceeding
-  mbPV[310] = datalayer.battery.status.voltage_dV;                            // DC inner voltage.
-  mbPV[311] = static_cast<int16_t>(datalayer.battery.status.active_power_W);  // DC inner power (before contactors).
-  mbPV[312] = datalayer.battery.status.temperature_min_dC;
-  mbPV[313] = datalayer.battery.status.temperature_max_dC;
+  mbPV[304] =
+      std::min(datalayer.battery.combined.info.reported_total_capacity_Wh, static_cast<uint32_t>(57960u));  //Cap to 58kWh
+  mbPV[305] = std::min(datalayer.battery.combined.status.reported_remaining_capacity_Wh,
+                       static_cast<uint32_t>(57960u));  //Cap to 58kWh
+  mbPV[306] = std::min(max_discharge_W, static_cast<uint32_t>(30000u));  //Cap to 30000 if exceeding
+  mbPV[307] = std::min(max_charge_W, static_cast<uint32_t>(30000u));     //Cap to 30000 if exceeding
+  mbPV[310] = datalayer.battery.combined.status.voltage_dV;  // DC inner voltage.
+  // DC inner power (before contactors).
+  mbPV[311] = static_cast<int16_t>(datalayer.battery.combined.status.active_power_W);
+  mbPV[312] = fronius_capped_temperature_dC(datalayer.battery.combined.status.temperature_min_dC);
+  mbPV[313] = fronius_capped_temperature_dC(datalayer.battery.combined.status.temperature_max_dC);
   // U64 for total charged/discharged Wh (314-317 and 318-321), but datalayer uses only 32-bit.
-  mbPV[316] = datalayer.battery.status.total_charged_battery_Wh >> 16;
-  mbPV[317] = datalayer.battery.status.total_charged_battery_Wh & 0xFFFF;
-  mbPV[320] = datalayer.battery.status.total_discharged_battery_Wh >> 16;
-  mbPV[321] = datalayer.battery.status.total_discharged_battery_Wh & 0xFFFF;
-  mbPV[322] = datalayer.battery.status.temperature_max_dC;  // Fill device temperature, perhaps BMS temperature.
-  mbPV[323] = datalayer.battery.status.soh_pptt;
+  mbPV[316] = datalayer.battery.combined.status.total_charged_battery_Wh >> 16;
+  mbPV[317] = datalayer.battery.combined.status.total_charged_battery_Wh & 0xFFFF;
+  mbPV[320] = datalayer.battery.combined.status.total_discharged_battery_Wh >> 16;
+  mbPV[321] = datalayer.battery.combined.status.total_discharged_battery_Wh & 0xFFFF;
+  // Fill device temperature, perhaps BMS temperature.
+  mbPV[322] = datalayer.battery.combined.status.temperature_max_dC;
+  mbPV[323] = datalayer.battery.combined.status.soh_pptt;
 }
 
-void BydModbusInverter::verify_temperature() {
-  if (datalayer.battery.info.chemistry == battery_chemistry_enum::LFP) {
-    return;  // Skip the following section
+/* Fronius inverters stop charge/discharge below -10°C, matching the original
+   BYD HVM LFP pack. EV packs with NCM/LMO/NCA chemistry are fine in that range,
+   so report -9.0°C to the inverter for readings between -9.0 and -20.0°C;
+   colder than -20.0°C passes through so the inverter genuinely stops. LFP packs
+   are never capped. Register-local: the measured values stay untouched. */
+static constexpr int16_t FRONIUS_COLD_CAP_DC = -90;
+static constexpr int16_t FRONIUS_COLD_CAP_FLOOR_DC = -200;
+
+int16_t BydModbusInverter::fronius_capped_temperature_dC(int16_t temperature_dC) {
+  if (datalayer.battery.combined.info.chemistry == battery_chemistry_enum::LFP) {
+    return temperature_dC;
   }
-  // This section checks if the battery temperature is negative, and incase it falls between -9.0 and -20.0C degrees
-  // The Fronius Gen24 (and other Fronius inverters also affected), will stop charge/discharge if the battery gets colder than -10°C.
-  // This is due to the original battery pack (BYD HVM), is a lithium iron phosphate battery, that cannot be charged in cold weather.
-  // When using EV packs with NCM/LMO/NCA chemsitry, this is not a problem, since these chemistries are OK for outdoor cold use.
-  if (datalayer.battery.status.temperature_min_dC < 0) {
-    if (datalayer.battery.status.temperature_min_dC < -90 &&
-        datalayer.battery.status.temperature_min_dC > -200) {  // Between -9.0 and -20.0C degrees
-      datalayer.battery.status.temperature_min_dC = -90;       //Cap value to -9.0C
-    }
+  if (temperature_dC < FRONIUS_COLD_CAP_DC && temperature_dC > FRONIUS_COLD_CAP_FLOOR_DC) {
+    return FRONIUS_COLD_CAP_DC;
   }
-  if (datalayer.battery.status.temperature_max_dC < 0) {  // Signed value on negative side
-    if (datalayer.battery.status.temperature_max_dC < -90 &&
-        datalayer.battery.status.temperature_max_dC > -200) {  // Between -9.0 and -20.0C degrees
-      datalayer.battery.status.temperature_max_dC = -90;       //Cap value to -9.0C
-    }
-  }
+  return temperature_dC;
 }
 
 void BydModbusInverter::verify_inverter_modbus() {
@@ -187,15 +174,18 @@ bool BydModbusInverter::setup(void) {  // Performs one time setup at startup ove
   // Init Static data to the RTU Modbus
   handle_static_data();
 
-  // Init Serial2 connected to the RTU Modbus
-  RTUutils::prepareHardwareSerial(Serial2);
+  if (port_ == nullptr) {
+    return false;
+  }
 
-  if (!rs485_begin(Name, Serial2, 9600, SERIAL_8N1)) {
+  RTUutils::prepareHardwareSerial(port_->serial());
+
+  if (!port_->begin(name(), 9600, SERIAL_8N1)) {
     return false;
   }
 
   // Start ModbusRTU background task
-  MBserver.begin(Serial2, esp32hal->MODBUS_CORE());
+  MBserver.begin(port_->serial(), esp32hal->MODBUS_CORE());
 
   return true;
 }

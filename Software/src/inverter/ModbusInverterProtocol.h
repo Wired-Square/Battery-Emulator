@@ -1,6 +1,7 @@
 #ifndef MODBUS_INVERTER_PROTOCOL_H
 #define MODBUS_INVERTER_PROTOCOL_H
 
+#include "../communication/rs485/Rs485Port.h"
 #include "../lib/eModbus-eModbus/ModbusMessage.h"
 #include "../lib/eModbus-eModbus/ModbusServerRTU.h"
 #include "InverterProtocol.h"
@@ -36,6 +37,7 @@ class ModbusInverterProtocol : public InverterProtocol {
   std::map<uint16_t, uint16_t> mbPV;
 
   ModbusServerRTU MBserver;
+  Rs485Port* port_;
 };
 
 #endif

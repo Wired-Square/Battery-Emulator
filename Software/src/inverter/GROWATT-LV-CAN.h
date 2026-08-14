@@ -5,11 +5,9 @@
 
 class GrowattLvInverter : public CanInverterProtocol {
  public:
-  const char* name() override { return Name; }
   void update_values();
   void transmit_can(unsigned long currentMillis);
   void map_can_frame_to_variable(CAN_frame rx_frame);
-  static constexpr const char* Name = "Growatt Low Voltage (48V) protocol via CAN";
 
  private:
   static const int VOLTAGE_OFFSET_DV = 40;  //Offset in deciVolt from max charge voltage and min discharge voltage

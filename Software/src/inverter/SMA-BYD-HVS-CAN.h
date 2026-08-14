@@ -8,19 +8,13 @@
 
 class SmaBydHvsInverter : public SmaInverterBase {
  public:
-  const char* name() override { return Name; }
   void update_values();
   void transmit_can(unsigned long currentMillis);
   void map_can_frame_to_variable(CAN_frame rx_frame);
-  static constexpr const char* Name = "SMA compatible BYD Battery-Box HVS";
 
   virtual bool controls_contactor() { return true; }
 
  private:
-  const int READY_STATE = 0x03;
-  const int STOP_STATE = 0x02;
-  const int THIRTY_MINUTES = 1200;
-
   void transmit_can_init();
   void pushFrame(CAN_frame* frame, std::function<void(void)> callback = []() {});
   void completePairing();
@@ -44,9 +38,6 @@ class SmaBydHvsInverter : public SmaInverterBase {
   int16_t inverter_current = 0;
   uint8_t pairing_events = 0;
   bool pairing_completed = false;
-  int16_t temperature_average = 0;
-  uint16_t ampere_hours_remaining = 0;
-  uint16_t timeWithoutInverterAllowsContactorClosing = 0;
 
   //Actual content messages
   CAN_frame SMA_358 = {.FD = false,
