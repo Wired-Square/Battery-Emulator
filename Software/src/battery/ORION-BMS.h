@@ -2,17 +2,19 @@
 #define ORION_BMS_H
 
 #include "../system_settings.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class OrionBms : public CanBattery {
  public:
+  OrionBms(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "DIY battery with Orion BMS (Victron setting)";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   uint16_t Maximum_Cell_Voltage = 3700;
   uint16_t Minimum_Cell_Voltage = 3700;
   uint16_t Pack_Health = 99;

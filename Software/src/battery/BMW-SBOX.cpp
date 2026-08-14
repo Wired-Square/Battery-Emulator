@@ -38,7 +38,6 @@ void BmwSbox::handle_incoming_can_frame(CAN_frame rx_frame) {
     ShuntLastSeen = currentTime;
     datalayer.shunt.measured_amperage_mA =
         ((rx_frame.data.u8[2] << 24) | (rx_frame.data.u8[1] << 16) | (rx_frame.data.u8[0] << 8)) / 256;
-    datalayer.shunt.measured_amperage_dA = datalayer.shunt.measured_amperage_mA / 100;
 
     /** Calculate 1S avg current **/
     if (LastAvgTime + 100 < currentTime) {

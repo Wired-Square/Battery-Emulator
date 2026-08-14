@@ -1,30 +1,160 @@
 #ifndef FORD_MACH_E_BATTERY_H
 #define FORD_MACH_E_BATTERY_H
 #include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
+#include "../devboard/webserver/advanced_api.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "FORD-MACH-E-BATTERY-HTML.h"
 
 class FordMachEBattery : public CanBattery {
  public:
+  FordMachEBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Ford Mustang Mach-E battery";
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
-  bool supports_read_DTC() { return true; }
-  void read_DTC() { UserRequestDTCreadout = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
+  const char* get_dtc_json_filename() override { return "ford_machE_dtc.json"; }
+
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
+    s.title = "Ford Mach-E Extra Information";
+
+    s.fields.push_back(kv("Polled allowed charge power",
+                          datalayer_extended.fordMachE.pid_hvb_max_charge_current == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_max_charge_current),
+                          "A"));
+    s.fields.push_back(kv("Average temperature",
+                          datalayer_extended.fordMachE.pid_hvb_temp == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_temp),
+                          "°C"));
+    s.fields.push_back(kv("High precision voltage",
+                          datalayer_extended.fordMachE.pid_hvb_voltage == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_voltage / 100.0, 2),
+                          "V"));
+    s.fields.push_back(kv("State of health",
+                          datalayer_extended.fordMachE.pid_hvb_soh == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_soh),
+                          "%"));
+    s.fields.push_back(kv("State of charge",
+                          datalayer_extended.fordMachE.pid_hvb_soc == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_soc / 1000.0, 3),
+                          "%"));
+
+    String contactor_status;
+    if (datalayer_extended.fordMachE.pid_hvb_contactor_status == 255) {
+      contactor_status = "N/A";
+    } else {
+      if (datalayer_extended.fordMachE.pid_hvb_contactor_status == 0xA00A8400) {
+        contactor_status = "Interlock Seated OK";
+      } else if (datalayer_extended.fordMachE.pid_hvb_contactor_status == 0) {
+        contactor_status = "Interlock Not evaluated yet";
+      } else if (datalayer_extended.fordMachE.pid_hvb_contactor_status == 0x00000400) {
+        contactor_status = "Interlock OPEN!";
+      } else {
+        contactor_status = "Unknown enumeration: " + String(datalayer_extended.fordMachE.pid_hvb_contactor_status);
+      }
+    }
+    s.fields.push_back(kv("Contactor status", contactor_status));
+
+    s.fields.push_back(kv("Pos contactor leak voltage",
+                          datalayer_extended.fordMachE.pid_hvb_contactor_positive_leak_voltage == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_contactor_positive_leak_voltage),
+                          "mV"));
+    s.fields.push_back(kv("Neg contactor leak voltage",
+                          datalayer_extended.fordMachE.pid_hvb_contactor_negative_leak_voltage == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_contactor_negative_leak_voltage),
+                          "mV"));
+    s.fields.push_back(kv("Pos contactor voltage",
+                          datalayer_extended.fordMachE.pid_hvb_contactor_positive_voltage == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_contactor_positive_voltage),
+                          "mV"));
+    s.fields.push_back(kv("Neg contactor voltage",
+                          datalayer_extended.fordMachE.pid_hvb_contactor_negative_voltage == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_contactor_negative_voltage),
+                          "mV"));
+    s.fields.push_back(kv("Pos contactor bus leak resistance",
+                          datalayer_extended.fordMachE.pid_hvb_contactor_positive_bus_leak_resistance == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_contactor_positive_bus_leak_resistance),
+                          "kOhm"));
+    s.fields.push_back(kv("Neg contactor bus leak resistance",
+                          datalayer_extended.fordMachE.pid_hvb_contactor_negative_bus_leak_resistance == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_contactor_negative_bus_leak_resistance),
+                          "kOhm"));
+    s.fields.push_back(kv("Overall contactor leak resistance",
+                          datalayer_extended.fordMachE.pid_hvb_contactor_overall_leak_resistance == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_contactor_overall_leak_resistance),
+                          "kOhm"));
+    s.fields.push_back(kv("Open contactor leak resistance",
+                          datalayer_extended.fordMachE.pid_hvb_contactor_open_leak_resistance == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_contactor_open_leak_resistance),
+                          "kOhm"));
+    s.fields.push_back(kv("Capacity",
+                          datalayer_extended.fordMachE.pid_battery_capacity_ah == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_battery_capacity_ah / 10.0, 1),
+                          "Ah"));
+
+    String rebalance_status;
+    if (datalayer_extended.fordMachE.pid_maintenance_rebalance_status == 255) {
+      rebalance_status = "N/A";
+    } else {
+      if (datalayer_extended.fordMachE.pid_maintenance_rebalance_status == 0x04) {
+        rebalance_status = "Initializing";
+      } else if (datalayer_extended.fordMachE.pid_maintenance_rebalance_status == 0x01) {
+        rebalance_status = "In progress";
+      } else if (datalayer_extended.fordMachE.pid_maintenance_rebalance_status == 0x02) {
+        rebalance_status = "Successfully";
+      } else if (datalayer_extended.fordMachE.pid_maintenance_rebalance_status == 0x03) {
+        rebalance_status = "Aborted pack fault";
+      } else {
+        rebalance_status = String(datalayer_extended.fordMachE.pid_maintenance_rebalance_status);
+      }
+    }
+    s.fields.push_back(kv("Maintenance rebalance status", rebalance_status));
+
+    s.fields.push_back(kv("Calendar age",
+                          datalayer_extended.fordMachE.pid_hvb_calendar_age_months == 255
+                              ? "N/A"
+                              : String(datalayer_extended.fordMachE.pid_hvb_calendar_age_months / 100.0, 0),
+                          "Months"));
+
+    status.sections.push_back(s);
+    status.sections.push_back(dtc_advanced_section(*this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType));
+    return status;
+  }
 
  private:
-  FordMachEHtmlRenderer renderer;
-  bool UserRequestDTCreset = false;
-  bool UserRequestDTCreadout = false;
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void reset_DTC() { UserRequestDTCreset = true; }
+  void read_DTC() { UserRequestDTCreadout = true; }
   // Parses a fully reassembled UDS ReadDTCInformation reply out of dtc_buffer into
   // datalayer_battery->dtc.
   void parseDTCResponse();
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+  };
+
+  bool UserRequestDTCreset = false;
+  bool UserRequestDTCreadout = false;
   //90S NMC
   static const int MAX_PACK_VOLTAGE_90S_DV = 3902;
   static const int MIN_PACK_VOLTAGE_90S_DV = 2490;
@@ -71,7 +201,9 @@ class FordMachEBattery : public CanBattery {
   uint16_t minimum_cellvoltage_mV = 3700;
   uint16_t charge_current_allowed = 0;
   uint16_t discharge_current_allowed = 0;
+
   uint16_t pid_reply = 0;
+
   uint16_t polled_12V = 12000;
 
   uint8_t display_soc = 0;

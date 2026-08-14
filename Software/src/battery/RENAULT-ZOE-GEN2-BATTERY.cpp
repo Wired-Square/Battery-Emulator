@@ -473,9 +473,9 @@ void RenaultZoeGen2Battery::transmit_can(unsigned long currentMillis) {
 }
 
 void RenaultZoeGen2Battery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
-  datalayer.system.status.battery_allows_contactor_closing = true;
+  if (allows_contactor_closing) {
+    *allows_contactor_closing = true;
+  }
   datalayer_battery->info.number_of_cells = 96;
   datalayer_battery->info.total_capacity_Wh = 52000;
   datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_DV;

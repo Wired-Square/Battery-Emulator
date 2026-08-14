@@ -1,19 +1,26 @@
 #ifndef TESLA_LEGACY_BATTERY_H
 #define TESLA_LEGACY_BATTERY_H
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class TeslaLegacyBattery : public CanBattery {
  public:
+  TeslaLegacyBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Tesla Model S/X 2012-2020";
 
-  bool supports_reset_BMS() { return true; }
-  void reset_BMS() { user_requests_bms_reset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void reset_BMS() { user_requests_bms_reset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_BMS, [this] { reset_BMS(); }),
+  };
+
   static const int MAX_PACK_VOLTAGE_60_DV = 5000;  //TODO, set
   static const int MIN_PACK_VOLTAGE_60_DV = 3000;
   static const int MAX_PACK_VOLTAGE_70_DV = 5000;  //TODO, set

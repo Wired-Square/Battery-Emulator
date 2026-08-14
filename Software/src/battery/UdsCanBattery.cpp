@@ -1,6 +1,8 @@
 #include "UdsCanBattery.h"
 
 #include <Arduino.h>
+#include <cstring>
+
 #include "../devboard/utils/events.h"
 #include "../devboard/utils/logging.h"
 
@@ -491,21 +493,21 @@ void UdsCanBattery::set_pid_scan_list(const uint16_t* pid_list, uint16_t length)
   this->pending_pid = 0;
 }
 
-String UdsBatteryHtmlRenderer::get_status_html() {
-  String ret = battery.get_uds_info_html();
-  if (battery.dtc != nullptr) {
-    ret += BatteryHtmlRenderer::render_dtc_section_html(*battery.dtc, battery.get_dtc_json_filename(),
-                                                        battery.get_dtc_standard_code_string());
+BatteryAdvancedStatus UdsCanBattery::get_advanced_status() {
+  BatteryAdvancedStatus status;
+
+  AdvancedSection uds_info;
+  append_uds_info_fields(uds_info.fields);
+  if (!uds_info.fields.empty()) {
+    status.sections.push_back(uds_info);
   }
-  return ret;
-}
 
-bool UdsCanBattery::supports_read_DTC() {
-  return true;
-}
+  if (dtc != nullptr) {
+    DtcCodeStyle style = get_dtc_standard_code_string() ? DtcCodeStyle::kStandard : DtcCodeStyle::kRawHex;
+    status.sections.push_back(dtc_advanced_section(*this, *dtc, style));
+  }
 
-bool UdsCanBattery::supports_reset_DTC() {
-  return true;
+  return status;
 }
 
 void UdsCanBattery::read_DTC() {

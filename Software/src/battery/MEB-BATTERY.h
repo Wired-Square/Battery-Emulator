@@ -1,10 +1,10 @@
 #ifndef MEB_BATTERY_H
 #define MEB_BATTERY_H
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "MEB-HTML.h"
-
-// Uncomment the next line to enable some debug logging.
-//#define MEB_DEBUG
+#include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
+#include "../devboard/webserver/advanced_api.h"
 
 // VW Group platform battery types.
 enum class VAGPlatform : uint8_t {
@@ -14,16 +14,9 @@ enum class VAGPlatform : uint8_t {
 
 class MebBattery : public CanBattery, public IsoTp {
  public:
-  // Use this constructor for the second battery.
-  MebBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_MEB* extended, CAN_Interface targetCan)
-      : CanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-    datalayer_meb = extended;
-    BMS_voltage = 0;
-  }
   // Use the default constructor to create the first or single battery.
-  MebBattery() {
-    datalayer_battery = &datalayer.battery;
+  MebBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
     datalayer_meb = &datalayer_extended.meb;
   }
 
@@ -31,26 +24,358 @@ class MebBattery : public CanBattery, public IsoTp {
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  bool supports_real_BMS_status() { return true; }
-  bool supports_insulation_resistance() { return true; }
   bool supports_charged_energy() { return true; }
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { datalayer_extended.meb.UserRequestDTCreset = true; }
-  bool supports_read_DTC() { return true; }
-  void read_DTC() { datalayer_extended.meb.UserRequestDTCreadout = true; }
-  bool supports_reset_crash() { return true; }
-  void reset_crash() { datalayer_extended.meb.UserRequestCrashReset = true; }
-  bool supports_reset_BMS() { return true; }
-  void reset_BMS() { datalayer_meb->UserRequestBMSReset = true; }
-  static constexpr const char* Name = "VW Group MEB platform via CAN-FD";
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
+  bool supports_insulation_resistance() override { return true; }
+
+  const char* get_dtc_json_filename() override { return "vag_meb_dtc.json"; }
+
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
+
+    s.fields.push_back(kv("Service disconnect switch", datalayer_extended.meb.SDSW ? "Missing!" : "OK"));
+    s.fields.push_back(kv("Pilotline", datalayer_extended.meb.pilotline ? "Open!" : "OK"));
+    s.fields.push_back(kv("Transportmode", datalayer_extended.meb.transportmode ? "Locked!" : "OK"));
+    s.fields.push_back(kv("Shutdown", datalayer_extended.meb.shutdown_active ? "Active!" : "No"));
+    s.fields.push_back(kv("Component protection", datalayer_extended.meb.componentprotection ? "Active!" : "No"));
+
+    String hvil;
+    switch (datalayer_extended.meb.HVIL) {
+      case 0:
+        hvil = "Init";
+        break;
+      case 1:
+        hvil = "Closed";
+        break;
+      case 2:
+        hvil = "Open!";
+        break;
+      case 3:
+        hvil = "Fault";
+        break;
+      default:
+        hvil = "?";
+    }
+    s.fields.push_back(kv("HVIL status", hvil));
+
+    String kl30c;
+    switch (datalayer_extended.meb.BMS_Kl30c_Status) {
+      case 0:
+        kl30c = "Init";
+        break;
+      case 1:
+        kl30c = "Closed";
+        break;
+      case 2:
+        kl30c = "Open!";
+        break;
+      case 3:
+        kl30c = "Fault";
+        break;
+      default:
+        kl30c = "?";
+    }
+    s.fields.push_back(kv("KL30C status", kl30c));
+
+    String bms_status;
+    switch (datalayer_battery->status.real_bms_status) {
+      case BMS_ACTIVE:
+        bms_status = "OK";
+        break;
+      case BMS_STANDBY:
+        bms_status = "Standby";
+        break;
+      case BMS_FAULT:
+        bms_status = "Fault";
+        break;
+      case BMS_DISCONNECTED:
+        bms_status = "Disconnected";
+        break;
+      default:
+        bms_status = "?";
+    }
+    s.fields.push_back(kv("BMS status", bms_status));
+
+    String bms_mode;
+    switch (datalayer_extended.meb.BMS_mode) {
+      case 0:
+        bms_mode = "HV inactive";
+        break;
+      case 1:
+        bms_mode = "HV active";
+        break;
+      case 2:
+        bms_mode = "Balancing";
+        break;
+      case 3:
+        bms_mode = "Extern charging";
+        break;
+      case 4:
+        bms_mode = "AC charging";
+        break;
+      case 5:
+        bms_mode = "Battery error";
+        break;
+      case 6:
+        bms_mode = "DC charging";
+        break;
+      case 7:
+        bms_mode = "Init";
+        break;
+      default:
+        bms_mode = "?";
+    }
+    s.fields.push_back(kv("BMS mode", bms_mode));
+
+    s.fields.push_back(kv("Charging", datalayer_extended.meb.charging_active ? "active" : "not active"));
+
+    String balancing;
+    switch (datalayer_extended.meb.balancing_active) {
+      case 0:
+        balancing = "init";
+        break;
+      case 1:
+        balancing = "active";
+        break;
+      case 2:
+        balancing = "inactive";
+        break;
+      default:
+        balancing = "?";
+    }
+    s.fields.push_back(kv("Balancing", balancing));
+
+    s.fields.push_back(
+        kv("Slow charging", datalayer_extended.meb.balancing_request ? "requested" : "not requested"));
+
+    String diagnostic;
+    switch (datalayer_extended.meb.battery_diagnostic) {
+      case 0:
+        diagnostic = "Init";
+        break;
+      case 1:
+        diagnostic = "Battery display";
+        break;
+      case 4:
+        diagnostic = "Battery display OK";
+        break;
+      case 6:
+        diagnostic = "Battery display check";
+        break;
+      case 7:
+        diagnostic = "Fault";
+        break;
+      default:
+        diagnostic = "?";
+    }
+    s.fields.push_back(kv("Diagnostic", diagnostic));
+
+    String hv_line;
+    switch (datalayer_extended.meb.status_HV_PTC_line) {
+      case 0:
+        hv_line = "Init";
+        break;
+      case 1:
+        hv_line = "No open HV line detected";
+        break;
+      case 2:
+        hv_line = "Open HV line";
+        break;
+      case 3:
+        hv_line = "Fault";
+        break;
+      default:
+        hv_line = "? " + String(datalayer_extended.meb.status_HV_PTC_line);
+    }
+    s.fields.push_back(kv("HV line status", hv_line));
+
+    s.fields.push_back(
+        kv("BMS fault performance", datalayer_extended.meb.BMS_fault_performance ? "Active!" : "Off"));
+    s.fields.push_back(kv("BMS fault emergency shutdown crash",
+                          datalayer_extended.meb.BMS_fault_emergency_shutdown_crash ? "Active!" : "Off"));
+    s.fields.push_back(kv("BMS error shutdown request",
+                          datalayer_extended.meb.BMS_error_shutdown_request ? "Active!" : "Inactive"));
+    s.fields.push_back(kv("BMS error shutdown", datalayer_extended.meb.BMS_error_shutdown ? "Active!" : "Off"));
+
+    String welded;
+    switch (datalayer_extended.meb.BMS_welded_contactors_status) {
+      case 0:
+        welded = "Init";
+        break;
+      case 1:
+        welded = "No contactor welded";
+        break;
+      case 2:
+        welded = "At least 1 contactor welded";
+        break;
+      case 3:
+        welded = "Protection status detection error";
+        break;
+      default:
+        welded = "?";
+    }
+    s.fields.push_back(kv("Welded contactors", welded));
+
+    String warning_support;
+    switch (datalayer_extended.meb.warning_support) {
+      case 0:
+        warning_support = "OK";
+        break;
+      case 1:
+        warning_support = "Not OK";
+        break;
+      case 6:
+        warning_support = "Init";
+        break;
+      case 7:
+        warning_support = "Fault";
+        break;
+      default:
+        warning_support = "?";
+    }
+    s.fields.push_back(kv("Warning support", warning_support));
+
+    String intermediate_voltage_status;
+    switch (datalayer_extended.meb.BMS_status_voltage_free) {
+      case 0:
+        intermediate_voltage_status = "Init";
+        break;
+      case 1:
+        intermediate_voltage_status = "BMS interm circuit voltage free (U<20V)";
+        break;
+      case 2:
+        intermediate_voltage_status = "BMS interm circuit not voltage free (U >= 25V)";
+        break;
+      case 3:
+        intermediate_voltage_status = "Error";
+        break;
+      default:
+        intermediate_voltage_status = "?";
+    }
+    s.fields.push_back(
+        kv("Intermediate voltage", String(datalayer_extended.meb.BMS_voltage_intermediate_dV / 10.0f, 1), "V"));
+    s.fields.push_back(kv("Intermediate voltage status", intermediate_voltage_status));
+
+    String bms_error_status;
+    switch (datalayer_extended.meb.BMS_error_status) {
+      case 0:
+        bms_error_status = "Component IO";
+        break;
+      case 1:
+        bms_error_status = "Iso Error 1";
+        break;
+      case 2:
+        bms_error_status = "Iso Error 2";
+        break;
+      case 3:
+        bms_error_status = "Interlock";
+        break;
+      case 4:
+        bms_error_status = "SD";
+        break;
+      case 5:
+        bms_error_status = "Performance red";
+        break;
+      case 6:
+        bms_error_status = "No component function";
+        break;
+      case 7:
+        bms_error_status = "Init";
+        break;
+      default:
+        bms_error_status = "?";
+    }
+    s.fields.push_back(kv("BMS error status", bms_error_status));
+
+    s.fields.push_back(kv("BMS voltage", String(datalayer_extended.meb.BMS_voltage_dV / 10.0f, 1)));
+    s.fields.push_back(kv("OBD MIL", datalayer_extended.meb.BMS_OBD_MIL ? "ON!" : "Off"));
+    s.fields.push_back(kv("Red error lamp", datalayer_extended.meb.BMS_error_lamp_req ? "ON!" : "Off"));
+    s.fields.push_back(kv("Yellow warning lamp", datalayer_extended.meb.BMS_warning_lamp_req ? "ON!" : "Off"));
+    s.fields.push_back(kv("Isolation resistance", String(datalayer_extended.meb.isolation_resistance), "kOhm"));
+    s.fields.push_back(kv("Battery heating", datalayer_extended.meb.battery_heating ? "Active!" : "Off"));
+
+    const char* rt_enum[] = {"No", "Error level 1", "Error level 2", "Error level 3"};
+    s.fields.push_back(kv("Overcurrent", rt_enum[datalayer_extended.meb.rt_overcurrent & 0x03]));
+    s.fields.push_back(kv("CAN fault", rt_enum[datalayer_extended.meb.rt_CAN_fault & 0x03]));
+    s.fields.push_back(kv("Overcharged", rt_enum[datalayer_extended.meb.rt_overcharge & 0x03]));
+    s.fields.push_back(kv("SOC too high", rt_enum[datalayer_extended.meb.rt_SOC_high & 0x03]));
+    s.fields.push_back(kv("SOC too low", rt_enum[datalayer_extended.meb.rt_SOC_low & 0x03]));
+    s.fields.push_back(kv("SOC jumping", rt_enum[datalayer_extended.meb.rt_SOC_jumping & 0x03]));
+    s.fields.push_back(kv("Temp difference", rt_enum[datalayer_extended.meb.rt_temp_difference & 0x03]));
+    s.fields.push_back(kv("Cell overtemp", rt_enum[datalayer_extended.meb.rt_cell_overtemp & 0x03]));
+    s.fields.push_back(kv("Cell undertemp", rt_enum[datalayer_extended.meb.rt_cell_undertemp & 0x03]));
+    s.fields.push_back(kv("Battery overvoltage", rt_enum[datalayer_extended.meb.rt_battery_overvolt & 0x03]));
+    s.fields.push_back(kv("Battery undervoltage", rt_enum[datalayer_extended.meb.rt_battery_undervol & 0x03]));
+    s.fields.push_back(kv("Cell overvoltage", rt_enum[datalayer_extended.meb.rt_cell_overvolt & 0x03]));
+    s.fields.push_back(kv("Cell undervoltage", rt_enum[datalayer_extended.meb.rt_cell_undervol & 0x03]));
+    s.fields.push_back(kv("Cell imbalance", rt_enum[datalayer_extended.meb.rt_cell_imbalance & 0x03]));
+    s.fields.push_back(kv("Battery unathorized", rt_enum[datalayer_extended.meb.rt_battery_unathorized & 0x03]));
+
+    if (datalayer_extended.meb.battery_temperature_dC == 875) {  //Raw value 255
+      s.fields.push_back(kv("Battery temperature", "ERROR"));
+    } else if (datalayer_extended.meb.battery_temperature_dC == 870) {  //Raw value 254
+      s.fields.push_back(kv("Battery temperature", "INIT"));
+    } else {
+      s.fields.push_back(
+          kv("Battery temperature", String(datalayer_extended.meb.battery_temperature_dC / 10.f, 1), "°C"));
+    }
+
+    for (int i = 0; i < 3; i++) {
+      String points;
+      for (int j = 0; j < 6; j++) {
+        if (j > 0) {
+          points += " ";
+        }
+        points += String(datalayer_extended.meb.temp_points[i * 6 + j], 1);
+      }
+      s.fields.push_back(kv("Temperature points " + String(i * 6 + 1) + "-" + String(i * 6 + 6), points, "°C"));
+    }
+
+    bool temps_done = false;
+    for (int i = 0; i < 7 && !temps_done; i++) {
+      String cell_temps;
+      for (int j = 0; j < 8; j++) {
+        if (datalayer_extended.meb.celltemperature_dC[i * 8 + j] == 865) {
+          temps_done = true;
+          break;
+        } else {
+          if (j > 0) {
+            cell_temps += " ";
+          }
+          cell_temps += String(datalayer_extended.meb.celltemperature_dC[i * 8 + j] / 10.f, 1);
+        }
+      }
+      s.fields.push_back(kv("Cell temperatures " + String(i * 8 + 1) + "-" + String(i * 8 + 8), cell_temps, "°C"));
+    }
+
+    s.fields.push_back(
+        kv("Total charged", String(datalayer_battery->status.total_charged_battery_Wh / 1000.0, 1), "kWh"));
+    s.fields.push_back(
+        kv("Total discharged", String(datalayer_battery->status.total_discharged_battery_Wh / 1000.0, 1), "kWh"));
+
+    status.sections.push_back(s);
+    status.sections.push_back(dtc_advanced_section(*this, datalayer_battery->dtc, DtcCodeStyle::kRawHex));
+    return status;
+  }
 
  protected:
-  /* calculate CRC for some CAN frames */
-  uint8_t vw_crc_calc(const uint8_t* inputBytes, uint8_t length, uint32_t msg_id);
+  void reset_DTC() { datalayer_extended.meb.UserRequestDTCreset = true; }
+  void read_DTC() { datalayer_extended.meb.UserRequestDTCreadout = true; }
+  void reset_crash() { datalayer_extended.meb.UserRequestCrashReset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+      command(CMD_RESET_CRASH, [this] { reset_crash(); }),
+  };
+
+  /* validate crc for some CAN frames */
+  uint8_t vw_crc_calc(const uint8_t* inputBytes, uint8_t length, uint32_t address);
   /* send a UDS ReadDataByIdentifier request for did via ISO-TP */
-  void uds_read_data_by_id(const uint16_t did, unsigned long currentMillis);
+  void uds_read_data_by_id(uint16_t did, unsigned long currentMillis);
   /* handle a UDS response assembled by the ISO-TP layer */
   void uds_response_handler(const uint8_t* data, int len, enum isotp_tatype type);
   /* drive basic settings state machine — called every transmit_can() tick */
@@ -61,7 +386,6 @@ class MebBattery : public CanBattery, public IsoTp {
   void on_isotp_can_tx(uint32_t can_id, const uint8_t* can_data, uint8_t can_dlc) override;
   /* IsoTp override: process an assembled ISO-TP message */
   void on_isotp_rx_complete(const uint8_t* data, int len, isotp_tatype tatype) override;
-  MebHtmlRenderer renderer;
 
   DATALAYER_BATTERY_TYPE* datalayer_battery;
   DATALAYER_INFO_MEB* datalayer_meb;
@@ -214,7 +538,6 @@ class MebBattery : public CanBattery, public IsoTp {
   static const int PID_TEMP_POINT_16 = 0x1EBD;
   static const int PID_TEMP_POINT_17 = 0x1EBE;
   static const int PID_TEMP_POINT_18 = 0x1EBF;
-  static const int ROUTINE_ID_DTC_DELETE_TRIGGER = 0x0302;
 
   /* Define CAN ID messages */
   static const int OBD_Hybrid_01_Req = 0x18DA05F1;
@@ -308,11 +631,16 @@ class MebBattery : public CanBattery, public IsoTp {
   uint8_t BMS_11_counter = 0;
   uint8_t BMS_11_CRC = 0;
 
+  uint32_t poll_pid = PID_CELLVOLTAGE_CELL_85;  // We start here to quickly determine the cell size of the pack.
+  bool nof_cells_determined = false;
+  uint32_t pid_reply = 0;
+
   // ISO-TP / UDS request serialization. Only one UDS transaction (PID poll, DTC read) is
   // outstanding at a time; the next request waits until a response arrives or the timeout expires.
-  static constexpr unsigned long UDS_REQUEST_TIMEOUT_MS = 1000;
-  // time between the routine start response and the routine stop request.
+  static const int ROUTINE_ID_DTC_DELETE_TRIGGER = 0x0302;
   static constexpr unsigned long BASIC_SETTINGS_ROUTINE_STOP_DELAY_MS = 3000;
+  static const int MAX_DTC_COUNT = 32;  // matches dtc_codes[] size in DATALAYER_INFO_MEB
+  static constexpr unsigned long UDS_REQUEST_TIMEOUT_MS = 1000;
   bool uds_request_pending = false;
   unsigned long uds_request_timestamp = 0;
 
@@ -351,9 +679,6 @@ class MebBattery : public CanBattery, public IsoTp {
   static constexpr unsigned long BMS_RESET_SLEEP_MS = 5000;             // bus-quiet wait before restart
   static constexpr uint32_t BMS_CAN_ERR_IGNORE_MS = 2000;               // ignore CAN errors while BMS wakes after reset
 
-  uint32_t poll_pid = PID_CELLVOLTAGE_CELL_85;  // We start here to quickly determine the cell size of the pack.
-  bool nof_cells_determined = false;
-  uint32_t pid_reply = 0;
   uint16_t battery_soc_polled = 0;
   uint16_t battery_soh_polled = 0;
   uint16_t battery_voltage_polled = 1480;
@@ -649,13 +974,11 @@ class MebBattery : public CanBattery, public IsoTp {
                               .DLC = 8,
                               .ID = Motor_14,  // CRC, otherwise content
                               .data = {0x57, 0x0D, 0x00, 0x00, 0x00, 0x02, 0x04, 0x40}};
-  static constexpr CAN_frame HVLM_13_frame = {
-      .FD = true,  //HVLM_13
-      .ext_ID = false,
-      .DLC = 32,
-      .ID = HVLM_13,
-      .data = {0x00, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0xFD, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF5, 0x00,
-               0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3F, 0x07, 0x00}};
+  CAN_frame HVLM_13_frame = {.FD = true,  //HVLM_13
+                             .ext_ID = false,
+                             .DLC = 8,
+                             .ID = HVLM_13,  // content still TODO
+                             .data = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
   CAN_frame HVLM_14_frame = {.FD = true,  //HVLM_14
                              .ext_ID = false,
                              .DLC = 8,
@@ -678,6 +1001,7 @@ class MebBattery : public CanBattery, public IsoTp {
                                                .DLC = 8,
                                                .ID = Kombi_02,  // content
                                                .data = {0xFE, 0xFF, 0xEF, 0xFF, 0x3F, 0x1C, 0x02, 0x94}};
+
   CAN_frame Motor_EV_01_frame = {.FD = true,
                                  .ext_ID = false,
                                  .DLC = 8,
@@ -689,11 +1013,10 @@ class MebBattery : public CanBattery, public IsoTp {
 // MQB Evo shares all of the MEB CAN handling; only the one-time setup differs.
 class MqbEvoBattery : public MebBattery {
  public:
-  MqbEvoBattery() = default;
-  MqbEvoBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_MEB* extended, CAN_Interface targetCan)
-      : MebBattery(datalayer_ptr, extended, targetCan) {}
+  MqbEvoBattery(const BatterySlotContext& ctx) : MebBattery(ctx) {}
   static constexpr const char* Name = "VW Group MQB Evo 2024+ via CAN-FD";
   void setup(void) override;
+  const char* get_dtc_json_filename() override { return "vag_mqb_dtc.json"; }
 };
 
 #endif

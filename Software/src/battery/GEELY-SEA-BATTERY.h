@@ -1,34 +1,76 @@
 #ifndef GEELY_SEA_BATTERY_H
 #define GEELY_SEA_BATTERY_H
 
+#include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "GEELY-SEA-HTML.h"
 
 class GeelySeaBattery : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }
+  GeelySeaBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Volvo/Zeekr/Geely SEA battery";
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { datalayer_extended.GeelySEA.UserRequestDTCreset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  bool supports_read_DTC() { return true; }
-  void read_DTC() { datalayer_extended.GeelySEA.UserRequestDTCreadout = true; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
 
-  bool supports_reset_BECM() { return true; }
-  void reset_BECM() { datalayer_extended.GeelySEA.UserRequestBECMecuReset = true; }
+    s.fields.push_back(kv("BECM reported number of DTCs", String(datalayer_extended.GeelySEA.DTCcount)));
+    s.fields.push_back(kv("Inhibition status (crash)", String(datalayer_extended.GeelySEA.CrashStatus)));
+    s.fields.push_back(kv("BECM reported SOC", String(datalayer_extended.GeelySEA.soc_bms / 100.0), "%"));
+    s.fields.push_back(kv("BECM reported SOH", String(datalayer_extended.GeelySEA.soh_bms / 100.0), "%"));
+    s.fields.push_back(kv("HV voltage", String(datalayer_extended.GeelySEA.BECMBatteryVoltage / 100.0), "V"));
+    s.fields.push_back(kv("Highest cell voltage", String(datalayer_extended.GeelySEA.CellVoltHighest / 1000.00), "V"));
+    s.fields.push_back(kv("Lowest cell voltage", String(datalayer_extended.GeelySEA.CellVoltLowest / 1000.00), "V"));
+    s.fields.push_back(kv("BECM supply voltage", String(datalayer_extended.GeelySEA.BECMsupplyVoltage / 1000.0), "V"));
+    s.fields.push_back(kv("Cell count", String(datalayer_battery->info.number_of_cells)));
+    s.fields.push_back(
+        kv("Highest cell temp", String((datalayer_extended.GeelySEA.CellTempHighest / 100.0) - 50.0), "ºC"));
+    s.fields.push_back(
+        kv("Average cell temp", String((datalayer_extended.GeelySEA.CellTempAverage / 100.0) - 50.0), "ºC"));
+    s.fields.push_back(
+        kv("Lowest cell temp", String((datalayer_extended.GeelySEA.CellTempLowest / 100.0) - 50.0), "ºC"));
 
-  bool supports_reset_crash() { return true; }
-  void reset_crash() { datalayer_extended.GeelySEA.UserRequestCrashReset = true; }
+    s.fields.push_back(kv("HVIL Circuit 1 (M1+M2+FC connectors) status",
+                          (datalayer_extended.GeelySEA.Interlock & 0x80) == 0x80 ? "Open" : "Closed"));
+    s.fields.push_back(kv("HVIL Circuit 2 (LV connector pin 9-10) status",
+                          (datalayer_extended.GeelySEA.Interlock & 0x40) == 0x40 ? "Open" : "Closed"));
+    s.fields.push_back(kv("HVIL Circuit 3 (LV connector pin 8-12) status",
+                          (datalayer_extended.GeelySEA.Interlock & 0x04) == 0x04 ? "Open" : "Closed"));
+    s.fields.push_back(kv("Unknow Contactor Status 1 (Negative FC?)",
+                          (datalayer_extended.GeelySEA.Interlock & 0x01) == 0x01 ? "Open" : "Closed"));
+    s.fields.push_back(kv("Unknown Contactor Status 2 (Positive FC?)",
+                          (datalayer_extended.GeelySEA.Interlock & 0x02) == 0x02 ? "Open" : "Closed"));
+    s.fields.push_back(
+        kv("Negative Contactor Status", (datalayer_extended.GeelySEA.Interlock & 0x08) == 0x08 ? "Open" : "Closed"));
+    s.fields.push_back(
+        kv("Precharge Contactor Status", (datalayer_extended.GeelySEA.Interlock & 0x10) == 0x10 ? "Open" : "Closed"));
+    s.fields.push_back(
+        kv("Positive Contactor Status", (datalayer_extended.GeelySEA.Interlock & 0x20) == 0x20 ? "Open" : "Closed"));
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+    status.sections.push_back(s);
+    return status;
+  }
 
  private:
-  GeelySeaHtmlRenderer renderer;
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void reset_DTC() { datalayer_extended.GeelySEA.UserRequestDTCreset = true; }
+  void read_DTC() { datalayer_extended.GeelySEA.UserRequestDTCreadout = true; }
+  void reset_BECM() { datalayer_extended.GeelySEA.UserRequestBECMecuReset = true; }
+  void reset_crash() { datalayer_extended.GeelySEA.UserRequestCrashReset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+      command(CMD_RESET_CRASH, [this] { reset_crash(); }),
+      command(CMD_RESET_BECM, [this] { reset_BECM(); }),
+  };
 
   void readDiagData();
 

@@ -1,41 +1,287 @@
 #ifndef CMP_SMART_CAR_BATTERY_H
 #define CMP_SMART_CAR_BATTERY_H
+#include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
 #include "../devboard/hal/hal.h"
-#include "CMP-SMART-CAR-BATTERY-HTML.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
+
+inline const char* getContactorStates(int index) {
+  switch (index) {
+    case 0:
+      return "Open";
+    case 1:
+      return "Closed";
+    case 2:
+      return "STUCK Open!";
+    case 3:
+      return "STUCK Closed!";
+    default:
+      return "";
+  }
+}
 
 class CmpSmartCarBattery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  CmpSmartCarBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_CMPSMART* extended, CAN_Interface targetCan)
-      : CanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-    datalayer_cmpsmart = extended;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  CmpSmartCarBattery() {
-    datalayer_battery = &datalayer.battery;
-    datalayer_cmpsmart = &datalayer_extended.stellantisCMPsmart;
+  CmpSmartCarBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    datalayer_cmpsmart = ctx.is_primary() ? &datalayer_extended.stellantisCMPsmart : nullptr;
   }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Stellantis CMP Smart Car Battery";
+
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
+  bool supports_insulation_resistance() override { return true; }
 
   bool supports_charged_energy() { return true; }
-  bool supports_insulation_resistance() { return true; }
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { datalayer_extended.stellantisCMPsmart.UserRequestDTCreset = true; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+    s.fields.push_back(
+        kv("Balancing active", datalayer_extended.stellantisCMPsmart.battery_balancing_active ? "Yes" : "No"));
+    s.fields.push_back(
+        kv("Positive contactor", getContactorStates(datalayer_extended.stellantisCMPsmart.battery_positive_contactor_state)));
+    s.fields.push_back(
+        kv("Negative contactor", getContactorStates(datalayer_extended.stellantisCMPsmart.battery_negative_contactor_state)));
+    s.fields.push_back(
+        kv("Precharge contactor", getContactorStates(datalayer_extended.stellantisCMPsmart.battery_precharge_contactor_state)));
+    s.fields.push_back(kv("Wakeup reason", String(datalayer_extended.stellantisCMPsmart.hvbat_wakeup_state)));
+
+    String battery_state;
+    if (datalayer_extended.stellantisCMPsmart.battery_state == 0) {
+      battery_state = "Sleep";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 1) {
+      battery_state = "Initialization";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 2) {
+      battery_state = "Wait";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 3) {
+      battery_state = "Ready";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 4) {
+      battery_state = "Preheat";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 5) {
+      battery_state = "Discharge";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 6) {
+      battery_state = "Charge";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 7) {
+      battery_state = "Fault";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 8) {
+      battery_state = "Pre-shutdown";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 9) {
+      battery_state = "Shutdown";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 10) {
+      battery_state = "Cooling";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_state == 11) {
+      battery_state = "HV battery precondition";
+    }
+    s.fields.push_back(kv("Battery state", battery_state));
+
+    s.fields.push_back(kv("Battery fault level", String(datalayer_extended.stellantisCMPsmart.battery_fault)));
+
+    String eplug_status;
+    if (datalayer_extended.stellantisCMPsmart.eplug_status == 0) {
+      eplug_status = "Seated OK";
+    } else if (datalayer_extended.stellantisCMPsmart.eplug_status == 1) {
+      eplug_status = "Disconnected!";
+    } else if (datalayer_extended.stellantisCMPsmart.eplug_status == 2) {
+      eplug_status = "Open Status";
+    } else if (datalayer_extended.stellantisCMPsmart.eplug_status == 3) {
+      eplug_status = "Invalid";
+    }
+    s.fields.push_back(kv("Eplug status", eplug_status));
+
+    String hvil_status;
+    if (datalayer_extended.stellantisCMPsmart.HVIL_status == 0) {
+      hvil_status = "Closed OK";
+    } else if (datalayer_extended.stellantisCMPsmart.HVIL_status == 1) {
+      hvil_status = "OPEN!!";
+    } else if (datalayer_extended.stellantisCMPsmart.HVIL_status == 2) {
+      hvil_status = "Error";
+    } else if (datalayer_extended.stellantisCMPsmart.HVIL_status == 3) {
+      hvil_status = "Invalid";
+    }
+    s.fields.push_back(kv("HVIL status", hvil_status));
+
+    String ev_warning;
+    if (datalayer_extended.stellantisCMPsmart.ev_warning == 0) {
+      ev_warning = "OK No alarm";
+    } else if (datalayer_extended.stellantisCMPsmart.ev_warning == 1) {
+      ev_warning = "Blinking!!";
+    } else if (datalayer_extended.stellantisCMPsmart.ev_warning == 2) {
+      ev_warning = "ON!!";
+    } else if (datalayer_extended.stellantisCMPsmart.ev_warning == 3) {
+      ev_warning = "Invalid";
+    }
+    s.fields.push_back(kv("EV Warning", ev_warning));
+
+    s.fields.push_back(
+        kv("Authorised for usage", datalayer_extended.stellantisCMPsmart.power_auth ? "NOT authorised" : "Authorised OK"));
+
+    String charging_status;
+    if (datalayer_extended.stellantisCMPsmart.battery_charging_status == 0) {
+      charging_status = "Not initiated";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_charging_status == 1) {
+      charging_status = "In progress";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_charging_status == 2) {
+      charging_status = "Completed";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_charging_status == 3) {
+      charging_status = "Failure";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_charging_status == 3) {
+      charging_status = "Stopped";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_charging_status == 3) {
+      charging_status = "Forbidden";
+    } else if (datalayer_extended.stellantisCMPsmart.battery_charging_status == 3) {
+      charging_status = "Prohibited, suggest preheat or precondition";
+    }
+    s.fields.push_back(kv("Charging status", charging_status));
+
+    String insulation_status;
+    if (datalayer_extended.stellantisCMPsmart.insulation_fault == 0) {
+      insulation_status = "OK";
+    } else if (datalayer_extended.stellantisCMPsmart.insulation_fault == 1) {
+      insulation_status = "Symmetrical failure!!";
+    } else if (datalayer_extended.stellantisCMPsmart.insulation_fault == 2) {
+      insulation_status = "Asymmetric failure HV+!!";
+    } else if (datalayer_extended.stellantisCMPsmart.insulation_fault == 3) {
+      insulation_status = "Asymmetric failure HV-!!";
+    }
+    s.fields.push_back(kv("Insulation status", insulation_status));
+
+    String insulation_circuit_status;
+    if (datalayer_extended.stellantisCMPsmart.insulation_circuit_status == 0) {
+      insulation_circuit_status = "Inactive (Insulation function not enable)";
+    } else if (datalayer_extended.stellantisCMPsmart.insulation_circuit_status == 1) {
+      insulation_circuit_status = "Active (Insulation function enable)";
+    } else if (datalayer_extended.stellantisCMPsmart.insulation_circuit_status == 2) {
+      insulation_circuit_status = "FAULT!!";
+    } else if (datalayer_extended.stellantisCMPsmart.insulation_circuit_status == 3) {
+      insulation_circuit_status = "Insulation measurement in progress";
+    }
+    s.fields.push_back(kv("Insulation circuit status", insulation_circuit_status));
+
+    String hardware_fault_status;
+    if (datalayer_extended.stellantisCMPsmart.hardware_fault_status == 0) {
+      hardware_fault_status += "No Fault";
+    }
+    if (datalayer_extended.stellantisCMPsmart.hardware_fault_status & 0b001) {
+      hardware_fault_status += "FAULT! Temperature sensor!";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.hardware_fault_status & 0b010) >> 1) {
+      hardware_fault_status += "FAULT! Voltage sensing circuit!";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.hardware_fault_status & 0b100) >> 2) {
+      hardware_fault_status += "FAULT! Current sensor!";
+    }
+    s.fields.push_back(kv("Hardware fault status", hardware_fault_status));
+
+    String l3_fault;
+    if (datalayer_extended.stellantisCMPsmart.l3_fault == 0) {
+      l3_fault += "No Fault";
+    }
+    if (datalayer_extended.stellantisCMPsmart.l3_fault & 0b001) {
+      l3_fault += "Cell undervoltage";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.l3_fault & 0b010) >> 1) {
+      l3_fault += "Cell overvoltage";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.l3_fault & 0b100) >> 2) {
+      l3_fault += "Over temperature";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.l3_fault & 0b1000) >> 3) {
+      l3_fault += "Under temperature";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.l3_fault & 0b10000) >> 4) {
+      l3_fault += "Over discharge current";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.l3_fault & 0b100000) >> 5) {
+      l3_fault += "Pack undedr voltage";
+    }
+    s.fields.push_back(kv("L3 Fault", l3_fault));
+
+    String plausibility_error;
+    if (datalayer_extended.stellantisCMPsmart.plausibility_error == 0) {
+      plausibility_error += "No error";
+    }
+    if (datalayer_extended.stellantisCMPsmart.plausibility_error & 0b001) {
+      plausibility_error += "Module temperature plausibility error";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.plausibility_error & 0b010) >> 1) {
+      plausibility_error += "Cell voltage plausibility error";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.plausibility_error & 0b100) >> 2) {
+      plausibility_error += "Battery voltlage plausibility error";
+    }
+    if ((datalayer_extended.stellantisCMPsmart.plausibility_error & 0b1000) >> 3) {
+      plausibility_error += "HVBAT Current plausibility error";
+    }
+    s.fields.push_back(kv("Plausibility error", plausibility_error));
+
+    if ((datalayer_extended.stellantisCMPsmart.alert_frame3 > 0) ||
+        (datalayer_extended.stellantisCMPsmart.alert_frame4 > 0)) {
+      String alert;
+      if (datalayer_extended.stellantisCMPsmart.alert_frame3 & 0b001) {
+        alert += "Cell Undervoltage ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame3 & 0b010) >> 1) {
+        alert += "Cell Overvoltage ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame3 & 0b100) >> 1) {
+        alert += "High SOC ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame3 & 0b1000) >> 1) {
+        alert += "Low SOC ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame3 & 0b10000) >> 1) {
+        alert += "Overvoltage ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame3 & 0b100000) >> 1) {
+        alert += "High temperature ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame3 & 0b01000000) >> 1) {
+        alert += "Temperature Delta ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame3 & 0b10000000) >> 1) {
+        alert += "Battery ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame4 & 0b10000) >> 1) {
+        alert += "Contactor Opening ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame4 & 0b100000) >> 1) {
+        alert += "Overcharge ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame4 & 0b01000000) >> 1) {
+        alert += "Cell poor consistency ";
+      }
+      if ((datalayer_extended.stellantisCMPsmart.alert_frame4 & 0b10000000) >> 1) {
+        alert += "SOC jump";
+      }
+      s.fields.push_back(kv("Alert", alert));
+    }
+
+    s.fields.push_back(kv("RCD line active", datalayer_extended.stellantisCMPsmart.rcd_line_active ? "Yes" : "No"));
+
+    String active_dtc_code = String(datalayer_extended.stellantisCMPsmart.active_DTC_code);
+    if (datalayer_extended.stellantisCMPsmart.active_DTC_code == 9) {
+      active_dtc_code += " Temperature sensor missing between pin 21-22";
+    }
+    s.fields.push_back(kv("Active DTC Code", active_dtc_code));
+
+    status.sections.push_back(s);
+    return status;
+  }
 
  private:
-  CmpSmartCarHtmlRenderer renderer;
+  void reset_DTC() { datalayer_extended.stellantisCMPsmart.UserRequestDTCreset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
   DATALAYER_BATTERY_TYPE* datalayer_battery;
   DATALAYER_INFO_CMPSMART* datalayer_cmpsmart;
 

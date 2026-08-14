@@ -2,20 +2,22 @@
 #define RJXZS_BMS_H
 
 #include "../system_settings.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class RjxzsBms : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }
+  RjxzsBms(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   RjxzsBms() : CanBattery(CAN_Speed::CAN_SPEED_250KBPS) {}
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "RJXZS BMS, DIY battery";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   static const int MAX_CHARGE_POWER_WHEN_TOPBALANCING_W = 500;
 
   unsigned long previousMillis10s = 0;  // will store last time a 10s CAN Message was sent

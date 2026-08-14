@@ -1,22 +1,29 @@
 #ifndef RENAULT_KANGOO_BATTERY_H
 #define RENAULT_KANGOO_BATTERY_H
 
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 extern bool user_selected_use_estimated_SOC;
 
 class RenaultKangooBattery : public CanBattery {
  public:
+  RenaultKangooBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Renault Kangoo";
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void reset_DTC() { UserRequestDTCreset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
   bool UserRequestDTCreset = false;
   static const int MAX_PACK_VOLTAGE_DV = 4150;  //5000 = 500.0V
   static const int MIN_PACK_VOLTAGE_DV = 2500;

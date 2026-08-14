@@ -1,32 +1,30 @@
 #ifndef SANTA_FE_PHEV_BATTERY_H
 #define SANTA_FE_PHEV_BATTERY_H
 #include "../datalayer/datalayer.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class SantaFePhevBattery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  SantaFePhevBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, CAN_Interface targetCan) : CanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-    allows_contactor_closing = nullptr;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  SantaFePhevBattery() {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
+  SantaFePhevBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
   }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Santa Fe PHEV";
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestedDTCReset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
  private:
+  void reset_DTC() { UserRequestedDTCReset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
   DATALAYER_BATTERY_TYPE* datalayer_battery;
 
   // If not null, this battery decides when the contactor can be closed and writes the value here.

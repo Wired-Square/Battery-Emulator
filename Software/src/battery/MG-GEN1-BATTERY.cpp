@@ -165,50 +165,32 @@ static void print_chars_or_hex(char* buf, const uint8_t* data, uint16_t length) 
   buf[ptr] = '\0';
 }
 
-String MgGen1Battery::get_uds_info_html() {
-  String ret = String();
-  ret.reserve(512);  //Pre-allocate some memory to avoid fragmentation
-
+void MgGen1Battery::append_uds_info_fields(std::vector<AdvancedField>& fields) {
   char buf[128];
 
-  ret += "UDS address: ";
-  ret += String(uds_address, 16);
-  ret += "<br>VIN: ";
+  fields.push_back(kv("UDS address", String(uds_address, 16)));
   print_chars_or_hex(buf, pid_vin, 17);
-  ret += buf;
-  ret += "<br>MfrDate: ";
+  fields.push_back(kv("VIN", String(buf)));
   sprintf(buf, "20%02X-%02X-%02X", pid_mfr_date[0], pid_mfr_date[1], pid_mfr_date[2]);
-  ret += buf;
-  ret += "<br>Fingerprint: ";
+  fields.push_back(kv("MfrDate", String(buf)));
   print_chars_or_hex(buf, pid_fingerprint, 10);
-  ret += buf;
-  ret += "<br>VehHWNo: ";
+  fields.push_back(kv("Fingerprint", String(buf)));
   print_chars_or_hex(buf, pid_vehicle_hw_number, 5);
-  ret += buf;
-  ret += "<br>SysHWNo: ";
+  fields.push_back(kv("VehHWNo", String(buf)));
   print_chars_or_hex(buf, pid_system_hw_number, 10);
-  ret += buf;
-  ret += "<br>SysSWNo: ";
+  fields.push_back(kv("SysHWNo", String(buf)));
   print_chars_or_hex(buf, pid_system_sw_number, 10);
-  ret += buf;
-  ret += "<br>F18A: ";
+  fields.push_back(kv("SysSWNo", String(buf)));
   print_chars_or_hex(buf, pid_f18a, 8);
-  ret += buf;
-  ret += "<br>F120: ";
+  fields.push_back(kv("F18A", String(buf)));
   print_chars_or_hex(buf, pid_f120, 16);
-  ret += buf;
-  ret += "<br>B18C: ";
+  fields.push_back(kv("F120", String(buf)));
   print_chars_or_hex(buf, pid_b18c, 24);
-  ret += buf;
-  ret += "<br>F1A2: ";
+  fields.push_back(kv("B18C", String(buf)));
   print_chars_or_hex(buf, pid_f1a2, 8);
-  ret += buf;
-  ret += "<br>F1AA: ";
+  fields.push_back(kv("F1A2", String(buf)));
   print_chars_or_hex(buf, pid_f1aa, 5);
-  ret += buf;
-  ret += "<br>";
-
-  return ret;
+  fields.push_back(kv("F1AA", String(buf)));
 }
 
 void MgGen1Battery::update_values() {
@@ -713,10 +695,6 @@ void MgGen1Battery::reset_BMS() {
   start_sequence(MG_STATE_RESET_START);
 }
 
-bool MgGen1Battery::supports_reset_BMS() {
-  return true;
-}
-
 void MgGen1Battery::on_uds_sequence_step(uint16_t state, uint8_t sid, const uint8_t* data, uint16_t len) {
   // Called by the superclass when a response in a UDS sequence is received.
   switch (state) {
@@ -847,8 +825,6 @@ void MgGen1Battery::setup(void) {
   set_pid_scan_list(UDS_BOOT_PID_LIST, sizeof(UDS_BOOT_PID_LIST) / sizeof(UDS_BOOT_PID_LIST[0]));
   dtc = &datalayer_battery->dtc;
 
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
   announce_contactor_state(false);
   datalayer_battery->info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_NMC_MV;
   datalayer_battery->info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_NMC_MV;

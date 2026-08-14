@@ -1,17 +1,19 @@
 #ifndef RANGE_ROVER_PHEV_BATTERY_H
 #define RANGE_ROVER_PHEV_BATTERY_H
 
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class RangeRoverPhevBattery : public CanBattery {
  public:
+  RangeRoverPhevBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Range Rover 13kWh PHEV battery (L494/L405)";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   /* Change the following to suit your battery */
   static const int MAX_PACK_VOLTAGE_DV = 4710;
   static const int MIN_PACK_VOLTAGE_DV = 3000;

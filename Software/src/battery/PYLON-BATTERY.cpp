@@ -289,8 +289,6 @@ void PylonBattery::transmit_can(unsigned long currentMillis) {
 }
 
 void PylonBattery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, "Pylon / Dyness compatible battery", 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
   datalayer_battery->info.number_of_cells = 2;
   if (user_selected_max_pack_voltage_dV > 0) {
     datalayer_battery->info.max_design_voltage_dV = user_selected_max_pack_voltage_dV;

@@ -15,8 +15,24 @@ class BatteryTestFixture : public testing::Test {
   //   static void TearDownTestSuite() { ... }
 
   void SetUp() override {
+    // Reset the datalayer and events before each test
+    datalayer = DataLayer();
+    reset_all_events();
+    if (batteries[0]) {
+      delete batteries[0];
+      batteries[0] = nullptr;
+    }
+    init_hal();
+
     user_selected_battery_type = type;
     setup_battery();
+  }
+
+  void TearDown() override {
+    if (batteries[0]) {
+      delete batteries[0];
+      batteries[0] = nullptr;
+    }
   }
 
  private:
@@ -29,13 +45,13 @@ class TestNotStillAlive : public BatteryTestFixture {
   explicit TestNotStillAlive(BatteryType type) : BatteryTestFixture(type) {}
   void TestBody() override {
     // check if battery is a CanBattery subclass
-    auto* battery = dynamic_cast<CanBattery*>(::battery);
+    auto* battery = dynamic_cast<CanBattery*>(batteries[0]);
     if (battery == nullptr) {
       GTEST_SKIP() << "Battery is not a CanBattery subclass";
     }
 
     // Set the still-alive counter to 0 (ie, not alive)
-    datalayer.battery.status.CAN_battery_still_alive = 0;
+    datalayer.battery.pack[0].status.CAN_battery_still_alive = 0;
 
     // A random fake CAN frame
     CAN_frame frame = {
@@ -47,7 +63,7 @@ class TestNotStillAlive : public BatteryTestFixture {
     }
 
     // Check it's still not alive (ie, the CAN frame handling didn't renew the counter)
-    EXPECT_EQ(datalayer.battery.status.CAN_battery_still_alive, 0);
+    EXPECT_EQ(datalayer.battery.pack[0].status.CAN_battery_still_alive, 0);
   }
 };
 
@@ -61,7 +77,7 @@ bool IsValidCanBattery(BatteryType type) {
   // This leaks memory (but not much...)
   init_hal();
 
-  auto* tmp_battery = create_battery(type);
+  auto* tmp_battery = create_battery(type, battery_slot_context(0));
   if (tmp_battery == nullptr) {
     // Not a valid battery type
     return false;

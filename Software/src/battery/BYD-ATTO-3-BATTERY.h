@@ -4,24 +4,18 @@
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
 
-#include "BYD-ATTO-3-HTML.h"
+#include <Arduino.h>
+#include "../devboard/webserver/advanced_api.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class BydAttoBattery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  BydAttoBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_BYDATTO3* extended, CAN_Interface targetCan)
-      : CanBattery(targetCan), renderer(extended, "2") {
-    datalayer_battery = datalayer_ptr;
-    datalayer_bydatto = extended;
-    allows_contactor_closing = nullptr;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  BydAttoBattery() : renderer(&datalayer_extended.bydAtto3) {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
-    datalayer_bydatto = &datalayer_extended.bydAtto3;
+  // Global datalayer_extended.bydAtto3 / bydAtto3_2: webserver, MQTT and comm_nvm read them.
+  BydAttoBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
+    datalayer_bydatto = ctx.is_primary() ? &datalayer_extended.bydAtto3 : &datalayer_extended.bydAtto3_2;
   }
 
   virtual void setup(void);
@@ -29,26 +23,267 @@ class BydAttoBattery : public CanBattery {
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  static constexpr const char* Name = "BYD Atto 3/Seal/Dolphin";
-
   bool supports_charged_energy() { return true; }
-  bool supports_reset_crash() { return true; }
-  void reset_crash() { datalayer_bydatto->UserRequestCrashReset = true; }
-  bool supports_calibrate_SOC() { return true; }
-  void reset_SOC() { datalayer_bydatto->UserRequestCalibrateSOC = true; }
-  bool supports_contactor_close() { return true; }
-  void request_open_contactors() { requestContactorOpen = true; }
-  void request_close_contactors() { requestContactorClose = true; }
-  bool supports_read_DTC() { return true; }
-  void read_DTC() { datalayer_bydatto->UserRequestDTCreadout = true; }
-  bool supports_reset_DTC() { return true; }
-  bool supports_insulation_resistance() { return true; }
-  void reset_DTC() { datalayer_bydatto->UserRequestDTCreset = true; }
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
+  bool supports_insulation_resistance() override { return true; }
+
+  const char* get_dtc_json_filename() override { return "byd_atto3_dtc.json"; }
+
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    DATALAYER_INFO_BYDATTO3* byd_datalayer = datalayer_bydatto;
+    const String s = (datalayer_bydatto == &datalayer_extended.bydAtto3) ? "" : "2";
+    AdvancedSection sec;
+
+    const auto& dl_bat = *datalayer_battery;
+    sec.fields.push_back(kv("Detected cells", String(dl_bat.info.number_of_cells)));
+
+    String contactor_control_state;
+    switch (byd_datalayer->contactor_control_state) {
+      case 0:
+        contactor_control_state = "Closing";
+        break;
+      case 1:
+        contactor_control_state = "Closed (live)";
+        break;
+      case 2:
+        contactor_control_state = "Preparing to open";
+        break;
+      case 3:
+        contactor_control_state = "Opening";
+        break;
+      case 4:
+        contactor_control_state = "Standby / idle";
+        break;
+      case 5:
+        contactor_control_state = "Open requested";
+        break;
+      case 6:
+        contactor_control_state = "Open (settling)";
+        break;
+      case 7:
+        contactor_control_state = "Held open (fault / e-stop / startup)";
+        break;
+      default:
+        contactor_control_state = "Unknown";
+    }
+    sec.fields.push_back(kv("BE contactor state", contactor_control_state));
+
+    sec.fields.push_back(kv("Main contactors", byd_datalayer->contactor_main_closed
+                                                    ? "Closed — battery connected"
+                                                    : "Open — battery disconnected"));
+    sec.fields.push_back(kv("Precharge state", byd_datalayer->contactor_precharging ? "Active" : "Idle"));
+    // Bit2 (0x04) = car on/off (clear during car-off AC charging even though HV is live),
+    // not literal HV-bus energisation.
+    sec.fields.push_back(kv("HV active", byd_datalayer->contactor_hv_active ? "Yes" : "No"));
+
+    // Pack mode read straight from the 0x344 byte0 state table (not re-derived per-bit).
+    String pack_mode;
+    switch (byd_datalayer->contactor_feedback) {
+      case 0x00:
+        pack_mode = "Disconnected";
+        break;
+      case 0x02:
+        pack_mode = "Open standby";
+        break;
+      case 0x42:
+        pack_mode = "Precharging";
+        break;
+      case 0x80:
+        pack_mode = "Closed, HV inactive";
+        break;
+      case 0x84:
+        pack_mode = "Closed idle, HV active";
+        break;
+      case 0x81:
+        pack_mode = "Charging, car off";
+        break;
+      case 0x85:
+        pack_mode = "Charging, HV active";
+        break;
+      case 0x82:
+        pack_mode = "Drive-ready pending";
+        break;
+      case 0x86:
+        pack_mode = "Drive ready";
+        break;
+      default: {
+        if (!(byd_datalayer->contactor_feedback & 0x80)) {
+          pack_mode = "Disconnected";
+        } else if (byd_datalayer->contactor_feedback & 0x01) {
+          pack_mode = "Charging";
+        } else if (byd_datalayer->contactor_feedback & 0x02) {
+          pack_mode = "Drive";
+        } else {
+          pack_mode = "Closed idle";
+        }
+        char modeStr[10];
+        snprintf(modeStr, sizeof(modeStr), " (0x%02X)", byd_datalayer->contactor_feedback);
+        pack_mode += modeStr;
+      }
+    }
+    sec.fields.push_back(kv("BMS pack mode", pack_mode));
+
+    char feedbackStr[5];
+    snprintf(feedbackStr, sizeof(feedbackStr), "0x%02X", byd_datalayer->contactor_feedback);
+    // 0x344 byte1 low nibble: a BMS state code whose meaning is unconfirmed (reads 1 in
+    // idle/drive/discharge alike). byte0 is the real charge/drive truth, so show this raw.
+    sec.fields.push_back(
+        kv("BMS raw status", "mode " + String(feedbackStr) + ", state " + String(byd_datalayer->discharge_status)));
+
+    float soc_measured = static_cast<float>(byd_datalayer->SOC_highprec) * 0.1f;
+    float BMS_maxChargePower = static_cast<float>(byd_datalayer->chargePower) * 0.1f;
+    float BMS_maxDischargePower = static_cast<float>(byd_datalayer->dischargePower) * 0.1f;
+
+    sec.fields.push_back(kv("SOC measured", String(soc_measured), "%"));
+    sec.fields.push_back(kv("SOC OBD2", String(byd_datalayer->SOC_polled), "%"));
+    if (byd_datalayer->pack_voltage_dV > 0) {
+      sec.fields.push_back(kv("Pack voltage", String(byd_datalayer->pack_voltage_dV / 10.0f, 1), "V"));
+    } else {
+      sec.fields.push_back(kv("Pack voltage", "Not received"));
+    }
+
+    for (int i = 0; i < 13; i++) {
+      if (byd_datalayer->battery_temperatures[i] != 215) {
+        sec.fields.push_back(kv("Temperature sensor " + String(i + 1), String(byd_datalayer->battery_temperatures[i]),
+                                "°C"));
+      }
+    }
+
+    sec.fields.push_back(kv("Max discharge power", String(BMS_maxDischargePower), "kW"));
+    sec.fields.push_back(kv("Max charge (regen) power", String(BMS_maxChargePower), "kW"));
+    sec.fields.push_back(kv("Total charged", String(byd_datalayer->total_charged_kwh), "kWh"));
+    sec.fields.push_back(kv("Total discharged", String(byd_datalayer->total_discharged_kwh), "kWh"));
+    sec.fields.push_back(kv("Total charged (Ah)", String(byd_datalayer->total_charged_ah), "Ah"));
+    sec.fields.push_back(kv("Total discharged (Ah)", String(byd_datalayer->total_discharged_ah), "Ah"));
+    sec.fields.push_back(kv("Charge times", String(byd_datalayer->charge_times)));
+    sec.fields.push_back(kv("Times of full power", String(byd_datalayer->times_full_power)));
+    sec.fields.push_back(kv("Min cell voltage number", String(byd_datalayer->BMS_min_cell_voltage_number)));
+    sec.fields.push_back(kv("Max cell voltage number", String(byd_datalayer->BMS_max_cell_voltage_number)));
+    sec.fields.push_back(kv("Min temp module number", String(byd_datalayer->BMS_min_temp_module_number)));
+    sec.fields.push_back(kv("Max temp module number", String(byd_datalayer->BMS_max_temp_module_number)));
+    sec.fields.push_back(kv("Seed", String(byd_datalayer->seed)));
+    sec.fields.push_back(kv("SolvedKey", String(byd_datalayer->solvedKey)));
+
+    if (byd_datalayer->servicemode == 0) {
+      sec.fields.push_back(kv("ServiceMode", "No command ran yet"));
+    } else if (byd_datalayer->servicemode == 1) {
+      sec.fields.push_back(kv("ServiceMode", "REJECTED"));
+    } else if (byd_datalayer->servicemode == 2) {
+      sec.fields.push_back(kv("ServiceMode", "APPROVED!"));
+    }
+
+    sec.fields.push_back(
+        kv("Capacity original", String((byd_datalayer->BMS_capacity_original_calibration) / 100), "AH"));
+    sec.fields.push_back(
+        kv("Capacity current", String((byd_datalayer->BMS_capacity_current_calibration) / 100), "AH"));
+    sec.fields.push_back(kv("SOC original", String(byd_datalayer->BMC_SOC_original_calibration), "%"));
+    sec.fields.push_back(kv("SOC current", String(byd_datalayer->BMC_SOC_current_calibration), "%"));
+
+    {
+      uint32_t dwell_sec = byd_datalayer->autocal_dwell_accumulated_ms / 1000;
+      uint32_t dwell_min = dwell_sec / 60;
+      uint32_t dwell_rem = dwell_sec % 60;
+      uint32_t grace_sec = byd_datalayer->autocal_grace_timer_ms / 1000;
+      float autocal_current_A = static_cast<float>(byd_datalayer->autocal_current_dA) / 10.0f;
+      const char* current_direction = "idle";
+      if (byd_datalayer->autocal_current_dA < 0) {
+        current_direction = "discharge";
+      } else if (byd_datalayer->autocal_current_dA > 0) {
+        current_direction = "charge";
+      }
+
+      String current_in_range;
+      if (!byd_datalayer->autocal_crit_taper) {
+        current_in_range = "Waiting for taper";
+      } else if (byd_datalayer->autocal_crit_low_current) {
+        current_in_range = "Yes (chg ≤3A, disch ≤0.5A)";
+      } else {
+        current_in_range = "No — " + String(grace_sec) + "s / 60s";
+      }
+
+      AdvancedField autocal_table;
+      autocal_table.kind = AdvancedFieldKind::Table;
+      autocal_table.label = "Auto-calibration status";
+      autocal_table.columns = {"Metric", "Value"};
+      autocal_table.rows.push_back({"Contactors", byd_datalayer->autocal_crit_contactors ? "OK" : "Open"});
+      autocal_table.rows.push_back({"Full / In taper?", byd_datalayer->autocal_crit_taper ? "Yes" : "No"});
+      autocal_table.rows.push_back(
+          {"Battery current", String(autocal_current_A, 1) + " A (" + String(current_direction) + ")"});
+      autocal_table.rows.push_back({"Current in range", current_in_range});
+      autocal_table.rows.push_back({"Dwell time", String(dwell_min) + "m " + String(dwell_rem) + "s / 10m"});
+      autocal_table.rows.push_back({"SOC drift", String(byd_datalayer->autocal_drift_percent, 1) + "% / threshold " +
+                                                       String(byd_datalayer->auto_calibrate_soc_drift_percent) + "%"});
+      autocal_table.rows.push_back(
+          {"Cooldown", byd_datalayer->autocal_crit_cooldown_ready ? "Ready" : "Waiting"});
+      sec.fields.push_back(autocal_table);
+    }
+
+    status.sections.push_back(sec);
+
+    AdvancedSection iso;
+    iso.title = "Isolation resistance monitor";
+
+    String monitoring;
+    if (!byd_datalayer->iso_status_valid) {
+      monitoring = "Unknown";
+    } else if (!byd_datalayer->contactor_main_closed) {
+      // Monitoring status from 0x35E b0 bit0x80; only unambiguous when the pack is closed
+      monitoring = "Inactive (pack open)";
+    } else {
+      monitoring = byd_datalayer->iso_measurement_active ? "On" : "Off";
+    }
+    iso.fields.push_back(kv("Monitoring", monitoring));
+
+    if (byd_datalayer->insulation_valid) {
+      float iso_kohm = static_cast<float>(byd_datalayer->insulation_ohm_per_volt) *
+                       (datalayer_battery->status.voltage_dV / 10.0f) / 1000.0f;
+      iso.fields.push_back(kv("Insulation resistance",
+                              String(iso_kohm, 1) + " kΩ (" + String(byd_datalayer->insulation_ohm_per_volt) + " Ω/V)"));
+    } else {
+      iso.fields.push_back(kv("Insulation resistance", "Not received"));
+    }
+
+    // Command feedback, only shown while something is pending or after a failure
+    if (byd_datalayer->iso_command_status == 1) {
+      iso.fields.push_back(kv("Last command", "Sending…"));
+    } else if (byd_datalayer->iso_command_status == 3) {
+      iso.fields.push_back(kv("Last command", "Rejected"));
+    } else if (byd_datalayer->iso_command_status == 4) {
+      iso.fields.push_back(kv("Last command", "No response"));
+    }
+    status.sections.push_back(iso);
+
+    auto& dtc = datalayer_battery->dtc;
+    status.sections.push_back(dtc_advanced_section(*this, dtc, DtcCodeStyle::kStandard));
+    return status;
+  }
 
  private:
-  BydAtto3HtmlRenderer renderer;
+  void calibrate_SOC() { datalayer_bydatto->UserRequestCalibrateSOC = true; }
+  void request_open_contactors() { requestContactorOpen = true; }
+  void request_close_contactors() { requestContactorClose = true; }
+  void read_DTC() { datalayer_bydatto->UserRequestDTCreadout = true; }
+  void reset_crash() { datalayer_bydatto->UserRequestCrashReset = true; }
+  void reset_DTC() { datalayer_bydatto->UserRequestDTCreset = true; }
+  void iso_monitor_enable() { datalayer_bydatto->UserRequestIsoRoutineEnable = true; }
+  void iso_monitor_disable() { datalayer_bydatto->UserRequestIsoRoutineDisable = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_CALIBRATE_SOC, [this] { calibrate_SOC(); }),
+      command(CMD_CONTACTOR_CLOSE, [this] { request_close_contactors(); }),
+      command(CMD_CONTACTOR_OPEN, [this] { request_open_contactors(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+      command(CMD_RESET_CRASH, [this] { reset_crash(); }),
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_ISO_MONITOR_ENABLE, [this] { iso_monitor_enable(); },
+              [this] { return datalayer_bydatto == &datalayer_extended.bydAtto3; }),
+      command(CMD_ISO_MONITOR_DISABLE, [this] { iso_monitor_disable(); },
+              [this] { return datalayer_bydatto == &datalayer_extended.bydAtto3; }),
+  };
+
   DATALAYER_BATTERY_TYPE* datalayer_battery;
   DATALAYER_INFO_BYDATTO3* datalayer_bydatto;
   bool* allows_contactor_closing;
@@ -64,6 +299,9 @@ class BydAttoBattery : public CanBattery {
   uint64_t last_auto_calibrate_ms = 0;  // Cooldown timer for auto-calibration
   uint32_t autocal_dwell_ms = 0;        // Valid low-current/full time
   uint32_t autocal_grace_start_ms = 0;  // When current left the valid window
+  uint16_t cap_slewed_dA = 0;           // Charge-taper slewed current cap
+  uint32_t taper_last_ms = 0;
+  bool taper_initialized = false;  // explicit flag avoids cap_slewed_dA starting at 0
 
   static const int POLL_TIMES_FULL_POWER = 0x0004;  // Using Carscanner name for now.
   // 0x0005/0x0008/0x0009 (SOC, voltage, current) come from 0x444 and 0x438, not polled.

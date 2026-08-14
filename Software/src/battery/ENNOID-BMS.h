@@ -2,18 +2,20 @@
 #define ENNOID_BMS_H
 
 #include "../system_settings.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class EnnoidBms : public CanBattery {
  public:
+  EnnoidBms(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  static constexpr const char* Name = "ENNOID BMS via VESC, DIY battery";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   static const int MAX_CHARGE_POWER_WHEN_TOPBALANCING_W = 500;
   static const int RAMPDOWN_SOC =
       9000;  // (90.00) SOC% to start ramping down from max charge power towards 0 at 100.00%

@@ -89,7 +89,7 @@ void BydAttoBattery::
   const uint16_t delta_mV = (cell_max_mV > cell_min_mV) ? (cell_max_mV - cell_min_mV) : 0;
 
   // Start from the user manual limit (deci-amps), but don't allow taper to go below tail current.
-  uint16_t user_cap_dA = datalayer_battery->settings.max_user_set_charge_dA;
+  uint16_t user_cap_dA = datalayer.battery.settings.max_user_set_charge_dA;
   if (user_cap_dA < TAIL_CURRENT_dA)
     user_cap_dA = TAIL_CURRENT_dA;
 
@@ -129,19 +129,15 @@ void BydAttoBattery::
   }
 
   // Slew-limit the cap so it changes smoothly over time
-  static uint16_t cap_slewed_dA = 0;
-  static uint32_t last_ms = 0;
-  static bool taper_initialized = false;  // explicit flag avoids cap_slewed_dA starting at 0
-
   const uint32_t now_ms = (uint32_t)millis64();
   if (!taper_initialized) {
-    last_ms = now_ms;
+    taper_last_ms = now_ms;
     cap_slewed_dA = user_cap_dA;  // seed slewer at full current, not zero
     taper_initialized = true;
   }
 
-  uint32_t dt_ms = now_ms - last_ms;
-  last_ms = now_ms;
+  uint32_t dt_ms = now_ms - taper_last_ms;
+  taper_last_ms = now_ms;
   if (dt_ms == 0)
     dt_ms = 1;
 
@@ -1156,8 +1152,6 @@ void BydAttoBattery::transmit_can(unsigned long currentMillis) {
 }
 
 void BydAttoBattery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
   datalayer_battery->info.chemistry = battery_chemistry_enum::LFP;
   datalayer_battery->info.max_design_voltage_dV = 6500;  //Startup in extremes
   datalayer_battery->info.min_design_voltage_dV = 2000;  //We later determine range based on amount of cells

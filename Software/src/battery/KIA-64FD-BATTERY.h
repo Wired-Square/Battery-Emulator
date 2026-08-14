@@ -1,6 +1,7 @@
 #ifndef KIA_64_FD_BATTERY_H
 #define KIA_64_FD_BATTERY_H
 #include <Arduino.h>
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 #define ESTIMATE_SOC_FROM_CELLVOLTAGE
@@ -8,16 +9,23 @@
 class Kia64FDBattery : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }
+  Kia64FDBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Kia 64kWh FD battery";
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void write_cell_voltages(CAN_frame rx_frame, int start, int length, int startCell);
+  void reset_DTC() { UserRequestDTCreset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
   bool UserRequestDTCreset = false;
   uint16_t estimateSOC(uint16_t packVoltage, uint16_t cellCount, int16_t currentAmps);
   uint16_t estimateSOCFromCell(uint16_t cellVoltage);

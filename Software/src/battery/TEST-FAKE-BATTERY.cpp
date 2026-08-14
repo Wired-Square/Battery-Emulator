@@ -8,10 +8,10 @@ void TestFakeBattery::
 
   datalayer_battery->status.soh_pptt = 9900;  // 99.00%
 
-  // Battery 1's voltage is set by the user via the webserver (set_fake_voltage).
-  // Batteries 2 and 3 mirror it so all instances report the same pack voltage.
-  if (datalayer_battery != &datalayer.battery) {
-    datalayer_battery->status.voltage_dV = datalayer.battery.status.voltage_dV;
+  // The primary slot's voltage is set by the user via the webserver (set_fake_voltage).
+  // The remaining slots mirror it so all instances report the same pack voltage.
+  if (datalayer_battery != &datalayer.battery.pack[0]) {
+    datalayer_battery->status.voltage_dV = datalayer.battery.pack[0].status.voltage_dV;
   }
 
   datalayer_battery->status.current_dA = 0;  // 0 A
@@ -107,9 +107,6 @@ void TestFakeBattery::transmit_can(unsigned long currentMillis) {
 void TestFakeBattery::setup(void) {  // Performs one time setup at startup
   randomSeed(analogRead(0));
 
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
-
   datalayer_battery->info.max_design_voltage_dV =
       4040;  // 404.4V, over this, charging is not possible (goes into forced discharge)
   datalayer_battery->info.min_design_voltage_dV = 2450;  // 245.0V under this, discharging further is disabled
@@ -122,8 +119,8 @@ void TestFakeBattery::setup(void) {  // Performs one time setup at startup
   datalayer_battery->info.min_cell_voltage_mV = 2500;  // 245.0V pack -> 2552mV per cell
 
   // Default fake pack voltage for the primary battery; editable via webserver.
-  // Batteries 2 and 3 pick this up through the mirror in update_values().
-  if (datalayer_battery == &datalayer.battery && datalayer_battery->status.voltage_dV == 0) {
+  // The remaining slots pick this up through the mirror in update_values().
+  if (datalayer_battery == &datalayer.battery.pack[0] && datalayer_battery->status.voltage_dV == 0) {
     datalayer_battery->status.voltage_dV = 3700;  // 370.0V
   }
 

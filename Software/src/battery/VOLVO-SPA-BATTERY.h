@@ -1,30 +1,194 @@
 #ifndef VOLVO_SPA_BATTERY_H
 #define VOLVO_SPA_BATTERY_H
+
 #include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
+#include "../devboard/webserver/advanced_api.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "VOLVO-SPA-HTML.h"
 
 class VolvoSpaBattery : public CanBattery {
  public:
+  VolvoSpaBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Volvo / Polestar 69/78kWh SPA battery";
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  bool supports_read_DTC() { return true; }
-  void read_DTC() { UserRequestDTCreadout = true; }
+  const char* get_dtc_json_filename() override { return "volvo_SPA_dtc.json"; }
 
-  bool supports_reset_BECM() { return true; }
-  void reset_BECM() { UserRequestBECMecuReset = true; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+    s.fields.push_back(kv("BECM supply voltage", String(datalayer_extended.VolvoPolestar.BECMsupplyVoltage), "mV"));
+
+    s.fields.push_back(kv("Dynamic max voltage", String(datalayer_extended.VolvoPolestar.BECMUDynMaxLim), "V"));
+    s.fields.push_back(kv("Dynamic min voltage", String(datalayer_extended.VolvoPolestar.BECMUDynMinLim), "V"));
+
+    s.fields.push_back(
+        kv("Discharge power limit 1", String(datalayer_extended.VolvoPolestar.HvBattPwrLimDcha1), "kW"));
+    s.fields.push_back(
+        kv("Discharge soft power limit", String(datalayer_extended.VolvoPolestar.HvBattPwrLimDchaSoft), "kW"));
+    s.fields.push_back(kv("Discharge power limit slow aging",
+                          String(datalayer_extended.VolvoPolestar.HvBattPwrLimDchaSlowAgi), "kW"));
+    s.fields.push_back(
+        kv("Charge power limit slow aging", String(datalayer_extended.VolvoPolestar.HvBattPwrLimChrgSlowAgi), "kW"));
+
+    String hvil_a;
+    switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x01) {
+      case 0x01:
+        hvil_a = "Open";
+        break;
+      default:
+        hvil_a = "Not valid";
+    }
+    s.fields.push_back(kv("HVIL Circuit A status", hvil_a));
+
+    String hvil_b;
+    switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x02) {
+      case 0x02:
+        hvil_b = "Open";
+        break;
+      default:
+        hvil_b = "Closed";
+    }
+    s.fields.push_back(kv("HVIL Circuit B status", hvil_b));
+
+    String hvil_c;
+    switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x04) {
+      case 0x04:
+        hvil_c = "Open";
+        break;
+      default:
+        hvil_c = "Closed";
+    }
+    s.fields.push_back(kv("HVIL Circuit C status", hvil_c));
+
+    String precharge_contactor;
+    switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x08) {
+      case 0x08:
+        precharge_contactor = "Open";
+        break;
+      default:
+        precharge_contactor = "Closed";
+    }
+    s.fields.push_back(kv("Precharge contactor status", precharge_contactor));
+
+    String positive_contactor;
+    switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x10) {
+      case 0x10:
+        positive_contactor = "Open";
+        break;
+      default:
+        positive_contactor = "Closed";
+    }
+    s.fields.push_back(kv("Positive Contactor status", positive_contactor));
+
+    String negative_contactor;
+    switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x20) {
+      case 0x20:
+        negative_contactor = "Open";
+        break;
+      default:
+        negative_contactor = "Closed";
+    }
+    s.fields.push_back(kv("Negative Contactor status", negative_contactor));
+
+    String hv_sys_relay_status;
+    switch (datalayer_extended.VolvoPolestar.HVSysRlySts) {
+      case 0:
+        hv_sys_relay_status = "Open";
+        break;
+      case 1:
+        hv_sys_relay_status = "Closed";
+        break;
+      case 2:
+        hv_sys_relay_status = "KeepStatus";
+        break;
+      case 3:
+        hv_sys_relay_status = "OpenAndRequestActiveDischarge";
+        break;
+      default:
+        hv_sys_relay_status = "Not valid";
+    }
+    s.fields.push_back(kv("HV system relay status", hv_sys_relay_status));
+
+    String hv_sys_dc_relay_status1;
+    switch (datalayer_extended.VolvoPolestar.HVSysDCRlySts1) {
+      case 0:
+        hv_sys_dc_relay_status1 = "Open";
+        break;
+      case 1:
+        hv_sys_dc_relay_status1 = "Closed";
+        break;
+      case 2:
+        hv_sys_dc_relay_status1 = "KeepStatus";
+        break;
+      case 3:
+        hv_sys_dc_relay_status1 = "Fault";
+        break;
+      default:
+        hv_sys_dc_relay_status1 = "Not valid";
+    }
+    s.fields.push_back(kv("HV system relay status 1", hv_sys_dc_relay_status1));
+
+    String hv_sys_dc_relay_status2;
+    switch (datalayer_extended.VolvoPolestar.HVSysDCRlySts2) {
+      case 0:
+        hv_sys_dc_relay_status2 = "Open";
+        break;
+      case 1:
+        hv_sys_dc_relay_status2 = "Closed";
+        break;
+      case 2:
+        hv_sys_dc_relay_status2 = "KeepStatus";
+        break;
+      case 3:
+        hv_sys_dc_relay_status2 = "Fault";
+        break;
+      default:
+        hv_sys_dc_relay_status2 = "Not valid";
+    }
+    s.fields.push_back(kv("HV system relay status 2", hv_sys_dc_relay_status2));
+
+    String hv_sys_iso_monitor_status;
+    switch (datalayer_extended.VolvoPolestar.HVSysIsoRMonrSts) {
+      case 0:
+        hv_sys_iso_monitor_status = "Not valid 1";
+        break;
+      case 1:
+        hv_sys_iso_monitor_status = "False";
+        break;
+      case 2:
+        hv_sys_iso_monitor_status = "True";
+        break;
+      case 3:
+        hv_sys_iso_monitor_status = "Not valid 2";
+        break;
+      default:
+        hv_sys_iso_monitor_status = "Not valid";
+    }
+    s.fields.push_back(kv("HV system isolation resistance monitoring status", hv_sys_iso_monitor_status));
+
+    status.sections.push_back(s);
+    status.sections.push_back(dtc_advanced_section(*this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType));
+    return status;
+  }
 
  private:
-  VolvoSpaHtmlRenderer renderer;
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void reset_DTC() { UserRequestDTCreset = true; }
+  void read_DTC() { UserRequestDTCreadout = true; }
+  void reset_BECM() { UserRequestBECMecuReset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+      command(CMD_RESET_BECM, [this] { reset_BECM(); }),
+  };
 
   bool UserRequestDTCreset = false;
   bool UserRequestDTCreadout = false;

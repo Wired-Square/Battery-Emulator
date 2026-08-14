@@ -4,59 +4,27 @@
 #include <Arduino.h>
 #include "../datalayer/datalayer.h"
 #include "../devboard/hal/hal.h"
-#include "BMW-I3-HTML.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class BmwI3Battery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  BmwI3Battery(DATALAYER_BATTERY_TYPE* datalayer_ptr, bool* contactor_closing_allowed_ptr, CAN_Interface targetCan,
-               gpio_num_t wakeup)
-      : CanBattery(targetCan), renderer(*this) {
-    datalayer_battery = datalayer_ptr;
-    contactor_closing_allowed = contactor_closing_allowed_ptr;
-    allows_contactor_closing = nullptr;
-    wakeup_pin = wakeup;
-
-    //Init voltage to 0 to allow contactor check to operate without fear of default values colliding
-    battery_volts = 0;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  BmwI3Battery() : renderer(*this) {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
-    contactor_closing_allowed = nullptr;
-    wakeup_pin = esp32hal->WUP_PIN1();
+  BmwI3Battery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
+    contactor_closing_allowed = ctx.is_primary() ? nullptr : ctx.contactor_flag;
+    wakeup_pin = ctx.wakeup_pin;
+    if (!ctx.is_primary()) {
+      battery_volts = 0;  // default 3700; slot must read 0 V until CAN gives a real value
+    }
   }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "BMW i3";
 
-  bool supports_balancing() { return true; }
-  bool is_balancing_active() { return UserRequestBalancing != NONE; }
-  const char* get_balancing_state_string() {
-    switch (UserRequestBalancing) {
-      case NONE:
-        return "None";
-      case REQUESTED:
-        return "Requested";
-      case STARTING:
-        return "Starting";
-      case EXECUTING:
-        return "Executing";
-      default:
-        return "Unknown";
-    }
-  }
-  virtual void initiate_balancing();
-  virtual void end_balancing();
-
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
   // SOC% raw battery value. Might not always reach 100%
   uint16_t SOC_raw() { return (battery_HVBatt_SOC * 10); }
@@ -100,12 +68,22 @@ class BmwI3Battery : public CanBattery {
     }
   }
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  BatteryAdvancedStatus get_advanced_status() override;
 
  private:
-  BmwI3HtmlRenderer renderer;
+  bool is_balancing_active() { return UserRequestBalancing != NONE; }
+  void initiate_balancing();
+  void end_balancing();
+  void reset_DTC() { UserRequestDTCreset = true; }
 
- private:
+  std::vector<BatteryCommand> commands_ = {
+      command(
+          CMD_START_BALANCING, [this] { initiate_balancing(); }, [this] { return !is_balancing_active(); }),
+      command(
+          CMD_END_BALANCING, [this] { end_balancing(); }, [this] { return is_balancing_active(); }),
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
   bool UserRequestDTCreset = false;
   enum BalancingState { NONE, REQUESTED, STARTING, EXECUTING };
   BalancingState UserRequestBalancing = NONE;

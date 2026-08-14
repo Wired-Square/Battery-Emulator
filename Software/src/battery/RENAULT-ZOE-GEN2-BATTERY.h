@@ -1,45 +1,101 @@
 #ifndef RENAULT_ZOE_GEN2_BATTERY_H
 #define RENAULT_ZOE_GEN2_BATTERY_H
 
+#include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "RENAULT-ZOE-GEN2-HTML.h"
 
 class RenaultZoeGen2Battery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  RenaultZoeGen2Battery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_ZOE_PH2* extended,
-                        CAN_Interface targetCan)
-      : CanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-    allows_contactor_closing = nullptr;
-    datalayer_zoePH2 = extended;
-
-    battery_pack_voltage_periodic_dV = 0;
+  RenaultZoeGen2Battery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
+    datalayer_zoePH2 = ctx.is_primary() ? &datalayer_extended.zoePH2 : nullptr;
+    if (!ctx.is_primary()) {
+      battery_pack_voltage_periodic_dV = 0;  // default 3700; slot must read 0 V until CAN gives a real value
+    }
   }
 
-  // Use the default constructor to create the first or single battery.
-  RenaultZoeGen2Battery() {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
-    datalayer_zoePH2 = &datalayer_extended.zoePH2;
-  }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Renault Zoe Gen2 50kWh";
 
-  bool supports_reset_NVROL() { return true; }
-  void reset_NVROL() { datalayer_extended.zoePH2.UserRequestNVROLReset = true; }
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestedDTCReset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
+    s.fields.push_back(kv("soc", String(datalayer_extended.zoePH2.battery_soc)));
+    s.fields.push_back(kv("usable soc", String(datalayer_extended.zoePH2.battery_usable_soc)));
+    s.fields.push_back(kv("soh", String(datalayer_extended.zoePH2.battery_soh)));
+    s.fields.push_back(kv("pack voltage", String(datalayer_extended.zoePH2.battery_pack_voltage)));
+    s.fields.push_back(kv("max cell voltage", String(datalayer_extended.zoePH2.battery_max_cell_voltage)));
+    s.fields.push_back(kv("min cell voltage", String(datalayer_extended.zoePH2.battery_min_cell_voltage)));
+    s.fields.push_back(kv("12v", String(datalayer_extended.zoePH2.battery_12v)));
+    s.fields.push_back(kv("avg temp", String(datalayer_extended.zoePH2.battery_avg_temp)));
+    s.fields.push_back(kv("min temp", String(datalayer_extended.zoePH2.battery_min_temp)));
+    s.fields.push_back(kv("max temp", String(datalayer_extended.zoePH2.battery_max_temp)));
+    s.fields.push_back(kv("max power", String(datalayer_extended.zoePH2.battery_max_power)));
+    s.fields.push_back(kv("interlock", String(datalayer_extended.zoePH2.battery_interlock)));
+    s.fields.push_back(kv("kwh", String(datalayer_extended.zoePH2.battery_kwh)));
+    s.fields.push_back(kv("current", String(datalayer_extended.zoePH2.battery_current)));
+    s.fields.push_back(kv("current offset", String(datalayer_extended.zoePH2.battery_current_offset)));
+    s.fields.push_back(kv("max generated", String(datalayer_extended.zoePH2.battery_max_generated)));
+    s.fields.push_back(kv("max available", String(datalayer_extended.zoePH2.battery_max_available)));
+    s.fields.push_back(kv("current voltage", String(datalayer_extended.zoePH2.battery_current_voltage)));
+    s.fields.push_back(kv("charging status", String(datalayer_extended.zoePH2.battery_charging_status)));
+    s.fields.push_back(kv("remaining charge", String(datalayer_extended.zoePH2.battery_remaining_charge)));
+    s.fields.push_back(
+        kv("balance capacity total", String(datalayer_extended.zoePH2.battery_balance_capacity_total)));
+    s.fields.push_back(kv("balance time total", String(datalayer_extended.zoePH2.battery_balance_time_total)));
+    s.fields.push_back(
+        kv("balance capacity sleep", String(datalayer_extended.zoePH2.battery_balance_capacity_sleep)));
+    s.fields.push_back(kv("balance time sleep", String(datalayer_extended.zoePH2.battery_balance_time_sleep)));
+    s.fields.push_back(
+        kv("balance capacity wake", String(datalayer_extended.zoePH2.battery_balance_capacity_wake)));
+    s.fields.push_back(kv("balance time wake", String(datalayer_extended.zoePH2.battery_balance_time_wake)));
+    s.fields.push_back(kv("bms state", String(datalayer_extended.zoePH2.battery_bms_state)));
+    s.fields.push_back(kv("energy complete", String(datalayer_extended.zoePH2.battery_energy_complete)));
+    s.fields.push_back(kv("energy partial", String(datalayer_extended.zoePH2.battery_energy_partial)));
+    s.fields.push_back(kv("slave failures", String(datalayer_extended.zoePH2.battery_slave_failures)));
+    s.fields.push_back(kv("mileage", String(datalayer_extended.zoePH2.battery_mileage)));
+    s.fields.push_back(kv("fan speed", String(datalayer_extended.zoePH2.battery_fan_speed)));
+    s.fields.push_back(kv("fan period", String(datalayer_extended.zoePH2.battery_fan_period)));
+    s.fields.push_back(kv("fan control", String(datalayer_extended.zoePH2.battery_fan_control)));
+    s.fields.push_back(kv("fan duty", String(datalayer_extended.zoePH2.battery_fan_duty)));
+    s.fields.push_back(kv("time", String(datalayer_extended.zoePH2.battery_time)));
+    s.fields.push_back(kv("pack time", String(datalayer_extended.zoePH2.battery_pack_time)));
+    s.fields.push_back(kv("soc min", String(datalayer_extended.zoePH2.battery_soc_min)));
+    s.fields.push_back(kv("soc max", String(datalayer_extended.zoePH2.battery_soc_max)));
+
+    String temporisation;
+    if (datalayer_extended.zoePH2.battery_temporisation == 255) {
+      temporisation = "Not read yet";
+    } else if (datalayer_extended.zoePH2.battery_temporisation == 0) {
+      temporisation = "0 Activated!";
+    } else if (datalayer_extended.zoePH2.battery_temporisation == 1) {
+      temporisation = "1 Disabled!";
+    } else {
+      temporisation = String(datalayer_extended.zoePH2.battery_temporisation);
+    }
+    s.fields.push_back(kv("temporisation", temporisation));
+
+    status.sections.push_back(s);
+    return status;
+  }
 
   uint8_t calculate_crc_zoe(CAN_frame& frame, uint8_t crc_xor);
 
  private:
-  RenaultZoeGen2HtmlRenderer renderer;
+  void reset_DTC() { UserRequestedDTCReset = true; }
+  void reset_NVROL() { datalayer_extended.zoePH2.UserRequestNVROLReset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_RESET_NVROL, [this] { reset_NVROL(); }),
+  };
 
   DATALAYER_BATTERY_TYPE* datalayer_battery;
   DATALAYER_INFO_ZOE_PH2* datalayer_zoePH2;

@@ -1,44 +1,92 @@
 #ifndef KIA_HYUNDAI_64_BATTERY_H
 #define KIA_HYUNDAI_64_BATTERY_H
+#include <cstring>
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "KIA-HYUNDAI-64-HTML.h"
 
 class KiaHyundai64Battery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  KiaHyundai64Battery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_KIAHYUNDAI64* extended_ptr,
-                      bool* contactor_closing_allowed_ptr, CAN_Interface targetCan)
-      : CanBattery(targetCan), renderer(extended_ptr) {
-    datalayer_battery = datalayer_ptr;
-    contactor_closing_allowed = contactor_closing_allowed_ptr;
-    allows_contactor_closing = nullptr;
-    datalayer_battery_extended = extended_ptr;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  KiaHyundai64Battery() : renderer(&datalayer_extended.KiaHyundai64) {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
-    contactor_closing_allowed = nullptr;
-    datalayer_battery_extended = &datalayer_extended.KiaHyundai64;
+  KiaHyundai64Battery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
+    contactor_closing_allowed = ctx.is_primary() ? nullptr : ctx.contactor_flag;
+    datalayer_battery_extended = &extended_;
   }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Kia/Hyundai 64/40kWh battery";
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  bool supports_reset_DTC() { return true; }
-  bool supports_insulation_resistance() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
+  bool supports_insulation_resistance() override { return true; }
+
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    DATALAYER_INFO_KIAHYUNDAI64* kia_datalayer = &extended_;
+    AdvancedSection s;
+    auto build_fields = [&s](DATALAYER_INFO_KIAHYUNDAI64& data) {
+      char readableSerialNumber[17];  // One extra space for null terminator
+      memcpy(readableSerialNumber, data.ecu_serial_number, sizeof(data.ecu_serial_number));
+      readableSerialNumber[16] = '\0';  // Null terminate the string
+      char readableVersionNumber[17];   // One extra space for null terminator
+      memcpy(readableVersionNumber, data.ecu_version_number, sizeof(data.ecu_version_number));
+      readableVersionNumber[16] = '\0';  // Null terminate the string
+
+      s.fields.push_back(kv("BMS serial number", String(readableSerialNumber)));
+      s.fields.push_back(kv("BMS software version", String(readableVersionNumber)));
+      s.fields.push_back(kv("Cells", String(data.total_cell_count), "S"));
+      s.fields.push_back(kv("12V voltage", String(data.battery_12V / 10.0f, 1), "V"));
+
+      String waterleakage;
+      if (data.waterleakageSensor == 0) {
+        waterleakage = "LEAK DETECTED";
+      } else if (data.waterleakageSensor == 164) {
+        waterleakage = "No leakage";
+      } else {
+        waterleakage = String(data.waterleakageSensor);
+      }
+      s.fields.push_back(kv("Waterleakage", waterleakage));
+
+      s.fields.push_back(kv("Temperature, water inlet", String(data.temperature_water_inlet), "°C"));
+      s.fields.push_back(kv("Temperature, power relay", String(data.powerRelayTemperature), "°C"));
+      s.fields.push_back(kv("Batterymanagement mode", String(data.batteryManagementMode)));
+      s.fields.push_back(kv("BMS ignition", String(data.BMS_ign)));
+      s.fields.push_back(kv("Battery relay", String(data.batteryRelay)));
+      s.fields.push_back(kv("Inverter voltage", String(data.inverterVoltage), "V"));
+      s.fields.push_back(kv("Isolation resistance", String(data.isolation_resistance_kOhm), "kOhm"));
+      s.fields.push_back(kv("Power on total time", String(data.powered_on_total_time), "s"));
+      s.fields.push_back(kv("Fastcharging sessions", String(data.number_of_fastcharging_sessions), "x"));
+      s.fields.push_back(kv("Slowcharging sessions", String(data.number_of_standard_charging_sessions), "x"));
+      s.fields.push_back(
+          kv("Normal charged energy amount", String(data.accumulated_normal_charging_energy_kWh), "kWh"));
+      s.fields.push_back(kv("Fastcharged energy amount", String(data.accumulated_fastcharging_energy_kWh), "kWh"));
+      s.fields.push_back(
+          kv("Total amount charged energy", String(data.cumulative_energy_charged_kWh / 10.0), "kWh"));
+      s.fields.push_back(
+          kv("Total amount discharged energy", String(data.cumulative_energy_discharged_kWh / 10.0), "kWh"));
+      s.fields.push_back(kv("Cumulative charge current", String(data.cumulative_charge_current_ah / 10.0), "Ah"));
+      s.fields.push_back(
+          kv("Cumulative discharge current", String(data.cumulative_discharge_current_ah / 10.0), "Ah"));
+    };
+
+    build_fields(*kia_datalayer);
+
+    status.sections.push_back(s);
+    return status;
+  }
 
  private:
-  KiaHyundai64HtmlRenderer renderer;
+  void reset_DTC() { UserRequestDTCreset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
+  DATALAYER_INFO_KIAHYUNDAI64 extended_;
 
   DATALAYER_BATTERY_TYPE* datalayer_battery;
   DATALAYER_INFO_KIAHYUNDAI64* datalayer_battery_extended;

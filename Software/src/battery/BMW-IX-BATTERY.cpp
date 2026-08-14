@@ -1,11 +1,13 @@
 #include "BMW-IX-BATTERY.h"
 #include "../battery/BATTERIES.h"
+#include "../devboard/utils/time_format.h"
 #include "../communication/can/comm_can.h"
 #include "../communication/contactorcontrol/comm_contactorcontrol.h"
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
 #include "../devboard/utils/events.h"
 #include "../devboard/utils/logging.h"
+#include "../devboard/webserver/advanced_api.h"
 
 // Function to check if a value has gone stale over a specified time period
 bool BmwIXBattery::isStale(int16_t currentValue, uint16_t& lastValue, unsigned long& lastChangeTime) {
@@ -361,7 +363,7 @@ void BmwIXBattery::processCompletedUDSResponse() {
         break;
       uint16_t voltage = (buf[i] << 8) | buf[i + 1];
       if (voltage < 10000) {
-        datalayer.battery.status.cell_voltages_mV[voltage_index] = voltage;
+        datalayer_battery->status.cell_voltages_mV[voltage_index] = voltage;
       }
       voltage_index++;
     }
@@ -416,69 +418,59 @@ void BmwIXBattery::processCompletedUDSResponse() {
   gUDSContext.UDS_bytesReceived = 0;
 }
 
-/*
-static uint8_t increment_C0_counter(uint8_t counter) {
-  counter++;
-  // Reset to 0xF0 if it exceeds 0xFE
-  if (counter > 0xFE) {
-    counter = 0xF0;
-  }
-  return counter;
-}
-*/
 void BmwIXBattery::update_values() {  //This function maps all the values fetched via CAN to the battery datalayer
 
-  datalayer.battery.status.real_soc = avg_soc_state;
+  datalayer_battery->status.real_soc = avg_soc_state;
 
-  datalayer.battery.status.voltage_dV = battery_voltage;
+  datalayer_battery->status.voltage_dV = battery_voltage;
 
-  datalayer.battery.status.current_dA = battery_current;
+  datalayer_battery->status.current_dA = battery_current;
 
-  datalayer.battery.info.total_capacity_Wh = max_capacity;
+  datalayer_battery->info.total_capacity_Wh = max_capacity;
 
-  datalayer.battery.status.remaining_capacity_Wh = remaining_capacity;
+  datalayer_battery->status.remaining_capacity_Wh = remaining_capacity;
 
-  datalayer.battery.status.soh_pptt = min_soh_state;
+  datalayer_battery->status.soh_pptt = min_soh_state;
 
-  datalayer.battery.status.max_discharge_power_W =
-      datalayer.battery.status.override_discharge_power_W;  //TODO: Estimated from UI
+  datalayer_battery->status.max_discharge_power_W =
+      datalayer_battery->status.override_discharge_power_W;  //TODO: Estimated from UI
 
-  datalayer.battery.status.temperature_min_dC = min_battery_temperature;
+  datalayer_battery->status.temperature_min_dC = min_battery_temperature;
 
-  datalayer.battery.status.temperature_max_dC = max_battery_temperature;
+  datalayer_battery->status.temperature_max_dC = max_battery_temperature;
 
   // Calculate charge power limit based User set value and temperature
 
   // Temperature-based limiting (ramp from 0W at -10°C to RAMPDOWN_TEMP_POWER_W at 5°C)
-  int max_charge_power_temp = datalayer.battery.status.override_charge_power_W;
+  int max_charge_power_temp = datalayer_battery->status.override_charge_power_W;
 
-  if (datalayer.battery.status.temperature_min_dC <= RAMPDOWN_TEMP_MIN_dC) {
+  if (datalayer_battery->status.temperature_min_dC <= RAMPDOWN_TEMP_MIN_dC) {
     // Below -10°C: no charging allowed
     max_charge_power_temp = 0;
-  } else if (datalayer.battery.status.temperature_min_dC < RAMPDOWN_TEMP_MAX_dC) {
+  } else if (datalayer_battery->status.temperature_min_dC < RAMPDOWN_TEMP_MAX_dC) {
     // Between -10°C and 5°C: linear ramp from 0W to RAMPDOWN_TEMP_POWER_W
-    float ramp_percentage = (float)(datalayer.battery.status.temperature_min_dC - RAMPDOWN_TEMP_MIN_dC) /
+    float ramp_percentage = (float)(datalayer_battery->status.temperature_min_dC - RAMPDOWN_TEMP_MIN_dC) /
                             (float)(RAMPDOWN_TEMP_MAX_dC - RAMPDOWN_TEMP_MIN_dC);
     max_charge_power_temp = RAMPDOWN_TEMP_POWER_W * ramp_percentage;
   }
   // Above 5°C: no temperature limitation
 
   //Write actual allowed power to datalayer
-  datalayer.battery.status.max_charge_power_W = max_charge_power_temp;
+  datalayer_battery->status.max_charge_power_W = max_charge_power_temp;
 
   //Check stale values. As values dont change much during idle only consider stale if both parts of this message freeze.
   bool isMinCellVoltageStale =
-      isStale(min_cell_voltage, datalayer.battery.status.cell_min_voltage_mV, min_cell_voltage_lastchanged);
+      isStale(min_cell_voltage, datalayer_battery->status.cell_min_voltage_mV, min_cell_voltage_lastchanged);
   bool isMaxCellVoltageStale =
-      isStale(max_cell_voltage, datalayer.battery.status.cell_max_voltage_mV, max_cell_voltage_lastchanged);
+      isStale(max_cell_voltage, datalayer_battery->status.cell_max_voltage_mV, max_cell_voltage_lastchanged);
 
   if (isMinCellVoltageStale && isMaxCellVoltageStale) {
-    datalayer.battery.status.cell_min_voltage_mV = 9999;  //Stale values force stop
-    datalayer.battery.status.cell_max_voltage_mV = 9999;  //Stale values force stop
+    datalayer_battery->status.cell_min_voltage_mV = 9999;  //Stale values force stop
+    datalayer_battery->status.cell_max_voltage_mV = 9999;  //Stale values force stop
     set_event(EVENT_STALE_VALUE, 0);
   } else {
-    datalayer.battery.status.cell_min_voltage_mV = min_cell_voltage;  //Value is alive
-    datalayer.battery.status.cell_max_voltage_mV = max_cell_voltage;  //Value is alive
+    datalayer_battery->status.cell_min_voltage_mV = min_cell_voltage;  //Value is alive
+    datalayer_battery->status.cell_max_voltage_mV = max_cell_voltage;  //Value is alive
   }
 
   if (terminal30_12v_voltage < 1100) {  //11.000V
@@ -486,32 +478,32 @@ void BmwIXBattery::update_values() {  //This function maps all the values fetche
   }
 
   // detect number of cells
-  if ((datalayer.battery.status.cell_voltages_mV[77] > 1000) &&
-      (datalayer.battery.status.cell_voltages_mV[78] < 1000)) {
+  if ((datalayer_battery->status.cell_voltages_mV[77] > 1000) &&
+      (datalayer_battery->status.cell_voltages_mV[78] < 1000)) {
     //If we detect cellvoltage on cell78, but nothing on 79, we can confirm we are on SE12
     detected_number_of_cells = 78;  //We are on 78S SE12 battery from BMW iX1
     logging.printf("Detected %dS battery\n", (int)detected_number_of_cells);
-  } else if ((datalayer.battery.status.cell_voltages_mV[89] > 1000) &&
-             (datalayer.battery.status.cell_voltages_mV[90] < 1000)) {
+  } else if ((datalayer_battery->status.cell_voltages_mV[89] > 1000) &&
+             (datalayer_battery->status.cell_voltages_mV[90] < 1000)) {
     detected_number_of_cells = 90;
     logging.printf("Detected %dS battery\n", (int)detected_number_of_cells);
-  } else if ((datalayer.battery.status.cell_voltages_mV[93] > 1000) &&
-             (datalayer.battery.status.cell_voltages_mV[94] < 1000)) {
+  } else if ((datalayer_battery->status.cell_voltages_mV[93] > 1000) &&
+             (datalayer_battery->status.cell_voltages_mV[94] < 1000)) {
     detected_number_of_cells = 94;
     logging.printf("Detected %dS battery\n", (int)detected_number_of_cells);
-  } else if ((datalayer.battery.status.cell_voltages_mV[95] > 1000) &&
-             (datalayer.battery.status.cell_voltages_mV[96] < 1000)) {
+  } else if ((datalayer_battery->status.cell_voltages_mV[95] > 1000) &&
+             (datalayer_battery->status.cell_voltages_mV[96] < 1000)) {
     detected_number_of_cells = 96;
     logging.printf("Detected %dS battery\n", (int)detected_number_of_cells);
-  } else if ((datalayer.battery.status.cell_voltages_mV[99] > 1000) &&
-             (datalayer.battery.status.cell_voltages_mV[100] < 1000)) {
+  } else if ((datalayer_battery->status.cell_voltages_mV[99] > 1000) &&
+             (datalayer_battery->status.cell_voltages_mV[100] < 1000)) {
     detected_number_of_cells = 100;
     logging.printf("Detected %dS battery\n", (int)detected_number_of_cells);
-  } else if ((datalayer.battery.status.cell_voltages_mV[101] > 1000) &&
-             (datalayer.battery.status.cell_voltages_mV[102] < 1000)) {
+  } else if ((datalayer_battery->status.cell_voltages_mV[101] > 1000) &&
+             (datalayer_battery->status.cell_voltages_mV[102] < 1000)) {
     detected_number_of_cells = 102;
     logging.printf("Detected %dS battery\n", (int)detected_number_of_cells);
-  } else if (datalayer.battery.status.cell_voltages_mV[107] > 1000) {
+  } else if (datalayer_battery->status.cell_voltages_mV[107] > 1000) {
     // voltage index cannot be larger than 107, therefore we only perform a check if we detect cellvoltage on cell107
     detected_number_of_cells = 108;
     logging.printf("Detected %dS battery\n", (int)detected_number_of_cells);
@@ -519,29 +511,29 @@ void BmwIXBattery::update_values() {  //This function maps all the values fetche
     logging.println("Number of cells not recognized");
   }
 
-  datalayer.battery.info.number_of_cells = detected_number_of_cells;
+  datalayer_battery->info.number_of_cells = detected_number_of_cells;
 
   if (detected_number_of_cells == 78) {
-    datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_78S_DV;
-    datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_78S_DV;
+    datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_78S_DV;
+    datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_78S_DV;
   } else if (detected_number_of_cells == 90) {
-    datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_90S_DV;
-    datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_90S_DV;
+    datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_90S_DV;
+    datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_90S_DV;
   } else if (detected_number_of_cells == 94) {
-    datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_94S_DV;
-    datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_94S_DV;
+    datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_94S_DV;
+    datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_94S_DV;
   } else if (detected_number_of_cells == 96) {
-    datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_96S_DV;
-    datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_96S_DV;
+    datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_96S_DV;
+    datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_96S_DV;
   } else if (detected_number_of_cells == 100) {
-    datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_100S_DV;
-    datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_100S_DV;
+    datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_100S_DV;
+    datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_100S_DV;
   } else if (detected_number_of_cells == 102) {
-    datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_102S_DV;
-    datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_102S_DV;
+    datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_102S_DV;
+    datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_102S_DV;
   } else if (detected_number_of_cells == 108) {
-    datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_108S_DV;
-    datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_108S_DV;
+    datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_108S_DV;
+    datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_108S_DV;
   }
 
   // Map BMW IX balancing status to standard balancing status enum
@@ -551,18 +543,18 @@ void BmwIXBattery::update_values() {  //This function maps all the values fetche
   // default = Unknown
   switch (balancing_status) {
     case 0:
-      datalayer.battery.status.balancing_status = BALANCING_STATUS_READY;
+      datalayer_battery->status.balancing_status = BALANCING_STATUS_READY;
       break;
     case 1:
     case 2:
     case 3:
-      datalayer.battery.status.balancing_status = BALANCING_STATUS_ACTIVE;
+      datalayer_battery->status.balancing_status = BALANCING_STATUS_ACTIVE;
       break;
     case 4:
-      datalayer.battery.status.balancing_status = BALANCING_STATUS_ERROR;
+      datalayer_battery->status.balancing_status = BALANCING_STATUS_ERROR;
       break;
     default:
-      datalayer.battery.status.balancing_status = BALANCING_STATUS_UNKNOWN;
+      datalayer_battery->status.balancing_status = BALANCING_STATUS_UNKNOWN;
       break;
   }
 }
@@ -571,55 +563,55 @@ void BmwIXBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
   battery_awake = true;
   switch (rx_frame.ID) {
     case 0x12B8D087:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x1D2:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x20B:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x2E2:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x31F:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x3EA:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x453:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x486:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x49C:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x4A1:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x4BB:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x4D0:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x507:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x587:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x7AB:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x8F:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0xD0D087:
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x607:  //SME responds to UDS requests on 0x607
       // Removed immediate cell voltage parsing blocks - now handled by ISO-TP multi-frame handler below
@@ -701,7 +693,7 @@ void BmwIXBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       if ((rx_frame.DLC == 12) && (rx_frame.data.u8[4] == 0xE5) &&
           (rx_frame.data.u8[5] == 0x53)) {  //Min and max cell voltage   10V = Qualifier Invalid
 
-        datalayer.battery.status.CAN_battery_still_alive =
+        datalayer_battery->status.CAN_battery_still_alive =
             CAN_STILL_ALIVE;  //This is the most important safety values, if we receive this we reset CAN alive counter.
 
         if ((rx_frame.data.u8[6] << 8 | rx_frame.data.u8[7]) == 10000 ||
@@ -854,7 +846,7 @@ void BmwIXBattery::transmit_can(unsigned long currentMillis) {
         // CAN mode: pause UDS during contactor closing to avoid interference
         if (contactorCloseReq == true && ContactorState.closed == false) {
           // Contactors are being closed - pause UDS
-          datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+          datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
         } else {
           // Normal operation - send UDS requests
           uds_req_id_counter = increment_uds_req_id_counter(uds_req_id_counter);
@@ -863,7 +855,7 @@ void BmwIXBattery::transmit_can(unsigned long currentMillis) {
       }
     } else {
       // During startup (first 3 seconds), keep battery marked as alive
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
     }
 
     // Keep contactors closed if needed (only when GPIO control is disabled)
@@ -879,15 +871,6 @@ void BmwIXBattery::transmit_can(unsigned long currentMillis) {
     //transmit_can_frame(&BMWiX_510);
   }
   // Send 200ms CAN Message
-  /*
-  if (currentMillis - previousMillis200 >= INTERVAL_200_MS) {
-    previousMillis200 = currentMillis;
-
-    Send SME Keep alive values 200ms
-    BMWiX_C0.data.u8[0] = increment_C0_counter(BMWiX_C0.data.u8[0]);  //Keep Alive 1
-    transmit_can_frame(&BMWiX_C0);
-  }
-  */
   // Send 1000ms CAN Message
   if (currentMillis - previousMillis1000 >= INTERVAL_1_S) {
     previousMillis1000 = currentMillis;
@@ -920,7 +903,7 @@ void BmwIXBattery::transmit_can(unsigned long currentMillis) {
     transmit_can_frame(&BMWiX_6F4_REQUEST_READ_DTC);
     UserRequestDTCRead = false;
 
-    // Set flags in datalayer for HTML renderer
+    // Set flags in datalayer for get_advanced_status()
     datalayer_extended.bmwix.dtc_read_in_progress = true;
     datalayer_extended.bmwix.dtc_read_failed = false;
   }
@@ -947,17 +930,15 @@ void BmwIXBattery::transmit_can(unsigned long currentMillis) {
 }
 
 void BmwIXBattery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
 
   startup_reset_complete = false;
 
   //Before we have started up and detected which battery is in use, use largest deviation possible to avoid errors
-  datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_108S_DV;
-  datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_78S_DV;
-  datalayer.battery.info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
-  datalayer.battery.info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
-  datalayer.battery.info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
+  datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_108S_DV;
+  datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_78S_DV;
+  datalayer_battery->info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
+  datalayer_battery->info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
+  datalayer_battery->info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
   datalayer.system.status.battery_allows_contactor_closing = false;  // Don't allow contactors until reset is done
 }
 
@@ -1141,7 +1122,7 @@ void BmwIXBattery::HandleBmwIxOpenContactorsRequest(uint16_t counter_10ms) {
   }
 }
 
-// Getter implementations for HTML renderer
+// Getter implementations for get_advanced_status()
 int BmwIXBattery::get_battery_voltage_after_contactor() const {
   return battery_voltage_after_contactor;
 }
@@ -1189,4 +1170,158 @@ int BmwIXBattery::get_pyro_status_pss4() const {
 }
 int BmwIXBattery::get_pyro_status_pss6() const {
   return pyro_status_pss6;
+}
+
+BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
+  BatteryAdvancedStatus status;
+
+  // Power & Voltage
+  AdvancedSection power_section;
+  power_section.title = "Power & Voltage";
+  power_section.fields.push_back(
+      kv("Battery Voltage (After Contactor)", String(get_battery_voltage_after_contactor()), "dV"));
+  power_section.fields.push_back(kv("Max Design Voltage", String(datalayer_battery->info.max_design_voltage_dV), "dV"));
+  power_section.fields.push_back(kv("Min Design Voltage", String(datalayer_battery->info.min_design_voltage_dV), "dV"));
+  power_section.fields.push_back(kv("T30 Terminal Voltage", String(get_T30_Voltage()), "mV"));
+  power_section.fields.push_back(kv("Allowed Charge Power", String(datalayer_battery->status.max_charge_power_W), "W"));
+  power_section.fields.push_back(
+      kv("Allowed Discharge Power", String(datalayer_battery->status.max_discharge_power_W), "W"));
+  power_section.fields.push_back(kv("BMS Allowed Charge Amps", String(get_allowable_charge_amps()), "A"));
+  power_section.fields.push_back(kv("BMS Allowed Discharge Amps", String(get_allowable_discharge_amps()), "A"));
+  status.sections.push_back(power_section);
+
+  // Cell Information
+  AdvancedSection cell_section;
+  cell_section.title = "Cell Information";
+  cell_section.fields.push_back(kv("Detected Cell Count", String(datalayer_battery->info.number_of_cells)));
+  cell_section.fields.push_back(kv("Max Cell Design Voltage", String(datalayer_battery->info.max_cell_voltage_mV), "mV"));
+  cell_section.fields.push_back(kv("Min Cell Design Voltage", String(datalayer_battery->info.min_cell_voltage_mV), "mV"));
+  cell_section.fields.push_back(kv("Min Cell Voltage Data Age", String(get_min_cell_voltage_data_age()), "ms"));
+  cell_section.fields.push_back(kv("Max Cell Voltage Data Age", String(get_max_cell_voltage_data_age()), "ms"));
+  status.sections.push_back(cell_section);
+
+  // Battery Status
+  AdvancedSection battery_status_section;
+  battery_status_section.title = "Battery Status";
+  String balancing;
+  switch (get_balancing_status()) {
+    case 0:
+      balancing = "No Balancing Mode Active";
+      break;
+    case 1:
+      balancing = "Voltage-Controlled Balancing Mode";
+      break;
+    case 2:
+      balancing = "Time-Controlled Balancing Mode with Demand Calculation at End of Charging";
+      break;
+    case 3:
+      balancing = "Time-Controlled Balancing Mode with Demand Calculation at Resting Voltage";
+      break;
+    case 4:
+      balancing = "No Balancing Mode Active (Qualifier Invalid)";
+      break;
+    default:
+      balancing = "Unknown";
+  }
+  battery_status_section.fields.push_back(kv("Balancing", balancing));
+
+  String energy_saving_mode;
+  int energy_mode = get_energy_saving_mode_status();
+  switch (energy_mode) {
+    case 0:
+      energy_saving_mode = "No Operating Mode Set (Normal)";
+      break;
+    case 1:
+      energy_saving_mode = "Production Mode Active";
+      break;
+    case 2:
+      energy_saving_mode = "Transport Mode Active";
+      break;
+    case 3:
+      energy_saving_mode = "Flash Mode Active";
+      break;
+    default:
+      if (energy_mode >= 4 && energy_mode <= 16) {
+        energy_saving_mode = "Extended Operating Mode " + String(energy_mode);
+      } else {
+        energy_saving_mode = "Unknown (" + String(energy_mode) + ")";
+      }
+      break;
+  }
+  battery_status_section.fields.push_back(kv("Energy Saving Mode", energy_saving_mode));
+  status.sections.push_back(battery_status_section);
+
+  // Safety Systems
+  AdvancedSection safety_section;
+  safety_section.title = "Safety Systems";
+  String hvil_status;
+  switch (get_hvil_status()) {
+    case 0:
+      hvil_status = "Error (Loop Open)";
+      break;
+    case 1:
+      hvil_status = "OK (Loop Closed)";
+      break;
+    default:
+      hvil_status = "Unknown";
+  }
+  safety_section.fields.push_back(kv("HVIL Status", hvil_status));
+
+  auto pyro_status_text = [](int status) {
+    switch (status) {
+      case 0:
+        return "Value Invalid";
+      case 1:
+        return "Successfully Blown";
+      case 2:
+        return "Disconnected";
+      case 3:
+        return "Not Activated - Pyro Intact";
+      case 4:
+        return "Unknown";
+      default:
+        return "Unknown";
+    }
+  };
+  safety_section.fields.push_back(kv("Pyro Status PSS1", String(pyro_status_text(get_pyro_status_pss1()))));
+  safety_section.fields.push_back(kv("Pyro Status PSS4", String(pyro_status_text(get_pyro_status_pss4()))));
+  safety_section.fields.push_back(kv("Pyro Status PSS6", String(pyro_status_text(get_pyro_status_pss6()))));
+  status.sections.push_back(safety_section);
+
+  // Isolation Monitoring
+  AdvancedSection isolation_section;
+  isolation_section.title = "Isolation Monitoring";
+  isolation_section.fields.push_back(kv("Isolation Positive",
+                                        String(get_iso_safety_positive()) + " (2147483647 = maximum/invalid)",
+                                        "kΩ"));
+  isolation_section.fields.push_back(kv("Isolation Negative",
+                                        String(get_iso_safety_negative()) + " (2147483647 = maximum/invalid)",
+                                        "kΩ"));
+  isolation_section.fields.push_back(kv("Isolation Parallel",
+                                        String(get_iso_safety_parallel()) + " (2147483647 = maximum/invalid)",
+                                        "kΩ"));
+  status.sections.push_back(isolation_section);
+
+  // Diagnostics
+  AdvancedSection diagnostics_section;
+  diagnostics_section.title = "Diagnostics";
+  diagnostics_section.fields.push_back(
+      kv("BMS Uptime", format_ms_string((uint64_t)get_bms_uptime() * 1000)));
+  status.sections.push_back(diagnostics_section);
+
+  // Diagnostic Trouble Codes: the BMW iX DTC store (DATALAYER_INFO_BMWIX) is a
+  // distinct type from the shared DATALAYER_BATTERY_DTC_TYPE used by
+  // dtc_advanced_section(*this, ), so its fields are copied into a local adapter
+  // rather than reimplementing the table/status logic here.
+  DATALAYER_BATTERY_DTC_TYPE dtc_adapter{};
+  dtc_adapter.dtc_count = datalayer_extended.bmwix.dtc_count;
+  dtc_adapter.dtc_last_read_millis = datalayer_extended.bmwix.dtc_last_read_millis;
+  dtc_adapter.dtc_read_failed = datalayer_extended.bmwix.dtc_read_failed;
+  for (uint8_t i = 0; i < dtc_adapter.dtc_count && i < DATALAYER_BATTERY_DTC_TYPE::MAX_DTC_COUNT; i++) {
+    dtc_adapter.dtc_codes[i] = datalayer_extended.bmwix.dtc_codes[i];
+    dtc_adapter.dtc_status[i] = datalayer_extended.bmwix.dtc_status[i];
+  }
+  status.sections.push_back(dtc_advanced_section(*this, dtc_adapter, DtcCodeStyle::kRawHex));
+
+  return status;
 }

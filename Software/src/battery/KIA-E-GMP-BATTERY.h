@@ -1,21 +1,23 @@
 #ifndef KIA_E_GMP_BATTERY_H
 #define KIA_E_GMP_BATTERY_H
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "KIA-E-GMP-HTML.h"
 
 extern bool user_selected_use_estimated_SOC;
 
 class KiaEGmpBattery : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }
-  KiaEGmpBattery() : renderer(*this) {}
+  KiaEGmpBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
+  KiaEGmpBattery() {}
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Kia/Hyundai EGMP platform";
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
-  // Getter implementations for HTML renderer
+
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
+  BatteryAdvancedStatus get_advanced_status() override;
   int get_battery_12V() const;
   int get_waterleakageSensor() const;
   int get_temperature_water_inlet() const;
@@ -24,12 +26,15 @@ class KiaEGmpBattery : public CanBattery {
   int get_BMS_ign() const;
   int get_batRelay() const;
 
-  bool supports_reset_DTC() { return true; }
+ private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   void reset_DTC() { UserRequestDTCreset = true; }
 
- private:
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
   bool UserRequestDTCreset = false;
-  KiaEGMPHtmlRenderer renderer;
   uint16_t estimateSOC(uint16_t packVoltage, uint16_t cellCount, int16_t currentAmps);
   uint16_t selectSOC(uint16_t SOC_low, uint16_t SOC_high);
   uint16_t estimateSOCFromCell(uint16_t cellVoltage);

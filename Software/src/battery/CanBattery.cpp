@@ -2,7 +2,7 @@
 
 CanBattery::CanBattery(CAN_Speed speed) : CanBattery(can_config.battery, speed) {}
 
-CanBattery::CanBattery(CAN_Interface interface, CAN_Speed speed) {
+CanBattery::CanBattery(const InterfaceDescriptor* interface, CAN_Speed speed) {
   can_interface = interface;
   initial_speed = speed;
   register_transmitter(this);

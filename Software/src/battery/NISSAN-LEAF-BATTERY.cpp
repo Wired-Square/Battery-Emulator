@@ -1,4 +1,5 @@
 #include "NISSAN-LEAF-BATTERY.h"
+#include <Arduino.h>
 #include <cstring>  //For unit test
 #include "../charger/CHARGERS.h"
 #include "../charger/CanCharger.h"
@@ -17,11 +18,6 @@ unsigned int ComputeMaskedXorProduct(unsigned int param_1, unsigned int param_2,
 short ShortMaskedSumAndProduct(short param_1, short param_2);
 unsigned int MaskedBitwiseRotateMultiply(unsigned int param_1, unsigned int param_2);
 unsigned int CryptAlgo(unsigned int param_1, unsigned int param_2, unsigned int param_3);
-
-// Note this should only be allowed/used on 2011-2017 24/30kWh batteries!
-bool NissanLeafBattery::supports_reset_SOH() {
-  return LEAF_battery_Type != ZE1_BATTERY;
-}
 
 void NissanLeafBattery::set_balancing_status(balancing_status_enum new_status) {
   if (new_status == datalayer_battery->status.balancing_status) {
@@ -281,10 +277,9 @@ void NissanLeafBattery::
     memcpy(datalayer_nissan->BatteryPartNumber, BatteryPartNumber, sizeof(BatteryPartNumber));
     datalayer_nissan->LEAF_gen = LEAF_battery_Type;
     if (allows_contactor_closing) {  //Only the main battery names the protocol shown on the status page
-      //setup() already wrote Name, so only the "battery" part gets replaced by the detected generation
-      static_assert(Name[sizeof("Nissan LEAF ") - 1] == 'b', "Name must start with \"Nissan LEAF \"");
       static const char LEAF_gen_name[3][5] = {"ZE0", "AZE0", "ZE1"};
-      strcpy(datalayer.system.info.battery_protocol + sizeof("Nissan LEAF ") - 1, LEAF_gen_name[LEAF_battery_Type]);
+      snprintf(datalayer.system.info.battery_protocol, sizeof(datalayer.system.info.battery_protocol),
+               "Nissan LEAF %s", LEAF_gen_name[LEAF_battery_Type]);
     }
     datalayer_nissan->GIDS = battery_GIDS;
     datalayer_nissan->ChargePowerLimit = battery_Charge_Power_Limit;
@@ -692,7 +687,7 @@ void NissanLeafBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
               battery_temp_raw_min = battery_temp_raw_2;
             }
             if (battery_temp_raw_3 < battery_temp_raw_min) {
-              battery_temp_raw_min = battery_temp_raw_2;
+              battery_temp_raw_min = battery_temp_raw_3;
             }
             if (battery_temp_raw_4 < battery_temp_raw_min) {
               battery_temp_raw_min = battery_temp_raw_4;
@@ -1400,8 +1395,6 @@ void decodeChallengeData(unsigned int incomingChallenge, unsigned char* solvedCh
 #endif
 
 void NissanLeafBattery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
   datalayer_battery->info.number_of_cells = 96;
   datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_DV;
   datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_DV;

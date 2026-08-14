@@ -1,32 +1,42 @@
 #ifndef MG_5_BATTERY_H
 #define MG_5_BATTERY_H
 
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 #ifndef SMALL_FLASH_DEVICE
 
 class Mg5Battery : public CanBattery {
  public:
+  Mg5Battery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void update_soc(uint16_t soc_times_ten);
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "MG 5 battery";
+
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
   void startUDSMultiFrameReception(uint16_t totalLength, uint8_t moduleID);
   bool storeUDSPayload(const uint8_t* payload, uint8_t length);
   void buildMG5_8AFrame();
   bool isUDSMessageComplete();
   virtual void print_formatted_dtc(uint32_t dtc24, uint8_t status);
-  bool supports_contactor_close() { return true; }
-  virtual bool supports_read_DTC() { return true; }
-  virtual bool supports_reset_DTC() { return true; }
-  void request_open_contactors() { userRequestContactorClose = false; }
-  void request_close_contactors() { userRequestContactorClose = true; }
-  virtual void read_DTC() { userRequestReadDTC = true; }
-  virtual void reset_DTC() { userRequestClearDTC = true; }
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void request_open_contactors() { userRequestContactorClose = false; }
+  void request_close_contactors() { userRequestContactorClose = true; }
+  void read_DTC() { userRequestReadDTC = true; }
+  void reset_DTC() { userRequestClearDTC = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+      command(CMD_CONTACTOR_CLOSE, [this] { request_close_contactors(); }),
+      command(CMD_CONTACTOR_OPEN, [this] { request_open_contactors(); }),
+  };
+
   static const int MAX_PACK_VOLTAGE_DV = 4040;  //5000 = 500.0V
   static const int MIN_PACK_VOLTAGE_DV = 3100;
   static const int MAX_CELL_DEVIATION_MV = 150;

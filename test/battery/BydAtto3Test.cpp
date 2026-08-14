@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../../Software/src/battery/BYD-ATTO-3-BATTERY.h"
+#include "../../Software/src/battery/BATTERIES.h"
 #include "../../Software/src/datalayer/datalayer.h"
 #include "../../Software/src/datalayer/datalayer_extended.h"
 
@@ -42,7 +43,7 @@ CAN_frame byd_corrupt_frame(uint32_t id, std::initializer_list<uint8_t> first7by
 
 // Clears the shared global datalayer between tests, so none sees values left by another.
 void reset_byd_state() {
-  datalayer.battery.status = DATALAYER_BATTERY_STATUS_TYPE{};
+  datalayer.battery.pack[0].status = DATALAYER_BATTERY_STATUS_TYPE{};
   datalayer.battery.settings.max_user_set_charge_dA = 300;
   datalayer_extended.bydAtto3.chargePower = 0;
   datalayer_extended.bydAtto3.dischargePower = 0;
@@ -66,7 +67,7 @@ CAN_frame power_limit_frame() {
 
 TEST(BydAtto3Tests, ShouldDecode0x345PowerLimitsAndRejectBadChecksum) {
   reset_byd_state();
-  auto battery = new BydAttoBattery();
+  auto battery = new BydAttoBattery(battery_slot_context(0));
   battery->setup();
 
   battery->handle_incoming_can_frame(power_limit_frame());
@@ -74,7 +75,7 @@ TEST(BydAtto3Tests, ShouldDecode0x345PowerLimitsAndRejectBadChecksum) {
 
   EXPECT_EQ(datalayer_extended.bydAtto3.dischargePower, 2855);
   EXPECT_EQ(datalayer_extended.bydAtto3.chargePower, 1311);
-  EXPECT_EQ(datalayer.battery.status.CAN_error_counter, 0);
+  EXPECT_EQ(datalayer.battery.pack[0].status.CAN_error_counter, 0);
 
   // 100 / 200 with a bad checksum: a gate failing open would show those instead of 2855 / 1311.
   battery->handle_incoming_can_frame(byd_corrupt_frame(0x345, {0x64, 0x00, 0xC8, 0x00, 0x00, 0x00, 0x00}));
@@ -82,7 +83,7 @@ TEST(BydAtto3Tests, ShouldDecode0x345PowerLimitsAndRejectBadChecksum) {
 
   EXPECT_EQ(datalayer_extended.bydAtto3.dischargePower, 2855);
   EXPECT_EQ(datalayer_extended.bydAtto3.chargePower, 1311);
-  EXPECT_EQ(datalayer.battery.status.CAN_error_counter, 1);
+  EXPECT_EQ(datalayer.battery.pack[0].status.CAN_error_counter, 1);
 
   // Same payload, valid checksum: accepted, so the checksum caused the rejection above.
   battery->handle_incoming_can_frame(byd_checksummed_frame(0x345, {0x64, 0x00, 0xC8, 0x00, 0x00, 0x00, 0x00}));
@@ -94,7 +95,7 @@ TEST(BydAtto3Tests, ShouldDecode0x345PowerLimitsAndRejectBadChecksum) {
 
 TEST(BydAtto3Tests, ShouldDecode0x447TemperaturesSensorNumbersAndHighPrecisionSoc) {
   reset_byd_state();
-  auto battery = new BydAttoBattery();
+  auto battery = new BydAttoBattery(battery_slot_context(0));
   battery->setup();
 
   battery->handle_incoming_can_frame(temperature_frame());
@@ -102,11 +103,11 @@ TEST(BydAtto3Tests, ShouldDecode0x447TemperaturesSensorNumbersAndHighPrecisionSo
 
   EXPECT_EQ(datalayer_extended.bydAtto3.BMS_min_temp_module_number, 9);
   EXPECT_EQ(datalayer_extended.bydAtto3.BMS_max_temp_module_number, 1);
-  EXPECT_EQ(datalayer.battery.status.temperature_min_dC, 80);   // 8C
-  EXPECT_EQ(datalayer.battery.status.temperature_max_dC, 240);  // 24C
-  EXPECT_EQ(datalayer.battery.status.real_soc, 9920);           // 99.2%, scaled by 100
+  EXPECT_EQ(datalayer.battery.pack[0].status.temperature_min_dC, 80);   // 8C
+  EXPECT_EQ(datalayer.battery.pack[0].status.temperature_max_dC, 240);  // 24C
+  EXPECT_EQ(datalayer.battery.pack[0].status.real_soc, 9920);           // 99.2%, scaled by 100
   EXPECT_EQ(datalayer_extended.bydAtto3.SOC_highprec, 992);
-  EXPECT_EQ(datalayer.battery.status.CAN_error_counter, 0);
+  EXPECT_EQ(datalayer.battery.pack[0].status.CAN_error_counter, 0);
 
   // Sensor 1 at 40C / sensor 2 at 56C / SOC 25.6%, all materially different, with a bad checksum.
   battery->handle_incoming_can_frame(byd_corrupt_frame(0x447, {0x01, 0x50, 0x02, 0x68, 0x00, 0x01, 0x50}));
@@ -114,15 +115,15 @@ TEST(BydAtto3Tests, ShouldDecode0x447TemperaturesSensorNumbersAndHighPrecisionSo
 
   EXPECT_EQ(datalayer_extended.bydAtto3.BMS_min_temp_module_number, 9);
   EXPECT_EQ(datalayer_extended.bydAtto3.BMS_max_temp_module_number, 1);
-  EXPECT_EQ(datalayer.battery.status.temperature_min_dC, 80);
-  EXPECT_EQ(datalayer.battery.status.temperature_max_dC, 240);
-  EXPECT_EQ(datalayer.battery.status.real_soc, 9920);
-  EXPECT_EQ(datalayer.battery.status.CAN_error_counter, 1);
+  EXPECT_EQ(datalayer.battery.pack[0].status.temperature_min_dC, 80);
+  EXPECT_EQ(datalayer.battery.pack[0].status.temperature_max_dC, 240);
+  EXPECT_EQ(datalayer.battery.pack[0].status.real_soc, 9920);
+  EXPECT_EQ(datalayer.battery.pack[0].status.CAN_error_counter, 1);
 }
 
 TEST(BydAtto3Tests, ShouldDecode0x444WholePercentSocAndRejectBadChecksum) {
   reset_byd_state();
-  auto battery = new BydAttoBattery();
+  auto battery = new BydAttoBattery(battery_slot_context(0));
   battery->setup();
 
   // b0/b1 = whole-volt voltage (420V), b2:b3 = current (offset 5000, here 0A), b4 = SOH (93%),
@@ -131,14 +132,14 @@ TEST(BydAtto3Tests, ShouldDecode0x444WholePercentSocAndRejectBadChecksum) {
   battery->update_values();
 
   EXPECT_EQ(datalayer_extended.bydAtto3.SOC_polled, 31);
-  EXPECT_EQ(datalayer.battery.status.soh_pptt, 9300);
-  EXPECT_EQ(datalayer.battery.status.CAN_error_counter, 0);
+  EXPECT_EQ(datalayer.battery.pack[0].status.soh_pptt, 9300);
+  EXPECT_EQ(datalayer.battery.pack[0].status.CAN_error_counter, 0);
 
   // SOH 50% / SOC 80%, both materially different, with a bad checksum.
   battery->handle_incoming_can_frame(byd_corrupt_frame(0x444, {0xA4, 0x01, 0x88, 0x13, 0x32, 0x50, 0x00}));
   battery->update_values();
 
   EXPECT_EQ(datalayer_extended.bydAtto3.SOC_polled, 31);
-  EXPECT_EQ(datalayer.battery.status.soh_pptt, 9300);
-  EXPECT_EQ(datalayer.battery.status.CAN_error_counter, 1);
+  EXPECT_EQ(datalayer.battery.pack[0].status.soh_pptt, 9300);
+  EXPECT_EQ(datalayer.battery.pack[0].status.CAN_error_counter, 1);
 }

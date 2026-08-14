@@ -4,11 +4,12 @@
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
 #include "../devboard/hal/hal.h"
-#include "CHADEMO-BATTERY-HTML.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class ChademoBattery : public CanBattery {
  public:
+  ChademoBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   ChademoBattery() {
     pin2 = esp32hal->CHADEMO_PIN_2();
     pin10 = esp32hal->CHADEMO_PIN_10();
@@ -17,8 +18,8 @@ class ChademoBattery : public CanBattery {
     pin_lock = esp32hal->CHADEMO_LOCK();
 
     // Assuming these are initialized by contactor control module.
-    precharge = esp32hal->PRECHARGE_PIN();
-    positive_contactor = esp32hal->POSITIVE_CONTACTOR_PIN();
+    precharge_output = esp32hal->switched_output(OutputRole::Precharge);
+    positive_contactor_output = esp32hal->switched_output(OutputRole::PositiveContactor);
   }
 
   virtual void setup(void);
@@ -26,18 +27,87 @@ class ChademoBattery : public CanBattery {
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  bool supports_chademo_restart() { return true; }
-  bool supports_chademo_stop() { return true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
+
+    String chademo_state;
+    switch (datalayer_extended.chademo.CHADEMO_Status) {
+      case 0:
+        chademo_state = "FAULT";
+        break;
+      case 1:
+        chademo_state = "STOP";
+        break;
+      case 2:
+        chademo_state = "IDLE";
+        break;
+      case 3:
+        chademo_state = "CONNECTED";
+        break;
+      case 4:
+        chademo_state = "INIT";
+        break;
+      case 5:
+        chademo_state = "NEGOTIATE";
+        break;
+      case 6:
+        chademo_state = "EV ALLOWED";
+        break;
+      case 7:
+        chademo_state = "EVSE PREPARE";
+        break;
+      case 8:
+        chademo_state = "EVSE START";
+        break;
+      case 9:
+        chademo_state = "EVSE CONTACTORS ENABLED";
+        break;
+      case 10:
+        chademo_state = "POWERFLOW";
+        break;
+      default:
+        chademo_state = "Unknown";
+        break;
+    }
+    s.fields.push_back(kv("Chademo state", chademo_state));
+
+    if (datalayer_extended.chademo.FaultBatteryCurrentDeviation) {
+      s.fields.push_back(kv("FAULT", "Battery Current Deviation"));
+    }
+    if (datalayer_extended.chademo.FaultBatteryOverVoltage) {
+      s.fields.push_back(kv("FAULT", "Battery Overvoltage"));
+    }
+    if (datalayer_extended.chademo.FaultBatteryUnderVoltage) {
+      s.fields.push_back(kv("FAULT", "Battery Undervoltage"));
+    }
+    if (datalayer_extended.chademo.FaultBatteryVoltageDeviation) {
+      s.fields.push_back(kv("FAULT", "Battery Voltage Deviation"));
+    }
+    if (datalayer_extended.chademo.FaultHighBatteryTemperature) {
+      s.fields.push_back(kv("FAULT", "Battery Temperature"));
+    }
+    s.fields.push_back(kv("Protocol", String(datalayer_extended.chademo.ControlProtocolNumberEV)));
+
+    status.sections.push_back(s);
+    return status;
+  }
+
+ private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   void chademo_restart() { datalayer_extended.chademo.UserRequestRestart = true; }
   void chademo_stop() { datalayer_extended.chademo.UserRequestStop = true; }
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
-  static constexpr const char* Name = "Chademo V2X mode";
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_CHADEMO_RESTART, [this] { chademo_restart(); }),
+      command(CMD_CHADEMO_STOP, [this] { chademo_stop(); }),
+  };
 
- private:
-  gpio_num_t pin2, pin10, pin4, pin7, pin_lock, precharge, positive_contactor;
-  ChademoBatteryHtmlRenderer renderer;
+  gpio_num_t pin2, pin10, pin4, pin7, pin_lock;
+  SwitchedOutput* precharge_output;
+  SwitchedOutput* positive_contactor_output;
 
   void process_vehicle_charging_minimums(CAN_frame rx_frame);
   void process_vehicle_charging_maximums(CAN_frame rx_frame);

@@ -1,33 +1,31 @@
 #ifndef STELLANTIS_SMALLWIDE_4x4_BATTERY_H
 #define STELLANTIS_SMALLWIDE_4x4_BATTERY_H
 #include "../datalayer/datalayer.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class StellantisSmallWide4x4Battery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  StellantisSmallWide4x4Battery(DATALAYER_BATTERY_TYPE* datalayer_ptr, CAN_Interface targetCan)
-      : CanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-    allows_contactor_closing = nullptr;
-  }
-
   // Use the default constructor to create the first or single battery.
-  StellantisSmallWide4x4Battery() {
-    datalayer_battery = &datalayer.battery;
+  StellantisSmallWide4x4Battery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
     allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
   }
-
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Stellantis FCA Small Wide 4x4";
+
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
  private:
+  void reset_DTC() { UserRequestDTCreset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
   DATALAYER_BATTERY_TYPE* datalayer_battery;
 
   // If not null, this battery decides when the contactor can be closed and writes the value here.

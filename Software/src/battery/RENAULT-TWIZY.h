@@ -1,16 +1,18 @@
 #ifndef RENAULT_TWIZY_BATTERY_H
 #define RENAULT_TWIZY_BATTERY_H
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class RenaultTwizyBattery : public CanBattery {
  public:
+  RenaultTwizyBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Renault Twizy";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   static const int MAX_PACK_VOLTAGE_DV = 579;  // 57.9V at 100% SOC (with 70% SOH, new one might be higher)
   static const int MIN_PACK_VOLTAGE_DV = 480;  // 48.4V at 13.76% SOC
   static const int MAX_CELL_DEVIATION_MV = 150;

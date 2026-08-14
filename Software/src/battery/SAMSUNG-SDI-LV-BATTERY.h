@@ -2,17 +2,19 @@
 #define SAMSUNG_SDI_LV_BATTERY_H
 #include <Arduino.h>
 #include "../datalayer/datalayer.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class SamsungSdiLVBattery : public CanBattery {
  public:
+  SamsungSdiLVBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Samsung SDI LV Battery";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   static const int MAX_PACK_VOLTAGE_DV = 600;  //5000 = 500.0V
   static const int MIN_PACK_VOLTAGE_DV = 300;
   static const int MAX_CELL_DEVIATION_MV = 250;

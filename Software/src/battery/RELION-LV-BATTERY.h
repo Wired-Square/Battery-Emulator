@@ -4,30 +4,24 @@
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
 #include "../system_settings.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class RelionBattery : public CanBattery {
  public:
-  bool mandatory_charge_taper() { return true; }
-  // Use this constructor for the second battery.
-  RelionBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, CAN_Interface targetCan, bool* allows_contactor_closing_ptr)
-      : CanBattery(targetCan, CAN_Speed::CAN_SPEED_250KBPS) {
-    datalayer_battery = datalayer_ptr;
-    allows_contactor_closing = allows_contactor_closing_ptr;
-    battery_total_voltage = 0;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  RelionBattery() : CanBattery(CAN_Speed::CAN_SPEED_250KBPS) {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
+  RelionBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface, CAN_Speed::CAN_SPEED_250KBPS) {
+    datalayer_battery = ctx.datalayer;
+    // Every Relion slot decides its own contactor closing, not just the primary.
+    allows_contactor_closing = ctx.contactor_flag;
+    if (!ctx.is_primary()) {
+      battery_total_voltage = 0;  // default 500; slot must read 0 V until CAN gives a real value
+    }
   }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Relion LV protocol via 250kbps CAN";
 
  private:
   DATALAYER_BATTERY_TYPE* datalayer_battery;
@@ -41,6 +35,9 @@ class RelionBattery : public CanBattery {
   static const int MAX_CELL_DEVIATION_MV = 300;
   static const int MAX_CELL_VOLTAGE_MV = 3750;
   static const int MIN_CELL_VOLTAGE_MV = 2800;
+
+  static const int MAX_CHARGE_POWER_WHEN_TOPBALANCING_W = 150;  // W, what power to allow for top balancing battery
+  static const int FLOAT_START_MV = 20;  // mV, how many mV under overvoltage to start float charging
 
   unsigned long previousMillis500ms = 0;  // will store last time a 500ms CAN Message was sent
 

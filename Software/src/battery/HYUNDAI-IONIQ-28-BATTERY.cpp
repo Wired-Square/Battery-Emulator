@@ -403,8 +403,6 @@ void HyundaiIoniq28Battery::transmit_can(unsigned long currentMillis) {
 }
 
 void HyundaiIoniq28Battery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
   datalayer_battery->info.total_capacity_Wh = 28000;
   datalayer_battery->info.number_of_cells = 96;
   datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_DV;
@@ -429,4 +427,15 @@ uint8_t HyundaiIoniq28Battery::get_battery_management_mode() const {
 
 uint16_t HyundaiIoniq28Battery::get_isolation_resistance() const {
   return isolation_resistance;
+}
+
+BatteryAdvancedStatus HyundaiIoniq28Battery::get_advanced_status() {
+  BatteryAdvancedStatus status;
+  AdvancedSection s;
+  s.fields.push_back(kv("12V voltage", String(get_lead_acid_voltage() / 10.0f, 1)));
+  s.fields.push_back(kv("Temperature, power relay", String(get_power_relay_temperature())));
+  s.fields.push_back(kv("Batterymanagement mode", String(get_battery_management_mode())));
+  s.fields.push_back(kv("Isolation resistance", String(get_isolation_resistance()), "kOhm"));
+  status.sections.push_back(s);
+  return status;
 }

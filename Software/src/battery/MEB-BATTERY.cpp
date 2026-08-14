@@ -237,9 +237,9 @@ void MebBattery::
       ((datalayer_battery->status.voltage_dV * datalayer_battery->status.current_dA) / 100);
 
   if ((battery_min_temp != 600) && (battery_max_temp != 600)) {  //Only update when both values have been read
-    // datalayer.battery.status.temperature_min_dC = actual_temperature_lowest_C*5 -400;  // We use the value below, because it has better accuracy
+    // datalayer_battery->status.temperature_min_dC = actual_temperature_lowest_C*5 -400;  // We use the value below, because it has better accuracy
     datalayer_battery->status.temperature_min_dC = (battery_min_temp * 10) / 64;
-    // datalayer.battery.status.temperature_max_dC = actual_temperature_highest_C*5 -400;  // We use the value below, because it has better accuracy
+    // datalayer_battery->status.temperature_max_dC = actual_temperature_highest_C*5 -400;  // We use the value below, because it has better accuracy
     datalayer_battery->status.temperature_max_dC = (battery_max_temp * 10) / 64;
   }
 
@@ -336,7 +336,7 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
     case BMS_11:
       if (rx_frame.data.u8[0] !=
           vw_crc_calc(rx_frame.data.u8, rx_frame.DLC, rx_frame.ID)) {  //If CRC does not match calc
-        datalayer.battery.status.CAN_error_counter++;
+        datalayer_battery->status.CAN_error_counter++;
         logging.printf("MEB: Msg 0x%04X CRC error\n", rx_frame.ID);
         return;
       }
@@ -346,7 +346,7 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
 
   switch (rx_frame.ID) {
     case KN_Hybrid_01:  // BMS 500ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       can_msg_received |= RX_KN_Hybrid_01;
       component_protection_active = (rx_frame.data.u8[0] & 0x01);
       shutdown_active = ((rx_frame.data.u8[0] & 0x02) >> 1);
@@ -362,13 +362,13 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
     case ISO_Hybrid_01_Resp:  // BMS - Offboard tester diag response
       break;
     case NMH_Hybrid_01:  // BMS - 200ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       wakeup_type =
           ((rx_frame.data.u8[1] & 0x10) >> 4);  //0 passive, SG has not woken up, 1 active, SG has woken up the network
       instrument_cluster_request = ((rx_frame.data.u8[1] & 0x40) >> 6);  //True/false
       break;
     case BMS_21:  // BMS Limits 100ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       can_msg_received |= RX_BMS_21;
       max_discharge_power_watt = ((rx_frame.data.u8[6] & 0x07) << 10) | (rx_frame.data.u8[5] << 2) |
                                  ((rx_frame.data.u8[4] & 0xC0) >> 6);  //*100
@@ -378,7 +378,7 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       max_charge_current_amp = ((rx_frame.data.u8[4] & 0x3F) << 7) | (rx_frame.data.u8[3] >> 1);           //*0.2
       break;
     case BMS_22:  // BMS 100ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       can_msg_received |= RX_BMS_22;
       if (rx_frame.data.u8[6] != 0xFE || rx_frame.data.u8[7] != 0xFF) {  // Init state, values below invalid
         battery_SOC = ((rx_frame.data.u8[3] & 0x0F) << 7) | (rx_frame.data.u8[2] >> 1);               //*0.05
@@ -390,7 +390,7 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       warning_support = (rx_frame.data.u8[1] & 0x70) >> 4;
       break;
     case BMS_23:  // BMS 100ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       can_msg_received |= RX_BMS_23;
       battery_heating_active = (rx_frame.data.u8[4] & 0x40) >> 6;
       heating_request = (rx_frame.data.u8[5] & 0xE0) >> 5;
@@ -399,7 +399,7 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       power_battery_heating_req_watt = rx_frame.data.u8[7];
       break;
     case BMS_24:  // BMS 500ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       can_msg_received |= RX_BMS_24;
       balancing_active = (rx_frame.data.u8[1] & 0xC0) >> 6;
       charging_active = (rx_frame.data.u8[2] & 0x01);
@@ -409,7 +409,7 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       isolation_resistance_kOhm = (((rx_frame.data.u8[3] & 0x1F) << 7) | rx_frame.data.u8[2] >> 1);  //*5
       break;
     case BMS_25:  // BMS 500ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       can_msg_received |= RX_BMS_25;
       battery_heating_installed = (rx_frame.data.u8[1] & 0x20) >> 5;
       error_NT_circuit = (rx_frame.data.u8[1] & 0x40) >> 6;
@@ -423,7 +423,7 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       return_temperature_C = rx_frame.data.u8[7];                             //*0,5 -40
       break;
     case BMS_31:  // BMS
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       can_msg_received |= RX_BMS_31;
       performance_index_discharge_peak_temperature_percentage =
           (((rx_frame.data.u8[3] & 0x07) << 6) | rx_frame.data.u8[2] >> 2);  //*0.2
@@ -433,7 +433,7 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       temperature_status_charge = (((rx_frame.data.u8[2] & 0x03) << 1) | rx_frame.data.u8[1] >> 7);
       break;
     case BMS_11:  // BMS
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       can_msg_received |= RX_BMS_11;
       BMS_11_counter = (rx_frame.data.u8[1] & 0x0F);  // Can be used to check CAN signal integrity later on
       isolation_fault = (rx_frame.data.u8[2] & 0xE0) >> 5;
@@ -443,17 +443,17 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
         actual_temperature_lowest_C = rx_frame.data.u8[4];   //*0,5 -40
         actual_cellvoltage_highest_mV = (((rx_frame.data.u8[6] & 0x0F) << 8) | rx_frame.data.u8[5]);
         actual_cellvoltage_lowest_mV = ((rx_frame.data.u8[7] << 4) | rx_frame.data.u8[6] >> 4);
-        datalayer.battery.status.cell_min_voltage_mV = actual_cellvoltage_lowest_mV + 1000;
-        datalayer.battery.status.cell_max_voltage_mV = actual_cellvoltage_highest_mV + 1000;
+        datalayer_battery->status.cell_min_voltage_mV = actual_cellvoltage_lowest_mV + 1000;
+        datalayer_battery->status.cell_max_voltage_mV = actual_cellvoltage_highest_mV + 1000;
       }
       break;
     case BMS_29:  // BMS
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       predicted_power_dyn_standard_watt = ((rx_frame.data.u8[6] << 1) | rx_frame.data.u8[5] >> 7);  //*50
       predicted_time_dyn_standard_minutes = rx_frame.data.u8[7];
       break;
     case BMS_CMC_04:  // BMS Temperature and cellvoltages - 180ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       mux = (rx_frame.data.u8[0] & 0x0F);
       switch (mux) {
         case 0:  // Temperatures 1-56. Value is 0xFD if sensor not present
@@ -461,180 +461,6 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
             datalayer_meb->celltemperature_dC[i] = ((int16_t)rx_frame.data.u8[i + 1] * 5) - 400;
           }
           break;
-        /*
-        Broadcast cellvoltages are currently disabled, since they're not in use.
-
-        The polled cellvoltages are being used instead.
-        ----
-        case 1:  // Cellvoltages 1-42
-          cellvoltages[0] = (((rx_frame.data.u8[2] & 0x0F) << 8) | rx_frame.data.u8[1]) + 1000;
-          cellvoltages[1] = ((rx_frame.data.u8[3] << 4) | (rx_frame.data.u8[2] >> 4)) + 1000;
-          cellvoltages[2] = (((rx_frame.data.u8[5] & 0x0F) << 8) | rx_frame.data.u8[4]) + 1000;
-          cellvoltages[3] = ((rx_frame.data.u8[6] << 4) | (rx_frame.data.u8[5] >> 4)) + 1000;
-          cellvoltages[4] = (((rx_frame.data.u8[8] & 0x0F) << 8) | rx_frame.data.u8[7]) + 1000;
-          cellvoltages[5] = ((rx_frame.data.u8[9] << 4) | (rx_frame.data.u8[8] >> 4)) + 1000;
-          cellvoltages[6] = (((rx_frame.data.u8[11] & 0x0F) << 8) | rx_frame.data.u8[10]) + 1000;
-          cellvoltages[7] = ((rx_frame.data.u8[12] << 4) | (rx_frame.data.u8[11] >> 4)) + 1000;
-          cellvoltages[8] = (((rx_frame.data.u8[14] & 0x0F) << 8) | rx_frame.data.u8[13]) + 1000;
-          cellvoltages[9] = ((rx_frame.data.u8[15] << 4) | (rx_frame.data.u8[14] >> 4)) + 1000;
-          cellvoltages[10] = (((rx_frame.data.u8[17] & 0x0F) << 8) | rx_frame.data.u8[16]) + 1000;
-          cellvoltages[11] = ((rx_frame.data.u8[18] << 4) | (rx_frame.data.u8[17] >> 4)) + 1000;
-          cellvoltages[12] = (((rx_frame.data.u8[20] & 0x0F) << 8) | rx_frame.data.u8[19]) + 1000;
-          cellvoltages[13] = ((rx_frame.data.u8[21] << 4) | (rx_frame.data.u8[20] >> 4)) + 1000;
-          cellvoltages[14] = (((rx_frame.data.u8[23] & 0x0F) << 8) | rx_frame.data.u8[22]) + 1000;
-          cellvoltages[15] = ((rx_frame.data.u8[24] << 4) | (rx_frame.data.u8[23] >> 4)) + 1000;
-          cellvoltages[16] = (((rx_frame.data.u8[26] & 0x0F) << 8) | rx_frame.data.u8[25]) + 1000;
-          cellvoltages[17] = ((rx_frame.data.u8[27] << 4) | (rx_frame.data.u8[26] >> 4)) + 1000;
-          cellvoltages[18] = (((rx_frame.data.u8[29] & 0x0F) << 8) | rx_frame.data.u8[28]) + 1000;
-          cellvoltages[19] = ((rx_frame.data.u8[30] << 4) | (rx_frame.data.u8[29] >> 4)) + 1000;
-          cellvoltages[20] = (((rx_frame.data.u8[32] & 0x0F) << 8) | rx_frame.data.u8[31]) + 1000;
-          cellvoltages[21] = ((rx_frame.data.u8[33] << 4) | (rx_frame.data.u8[32] >> 4)) + 1000;
-          cellvoltages[22] = (((rx_frame.data.u8[35] & 0x0F) << 8) | rx_frame.data.u8[34]) + 1000;
-          cellvoltages[23] = ((rx_frame.data.u8[36] << 4) | (rx_frame.data.u8[35] >> 4)) + 1000;
-          cellvoltages[24] = (((rx_frame.data.u8[38] & 0x0F) << 8) | rx_frame.data.u8[37]) + 1000;
-          cellvoltages[25] = ((rx_frame.data.u8[39] << 4) | (rx_frame.data.u8[38] >> 4)) + 1000;
-          cellvoltages[26] = (((rx_frame.data.u8[41] & 0x0F) << 8) | rx_frame.data.u8[40]) + 1000;
-          cellvoltages[27] = ((rx_frame.data.u8[42] << 4) | (rx_frame.data.u8[41] >> 4)) + 1000;
-          cellvoltages[28] = (((rx_frame.data.u8[44] & 0x0F) << 8) | rx_frame.data.u8[43]) + 1000;
-          cellvoltages[29] = ((rx_frame.data.u8[45] << 4) | (rx_frame.data.u8[44] >> 4)) + 1000;
-          cellvoltages[30] = (((rx_frame.data.u8[47] & 0x0F) << 8) | rx_frame.data.u8[46]) + 1000;
-          cellvoltages[31] = ((rx_frame.data.u8[48] << 4) | (rx_frame.data.u8[47] >> 4)) + 1000;
-          cellvoltages[32] = (((rx_frame.data.u8[50] & 0x0F) << 8) | rx_frame.data.u8[49]) + 1000;
-          cellvoltages[33] = ((rx_frame.data.u8[51] << 4) | (rx_frame.data.u8[50] >> 4)) + 1000;
-          cellvoltages[34] = (((rx_frame.data.u8[53] & 0x0F) << 8) | rx_frame.data.u8[52]) + 1000;
-          cellvoltages[35] = ((rx_frame.data.u8[54] << 4) | (rx_frame.data.u8[53] >> 4)) + 1000;
-          cellvoltages[36] = (((rx_frame.data.u8[56] & 0x0F) << 8) | rx_frame.data.u8[55]) + 1000;
-          cellvoltages[37] = ((rx_frame.data.u8[57] << 4) | (rx_frame.data.u8[56] >> 4)) + 1000;
-          cellvoltages[38] = (((rx_frame.data.u8[59] & 0x0F) << 8) | rx_frame.data.u8[58]) + 1000;
-          cellvoltages[39] = ((rx_frame.data.u8[60] << 4) | (rx_frame.data.u8[59] >> 4)) + 1000;
-          cellvoltages[40] = (((rx_frame.data.u8[62] & 0x0F) << 8) | rx_frame.data.u8[61]) + 1000;
-          cellvoltages[41] = ((rx_frame.data.u8[63] << 4) | (rx_frame.data.u8[62] >> 4)) + 1000;
-          break;
-        case 2:  // Cellvoltages 43-84
-          cellvoltages[42] = (((rx_frame.data.u8[2] & 0x0F) << 8) | rx_frame.data.u8[1]) + 1000;
-          cellvoltages[43] = ((rx_frame.data.u8[3] << 4) | (rx_frame.data.u8[2] >> 4)) + 1000;
-          cellvoltages[44] = (((rx_frame.data.u8[5] & 0x0F) << 8) | rx_frame.data.u8[4]) + 1000;
-          cellvoltages[45] = ((rx_frame.data.u8[6] << 4) | (rx_frame.data.u8[5] >> 4)) + 1000;
-          cellvoltages[46] = (((rx_frame.data.u8[8] & 0x0F) << 8) | rx_frame.data.u8[7]) + 1000;
-          cellvoltages[47] = ((rx_frame.data.u8[9] << 4) | (rx_frame.data.u8[8] >> 4)) + 1000;
-          cellvoltages[48] = (((rx_frame.data.u8[11] & 0x0F) << 8) | rx_frame.data.u8[10]) + 1000;
-          cellvoltages[49] = ((rx_frame.data.u8[12] << 4) | (rx_frame.data.u8[11] >> 4)) + 1000;
-          cellvoltages[50] = (((rx_frame.data.u8[14] & 0x0F) << 8) | rx_frame.data.u8[13]) + 1000;
-          cellvoltages[51] = ((rx_frame.data.u8[15] << 4) | (rx_frame.data.u8[14] >> 4)) + 1000;
-          cellvoltages[52] = (((rx_frame.data.u8[17] & 0x0F) << 8) | rx_frame.data.u8[16]) + 1000;
-          cellvoltages[53] = ((rx_frame.data.u8[18] << 4) | (rx_frame.data.u8[17] >> 4)) + 1000;
-          cellvoltages[54] = (((rx_frame.data.u8[20] & 0x0F) << 8) | rx_frame.data.u8[19]) + 1000;
-          cellvoltages[55] = ((rx_frame.data.u8[21] << 4) | (rx_frame.data.u8[20] >> 4)) + 1000;
-          cellvoltages[56] = (((rx_frame.data.u8[23] & 0x0F) << 8) | rx_frame.data.u8[22]) + 1000;
-          cellvoltages[57] = ((rx_frame.data.u8[24] << 4) | (rx_frame.data.u8[23] >> 4)) + 1000;
-          cellvoltages[58] = (((rx_frame.data.u8[26] & 0x0F) << 8) | rx_frame.data.u8[25]) + 1000;
-          cellvoltages[59] = ((rx_frame.data.u8[27] << 4) | (rx_frame.data.u8[26] >> 4)) + 1000;
-          cellvoltages[60] = (((rx_frame.data.u8[29] & 0x0F) << 8) | rx_frame.data.u8[28]) + 1000;
-          cellvoltages[61] = ((rx_frame.data.u8[30] << 4) | (rx_frame.data.u8[29] >> 4)) + 1000;
-          cellvoltages[62] = (((rx_frame.data.u8[32] & 0x0F) << 8) | rx_frame.data.u8[31]) + 1000;
-          cellvoltages[63] = ((rx_frame.data.u8[33] << 4) | (rx_frame.data.u8[32] >> 4)) + 1000;
-          cellvoltages[64] = (((rx_frame.data.u8[35] & 0x0F) << 8) | rx_frame.data.u8[34]) + 1000;
-          cellvoltages[65] = ((rx_frame.data.u8[36] << 4) | (rx_frame.data.u8[35] >> 4)) + 1000;
-          cellvoltages[66] = (((rx_frame.data.u8[38] & 0x0F) << 8) | rx_frame.data.u8[37]) + 1000;
-          cellvoltages[67] = ((rx_frame.data.u8[39] << 4) | (rx_frame.data.u8[38] >> 4)) + 1000;
-          cellvoltages[68] = (((rx_frame.data.u8[41] & 0x0F) << 8) | rx_frame.data.u8[40]) + 1000;
-          cellvoltages[69] = ((rx_frame.data.u8[42] << 4) | (rx_frame.data.u8[41] >> 4)) + 1000;
-          cellvoltages[70] = (((rx_frame.data.u8[44] & 0x0F) << 8) | rx_frame.data.u8[43]) + 1000;
-          cellvoltages[71] = ((rx_frame.data.u8[45] << 4) | (rx_frame.data.u8[44] >> 4)) + 1000;
-          cellvoltages[72] = (((rx_frame.data.u8[47] & 0x0F) << 8) | rx_frame.data.u8[46]) + 1000;
-          cellvoltages[73] = ((rx_frame.data.u8[48] << 4) | (rx_frame.data.u8[47] >> 4)) + 1000;
-          cellvoltages[74] = (((rx_frame.data.u8[50] & 0x0F) << 8) | rx_frame.data.u8[49]) + 1000;
-          cellvoltages[75] = ((rx_frame.data.u8[51] << 4) | (rx_frame.data.u8[50] >> 4)) + 1000;
-          cellvoltages[76] = (((rx_frame.data.u8[53] & 0x0F) << 8) | rx_frame.data.u8[52]) + 1000;
-          cellvoltages[77] = ((rx_frame.data.u8[54] << 4) | (rx_frame.data.u8[53] >> 4)) + 1000;
-          cellvoltages[78] = (((rx_frame.data.u8[56] & 0x0F) << 8) | rx_frame.data.u8[55]) + 1000;
-          cellvoltages[79] = ((rx_frame.data.u8[57] << 4) | (rx_frame.data.u8[56] >> 4)) + 1000;
-          cellvoltages[80] = (((rx_frame.data.u8[59] & 0x0F) << 8) | rx_frame.data.u8[58]) + 1000;
-          cellvoltages[81] = ((rx_frame.data.u8[60] << 4) | (rx_frame.data.u8[59] >> 4)) + 1000;
-          cellvoltages[82] = (((rx_frame.data.u8[62] & 0x0F) << 8) | rx_frame.data.u8[61]) + 1000;
-          cellvoltages[83] = ((rx_frame.data.u8[63] << 4) | (rx_frame.data.u8[62] >> 4)) + 1000;
-          break;
-        case 3:  // Cellvoltages 85-126
-          cellvoltages[84] = (((rx_frame.data.u8[2] & 0x0F) << 8) | rx_frame.data.u8[1]) + 1000;
-          cellvoltages[85] = ((rx_frame.data.u8[3] << 4) | (rx_frame.data.u8[2] >> 4)) + 1000;
-          cellvoltages[86] = (((rx_frame.data.u8[5] & 0x0F) << 8) | rx_frame.data.u8[4]) + 1000;
-          cellvoltages[87] = ((rx_frame.data.u8[6] << 4) | (rx_frame.data.u8[5] >> 4)) + 1000;
-          cellvoltages[88] = (((rx_frame.data.u8[8] & 0x0F) << 8) | rx_frame.data.u8[7]) + 1000;
-          cellvoltages[89] = ((rx_frame.data.u8[9] << 4) | (rx_frame.data.u8[8] >> 4)) + 1000;
-          cellvoltages[90] = (((rx_frame.data.u8[11] & 0x0F) << 8) | rx_frame.data.u8[10]) + 1000;
-          cellvoltages[91] = ((rx_frame.data.u8[12] << 4) | (rx_frame.data.u8[11] >> 4)) + 1000;
-          cellvoltages[92] = (((rx_frame.data.u8[14] & 0x0F) << 8) | rx_frame.data.u8[13]) + 1000;
-          cellvoltages[93] = ((rx_frame.data.u8[15] << 4) | (rx_frame.data.u8[14] >> 4)) + 1000;
-          cellvoltages[94] = (((rx_frame.data.u8[17] & 0x0F) << 8) | rx_frame.data.u8[16]) + 1000;
-          cellvoltages[95] = ((rx_frame.data.u8[18] << 4) | (rx_frame.data.u8[17] >> 4)) + 1000;
-          cellvoltages[96] = (((rx_frame.data.u8[20] & 0x0F) << 8) | rx_frame.data.u8[19]) + 1000;
-          cellvoltages[97] = ((rx_frame.data.u8[21] << 4) | (rx_frame.data.u8[20] >> 4)) + 1000;
-          cellvoltages[98] = (((rx_frame.data.u8[23] & 0x0F) << 8) | rx_frame.data.u8[22]) + 1000;
-          cellvoltages[99] = ((rx_frame.data.u8[24] << 4) | (rx_frame.data.u8[23] >> 4)) + 1000;
-          cellvoltages[100] = (((rx_frame.data.u8[26] & 0x0F) << 8) | rx_frame.data.u8[25]) + 1000;
-          cellvoltages[101] = ((rx_frame.data.u8[27] << 4) | (rx_frame.data.u8[26] >> 4)) + 1000;
-          cellvoltages[102] = (((rx_frame.data.u8[29] & 0x0F) << 8) | rx_frame.data.u8[28]) + 1000;
-          cellvoltages[103] = ((rx_frame.data.u8[30] << 4) | (rx_frame.data.u8[29] >> 4)) + 1000;
-          cellvoltages[104] = (((rx_frame.data.u8[32] & 0x0F) << 8) | rx_frame.data.u8[31]) + 1000;
-          cellvoltages[105] = ((rx_frame.data.u8[33] << 4) | (rx_frame.data.u8[32] >> 4)) + 1000;
-          cellvoltages[106] = (((rx_frame.data.u8[35] & 0x0F) << 8) | rx_frame.data.u8[34]) + 1000;
-          cellvoltages[107] = ((rx_frame.data.u8[36] << 4) | (rx_frame.data.u8[35] >> 4)) + 1000;
-          cellvoltages[108] = (((rx_frame.data.u8[38] & 0x0F) << 8) | rx_frame.data.u8[37]) + 1000;
-          cellvoltages[109] = ((rx_frame.data.u8[39] << 4) | (rx_frame.data.u8[38] >> 4)) + 1000;
-          cellvoltages[110] = (((rx_frame.data.u8[41] & 0x0F) << 8) | rx_frame.data.u8[40]) + 1000;
-          cellvoltages[111] = ((rx_frame.data.u8[42] << 4) | (rx_frame.data.u8[41] >> 4)) + 1000;
-          cellvoltages[112] = (((rx_frame.data.u8[44] & 0x0F) << 8) | rx_frame.data.u8[43]) + 1000;
-          cellvoltages[113] = ((rx_frame.data.u8[45] << 4) | (rx_frame.data.u8[44] >> 4)) + 1000;
-          cellvoltages[114] = (((rx_frame.data.u8[47] & 0x0F) << 8) | rx_frame.data.u8[46]) + 1000;
-          cellvoltages[115] = ((rx_frame.data.u8[48] << 4) | (rx_frame.data.u8[47] >> 4)) + 1000;
-          cellvoltages[116] = (((rx_frame.data.u8[50] & 0x0F) << 8) | rx_frame.data.u8[49]) + 1000;
-          cellvoltages[117] = ((rx_frame.data.u8[51] << 4) | (rx_frame.data.u8[50] >> 4)) + 1000;
-          cellvoltages[118] = (((rx_frame.data.u8[53] & 0x0F) << 8) | rx_frame.data.u8[52]) + 1000;
-          cellvoltages[119] = ((rx_frame.data.u8[54] << 4) | (rx_frame.data.u8[53] >> 4)) + 1000;
-          cellvoltages[120] = (((rx_frame.data.u8[56] & 0x0F) << 8) | rx_frame.data.u8[55]) + 1000;
-          cellvoltages[121] = ((rx_frame.data.u8[57] << 4) | (rx_frame.data.u8[56] >> 4)) + 1000;
-          cellvoltages[122] = (((rx_frame.data.u8[59] & 0x0F) << 8) | rx_frame.data.u8[58]) + 1000;
-          cellvoltages[123] = ((rx_frame.data.u8[60] << 4) | (rx_frame.data.u8[59] >> 4)) + 1000;
-          cellvoltages[124] = (((rx_frame.data.u8[62] & 0x0F) << 8) | rx_frame.data.u8[61]) + 1000;
-          cellvoltages[125] = ((rx_frame.data.u8[63] << 4) | (rx_frame.data.u8[62] >> 4)) + 1000;
-          break;
-        case 4:  //Cellvoltages 127-160
-          cellvoltages[126] = (((rx_frame.data.u8[2] & 0x0F) << 8) | rx_frame.data.u8[1]) + 1000;
-          cellvoltages[127] = ((rx_frame.data.u8[3] << 4) | (rx_frame.data.u8[2] >> 4)) + 1000;
-          cellvoltages[128] = (((rx_frame.data.u8[5] & 0x0F) << 8) | rx_frame.data.u8[4]) + 1000;
-          cellvoltages[129] = ((rx_frame.data.u8[6] << 4) | (rx_frame.data.u8[5] >> 4)) + 1000;
-          cellvoltages[130] = (((rx_frame.data.u8[8] & 0x0F) << 8) | rx_frame.data.u8[7]) + 1000;
-          cellvoltages[131] = ((rx_frame.data.u8[9] << 4) | (rx_frame.data.u8[8] >> 4)) + 1000;
-          cellvoltages[132] = (((rx_frame.data.u8[11] & 0x0F) << 8) | rx_frame.data.u8[10]) + 1000;
-          cellvoltages[133] = ((rx_frame.data.u8[12] << 4) | (rx_frame.data.u8[11] >> 4)) + 1000;
-          cellvoltages[134] = (((rx_frame.data.u8[14] & 0x0F) << 8) | rx_frame.data.u8[13]) + 1000;
-          cellvoltages[135] = ((rx_frame.data.u8[15] << 4) | (rx_frame.data.u8[14] >> 4)) + 1000;
-          cellvoltages[136] = (((rx_frame.data.u8[17] & 0x0F) << 8) | rx_frame.data.u8[16]) + 1000;
-          cellvoltages[137] = ((rx_frame.data.u8[18] << 4) | (rx_frame.data.u8[17] >> 4)) + 1000;
-          cellvoltages[138] = (((rx_frame.data.u8[20] & 0x0F) << 8) | rx_frame.data.u8[19]) + 1000;
-          cellvoltages[139] = ((rx_frame.data.u8[21] << 4) | (rx_frame.data.u8[20] >> 4)) + 1000;
-          cellvoltages[140] = (((rx_frame.data.u8[23] & 0x0F) << 8) | rx_frame.data.u8[22]) + 1000;
-          cellvoltages[141] = ((rx_frame.data.u8[24] << 4) | (rx_frame.data.u8[23] >> 4)) + 1000;
-          cellvoltages[142] = (((rx_frame.data.u8[26] & 0x0F) << 8) | rx_frame.data.u8[25]) + 1000;
-          cellvoltages[143] = ((rx_frame.data.u8[27] << 4) | (rx_frame.data.u8[26] >> 4)) + 1000;
-          cellvoltages[144] = (((rx_frame.data.u8[29] & 0x0F) << 8) | rx_frame.data.u8[28]) + 1000;
-          cellvoltages[145] = ((rx_frame.data.u8[30] << 4) | (rx_frame.data.u8[29] >> 4)) + 1000;
-          cellvoltages[146] = (((rx_frame.data.u8[32] & 0x0F) << 8) | rx_frame.data.u8[31]) + 1000;
-          cellvoltages[147] = ((rx_frame.data.u8[33] << 4) | (rx_frame.data.u8[32] >> 4)) + 1000;
-          cellvoltages[148] = (((rx_frame.data.u8[35] & 0x0F) << 8) | rx_frame.data.u8[34]) + 1000;
-          cellvoltages[149] = ((rx_frame.data.u8[36] << 4) | (rx_frame.data.u8[35] >> 4)) + 1000;
-          cellvoltages[150] = (((rx_frame.data.u8[38] & 0x0F) << 8) | rx_frame.data.u8[37]) + 1000;
-          cellvoltages[151] = ((rx_frame.data.u8[39] << 4) | (rx_frame.data.u8[38] >> 4)) + 1000;
-          cellvoltages[152] = (((rx_frame.data.u8[41] & 0x0F) << 8) | rx_frame.data.u8[40]) + 1000;
-          cellvoltages[153] = ((rx_frame.data.u8[42] << 4) | (rx_frame.data.u8[41] >> 4)) + 1000;
-          cellvoltages[154] = (((rx_frame.data.u8[44] & 0x0F) << 8) | rx_frame.data.u8[43]) + 1000;
-          cellvoltages[155] = ((rx_frame.data.u8[45] << 4) | (rx_frame.data.u8[44] >> 4)) + 1000;
-          cellvoltages[156] = (((rx_frame.data.u8[47] & 0x0F) << 8) | rx_frame.data.u8[46]) + 1000;
-          cellvoltages[157] = ((rx_frame.data.u8[48] << 4) | (rx_frame.data.u8[47] >> 4)) + 1000;
-          cellvoltages[158] = (((rx_frame.data.u8[50] & 0x0F) << 8) | rx_frame.data.u8[49]) + 1000;
-          cellvoltages[159] = ((rx_frame.data.u8[51] << 4) | (rx_frame.data.u8[50] >> 4)) + 1000;
-          break;
-        */
         default:  //Invalid mux
           //TODO: Add corrupted CAN message counter tick?
           break;
@@ -739,23 +565,23 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
         case 6:  // DC_CHARGING
           if (!datalayer.system.status.battery_allows_contactor_closing)
             logging.printf("MEB: Contactors closed\n");
-          if (datalayer.battery.status.real_bms_status != BMS_FAULT)
-            datalayer.battery.status.real_bms_status = BMS_ACTIVE;
+          if (datalayer_battery->status.real_bms_status != BMS_FAULT)
+            datalayer_battery->status.real_bms_status = BMS_ACTIVE;
           datalayer.system.status.battery_allows_contactor_closing = true;
           hv_requested = false;
           break;
         case 5:  // Error
           if (datalayer.system.status.battery_allows_contactor_closing)
             logging.printf("MEB: Contactors opened\n");
-          datalayer.battery.status.real_bms_status = BMS_FAULT;
+          datalayer_battery->status.real_bms_status = BMS_FAULT;
           datalayer.system.status.battery_allows_contactor_closing = false;
           hv_requested = false;
           break;
         case 7:  // Init
           if (datalayer.system.status.battery_allows_contactor_closing)
             logging.printf("MEB: Contactors opened\n");
-          if (datalayer.battery.status.real_bms_status != BMS_FAULT)
-            datalayer.battery.status.real_bms_status = BMS_STANDBY;
+          if (datalayer_battery->status.real_bms_status != BMS_FAULT)
+            datalayer_battery->status.real_bms_status = BMS_STANDBY;
           datalayer.system.status.battery_allows_contactor_closing = false;
           hv_requested = false;
           break;
@@ -763,8 +589,8 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
         default:
           if (datalayer.system.status.battery_allows_contactor_closing)
             logging.printf("MEB: Contactors opened\n");
-          if (datalayer.battery.status.real_bms_status != BMS_FAULT)
-            datalayer.battery.status.real_bms_status = BMS_STANDBY;
+          if (datalayer_battery->status.real_bms_status != BMS_FAULT)
+            datalayer_battery->status.real_bms_status = BMS_STANDBY;
           datalayer.system.status.battery_allows_contactor_closing = false;
       }
       // Pack-internal contactors: BMS_mode 1/3/4/6 are the HV-active states (same set that
@@ -806,8 +632,8 @@ void MebBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
       break;
   }
   if (can_msg_received == 0xFFFF && nof_cells_determined) {
-    if (datalayer.battery.status.real_bms_status == BMS_DISCONNECTED)
-      datalayer.battery.status.real_bms_status = BMS_STANDBY;
+    if (datalayer_battery->status.real_bms_status == BMS_DISCONNECTED)
+      datalayer_battery->status.real_bms_status = BMS_STANDBY;
   }
 }
 
@@ -865,8 +691,8 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
       logging.printf("MEB: No CAN msg received for 500ms\n");
     can_msg_received = RX_DEFAULT;
     first_can_msg_timestamp = 0;
-    if (datalayer.battery.status.real_bms_status != BMS_FAULT) {
-      datalayer.battery.status.real_bms_status = BMS_DISCONNECTED;
+    if (datalayer_battery->status.real_bms_status != BMS_FAULT) {
+      datalayer_battery->status.real_bms_status = BMS_DISCONNECTED;
       datalayer.system.status.battery_allows_contactor_closing = false;
 
       // Set the link voltage back to 0, so that when the BMS comes back, it
@@ -926,9 +752,9 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
     /* BMS needs to see this EM1 message. Content located in frame5&6 especially (can be static?)*/
     /* Also the voltage seen externally to battery is in frame 7&8. At least for the 62kWh ID3 version does not seem to matter, but we send it anyway. */
     EM1_01_frame.data.u8[1] = ((EM1_01_frame.data.u8[1] & 0xF0) | counter_50ms);
-    EM1_01_frame.data.u8[7] = ((datalayer.battery.status.voltage_dV / 10) * 4) & 0x00FF;
+    EM1_01_frame.data.u8[7] = ((datalayer_battery->status.voltage_dV / 10) * 4) & 0x00FF;
     EM1_01_frame.data.u8[8] =
-        ((EM1_01_frame.data.u8[8] & 0xF0) | ((((datalayer.battery.status.voltage_dV / 10) * 4) >> 8) & 0x0F));
+        ((EM1_01_frame.data.u8[8] & 0xF0) | ((((datalayer_battery->status.voltage_dV / 10) * 4) >> 8) & 0x0F));
     EM1_01_frame.data.u8[0] = vw_crc_calc(EM1_01_frame.data.u8, EM1_01_frame.DLC, EM1_01_frame.ID);
     counter_50ms = (counter_50ms + 1) % 16;  //Goes from 0-1-2-3...15-0-1-2-3..
 
@@ -941,20 +767,20 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
     //HV request and DC/DC control lies in 0x503
 
     if ((!datalayer.system.info.equipment_stop_active) && datalayer.system.status.inverter_allows_contactor_closing &&
-        datalayer.battery.status.real_bms_status != BMS_FAULT &&
-        (datalayer.battery.status.real_bms_status == BMS_ACTIVE ||
-         (datalayer.battery.status.real_bms_status == BMS_STANDBY &&
+        datalayer_battery->status.real_bms_status != BMS_FAULT &&
+        (datalayer_battery->status.real_bms_status == BMS_ACTIVE ||
+         (datalayer_battery->status.real_bms_status == BMS_STANDBY &&
           (hv_requested ||
-           (datalayer.battery.status.voltage_dV > 200 && datalayer_meb->BMS_voltage_intermediate_dV > 0 &&
-            labs(((int32_t)datalayer.battery.status.voltage_dV) -
-                 ((int32_t)datalayer_meb->BMS_voltage_intermediate_dV)) < 200))))) {
+           (datalayer_battery->status.voltage_dV > 200 && datalayer_extended.meb.BMS_voltage_intermediate_dV > 0 &&
+            labs(((int32_t)datalayer_battery->status.voltage_dV) -
+                 ((int32_t)datalayer_extended.meb.BMS_voltage_intermediate_dV)) < 200))))) {
       // We are either:
       //  - Equipment stop is not active, and the inverter allows contactor closing, and the BMS is not in FAULT state, and either:
       //  - in BMS_ACTIVE state (contactors closed, normal operation)
       //  - or in BMS_STANDBY state, ready to request HV from the battery (our precharge is within 20V)
       //  - or in BMS_STANDBY state, having already requested HV (hv_requested = true)
 
-      if (datalayer.battery.status.real_bms_status != BMS_ACTIVE) {
+      if (datalayer_battery->status.real_bms_status != BMS_ACTIVE) {
         // We're still awaiting contactor closure, so record that we've
         // requested HV, so that we keep doing so even if the precharge voltage
         // wavers.
@@ -985,7 +811,7 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
                datalayer.system.info.equipment_stop_active ||
                !datalayer.system.status.inverter_allows_contactor_closing) {  //FAULT STATE, open contactors
 
-      if (datalayer.system.status.system_status != FAULT && datalayer.battery.status.real_bms_status == BMS_STANDBY &&
+      if (datalayer.system.status.system_status != FAULT && datalayer_battery->status.real_bms_status == BMS_STANDBY &&
           !datalayer.system.info.equipment_stop_active) {
         datalayer.system.info.start_precharging = true;
       }
@@ -1023,7 +849,7 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
 
     //Klemmen status
     bool kl15_on = !bms_reset_active && BMS_mode != BMS_TARGET_INIT &&
-                   datalayer.battery.status.real_bms_status != BMS_DISCONNECTED;
+                   datalayer_battery->status.real_bms_status != BMS_DISCONNECTED;
     Klemmen_Status_01_frame.data.u8[2] = kl15_on ? 0x02 : 0x00;  //bit to signal KL_15 is (0x02 = ON, 0x00 = OFF)
     Klemmen_Status_01_frame.data.u8[1] = ((Klemmen_Status_01_frame.data.u8[1] & 0xF0) | counter_100ms);
     Klemmen_Status_01_frame.data.u8[0] =
@@ -1132,7 +958,7 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
         poll_pid = PID_CELLVOLTAGE_CELL_2;
         break;
       case PID_CELLVOLTAGE_CELL_84:
-        if (datalayer.battery.info.number_of_cells > 84) {
+        if (datalayer_battery->info.number_of_cells > 84) {
           if (nof_cells_determined) {
             poll_pid = PID_CELLVOLTAGE_CELL_85;
           } else {
@@ -1143,7 +969,7 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
         }
         break;
       case PID_CELLVOLTAGE_CELL_96:
-        if (datalayer.battery.info.number_of_cells > 96)
+        if (datalayer_battery->info.number_of_cells > 96)
           poll_pid = PID_CELLVOLTAGE_CELL_97;
         else
           poll_pid = PID_SOC;
@@ -1216,16 +1042,16 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
     }
   }
 
-  static auto last_real_bms_status = datalayer.battery.status.real_bms_status;
+  static auto last_real_bms_status = datalayer_battery->status.real_bms_status;
   static auto last_start_precharging = datalayer.system.info.start_precharging;
   static auto last_hv_requested = hv_requested;
-  static auto last_voltage_dV = datalayer.battery.status.voltage_dV;
-  static auto last_BMS_voltage_intermediate_dV = datalayer_meb->BMS_voltage_intermediate_dV;
+  static auto last_voltage_dV = datalayer_battery->status.voltage_dV;
+  static auto last_BMS_voltage_intermediate_dV = datalayer_extended.meb.BMS_voltage_intermediate_dV;
   static auto last_bms_mode = BMS_mode;
 
-  if (last_real_bms_status != datalayer.battery.status.real_bms_status) {
-    logging.printf("MEB: BMS status %d -> %d\n", last_real_bms_status, datalayer.battery.status.real_bms_status);
-    last_real_bms_status = datalayer.battery.status.real_bms_status;
+  if (last_real_bms_status != datalayer_battery->status.real_bms_status) {
+    logging.printf("MEB: BMS status %d -> %d\n", last_real_bms_status, datalayer_battery->status.real_bms_status);
+    last_real_bms_status = datalayer_battery->status.real_bms_status;
   }
 
   if (last_start_precharging != datalayer.system.info.start_precharging) {
@@ -1239,9 +1065,9 @@ void MebBattery::transmit_can(unsigned long currentMillis) {
     last_hv_requested = hv_requested;
   }
 
-  if (last_voltage_dV != datalayer.battery.status.voltage_dV) {
-    logging.printf("MEB: Voltage dV %d -> %d\n", last_voltage_dV, datalayer.battery.status.voltage_dV);
-    last_voltage_dV = datalayer.battery.status.voltage_dV;
+  if (last_voltage_dV != datalayer_battery->status.voltage_dV) {
+    logging.printf("MEB: Voltage dV %d -> %d\n", last_voltage_dV, datalayer_battery->status.voltage_dV);
+    last_voltage_dV = datalayer_battery->status.voltage_dV;
   }
 
   if (last_BMS_voltage_intermediate_dV != datalayer_meb->BMS_voltage_intermediate_dV) {
@@ -1396,7 +1222,7 @@ void MebBattery::handle_bms_reset(unsigned long currentMillis) {
         // Clearing the fault is the whole point of the reset: BMS_FAULT is latched (every BMS_20
         // branch is guarded with "!= BMS_FAULT"), so drop it here and let the live BMS_mode
         // repopulate real_bms_status once messages resume.
-        datalayer.battery.status.real_bms_status = BMS_DISCONNECTED;
+        datalayer_battery->status.real_bms_status = BMS_DISCONNECTED;
         // Step 6: resume charge/discharge.
         setBatteryPause(false, false, UNCHANGED, false);
         // The BMS is still waking on the bus, so the first frames won't be ACKed. Ignore
@@ -1570,8 +1396,8 @@ void MebBattery::uds_response_handler(const uint8_t* data, int len, enum isotp_t
           // int32_t ah_charge    = ((data[7] << 24) | (data[8] << 16) | (data[9] << 8) | data[10]);
           kwh_charge = ((data[11] << 24) | (data[12] << 16) | (data[13] << 8) | data[14]);
           kwh_discharge = ((data[15] << 24) | (data[16] << 16) | (data[17] << 8) | data[18]);
-          datalayer.battery.status.total_discharged_battery_Wh = kwh_discharge * 0.11650853;
-          datalayer.battery.status.total_charged_battery_Wh = kwh_charge * 0.11650853;
+          datalayer_battery->status.total_discharged_battery_Wh = kwh_discharge * 0.11650853;
+          datalayer_battery->status.total_charged_battery_Wh = kwh_charge * 0.11650853;
           break;
         case PID_ALLOWED_CHARGE_POWER:
           if (len < 5)
@@ -1592,10 +1418,10 @@ void MebBattery::uds_response_handler(const uint8_t* data, int len, enum isotp_t
           if (tempval != 0xFFE) {
             cellvoltages_polled[84] = (tempval + 1000);
           } else {  // Cell 85 unavailable. We have a 84S battery (48kWh)
-            datalayer.battery.info.number_of_cells = 84;
+            datalayer_battery->info.number_of_cells = 84;
             nof_cells_determined = true;
-            datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_84S_DV;
-            datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_84S_DV;
+            datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_84S_DV;
+            datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_84S_DV;
           }
           break;
         case PID_CELLVOLTAGE_CELL_97:
@@ -1605,13 +1431,13 @@ void MebBattery::uds_response_handler(const uint8_t* data, int len, enum isotp_t
           if (tempval != 0xFFE) {
             cellvoltages_polled[96] = (tempval + 1000);
           } else {  // Cell 97 unavailable. We have a 96S battery (55kWh) (Unless already specified as 84S)
-            if (datalayer.battery.info.number_of_cells == 84) {
+            if (datalayer_battery->info.number_of_cells == 84) {
               // Do nothing, we already identified it as 84S
             } else {
-              datalayer.battery.info.number_of_cells = 96;
+              datalayer_battery->info.number_of_cells = 96;
               nof_cells_determined = true;
-              datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_96S_DV;
-              datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_96S_DV;
+              datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_96S_DV;
+              datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_96S_DV;
             }
           }
           break;
@@ -1623,9 +1449,9 @@ void MebBattery::uds_response_handler(const uint8_t* data, int len, enum isotp_t
           // sure we only take the shortcuts to determine the number of cells once.
           if (tempval != 0xFFE) {
             cellvoltages_polled[107] = (tempval + 1000);
-            datalayer.battery.info.number_of_cells = 108;
-            datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_108S_DV;
-            datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_108S_DV;
+            datalayer_battery->info.number_of_cells = 108;
+            datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_108S_DV;
+            datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_108S_DV;
           }
           break;
         default:
@@ -1714,14 +1540,12 @@ void MebBattery::uds_response_handler(const uint8_t* data, int len, enum isotp_t
 }
 
 void MebBattery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
-  datalayer.battery.info.number_of_cells = 108;  //Startup in 108S mode. We figure out the actual count later.
-  datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_108S_DV;  //Defined later to correct pack size
-  datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_84S_DV;   //Defined later to correct pack size
-  datalayer.battery.info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
-  datalayer.battery.info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
-  datalayer.battery.info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
+  datalayer_battery->info.number_of_cells = 108;  //Startup in 108S mode. We figure out the actual count later.
+  datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_108S_DV;  //Defined later to correct pack size
+  datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_84S_DV;   //Defined later to correct pack size
+  datalayer_battery->info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
+  datalayer_battery->info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
+  datalayer_battery->info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
   memset(cellvoltages_polled, 0, sizeof(cellvoltages_polled));
 
   // ISO-TP transport for UDS diagnostics (PID polling, DTC read). Replies arrive on
@@ -1743,9 +1567,5 @@ void MqbEvoBattery::setup(void) {  // Performs one time setup at startup
   datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_96S_DV;
   nof_cells_determined = true;
   security_login_key = 20104;  //correct key for MQB Evo
-  renderer.dtc_json_filename = "vag_mqb_dtc.json";
   poll_pid = PID_SOC;  //MQB doesn't use the number of cells detection.
-
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);  // Overwrite the MEB name.
-  datalayer.system.info.battery_protocol[63] = '\0';
 }

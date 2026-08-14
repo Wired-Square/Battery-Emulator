@@ -41,9 +41,9 @@ void CmfaEvBattery::
       (static_cast<double>(datalayer_battery->status.real_soc) / 10000) * datalayer_battery->info.total_capacity_Wh);
 
   if (user_selected_use_estimated_charge_limits) {  //Some packs are locked? and do not report allowed charge/discharge power
-    datalayer_battery->status.max_charge_power_W = datalayer.battery.status.override_charge_power_W;
+    datalayer_battery->status.max_charge_power_W = datalayer_battery->status.override_charge_power_W;
 
-    datalayer_battery->status.max_discharge_power_W = datalayer.battery.status.override_discharge_power_W;
+    datalayer_battery->status.max_discharge_power_W = datalayer_battery->status.override_discharge_power_W;
   } else {  //Use sane limits sent by battery
     datalayer_battery->status.max_charge_power_W = charge_power_w;
 
@@ -61,40 +61,6 @@ void CmfaEvBattery::
   if (lead_acid_voltage < 11000) {  //11.000V
     set_event(EVENT_12V_LOW, lead_acid_voltage);
   }
-}
-
-template <typename T>
-inline String& operator<<(String& str, const T& value) {
-  str += value;
-  return str;
-}
-
-String CmfaEvBattery::get_uds_info_html() {
-  String content;
-  content.reserve(600);
-
-  // clang-format off
-  content << "<h4>SOC U: " << soc_u << "percent</h4>"
-             "<h4>SOC Z: " << soc_z << "percent</h4>"
-             "<h4>SOH Average: " << soh_average << "pptt</h4>"
-             "<h4>12V voltage: " << lead_acid_voltage << "mV</h4>"
-             "<h4>Highest cell number: " << highest_cell_voltage_number << "</h4>"
-             "<h4>Lowest cell number: " << lowest_cell_voltage_number << "</h4>"
-             "<h4>Sum of cellvoltages: " << average_voltage_of_cells << "</h4>"
-             "<h4>Max regen power: " << max_regen_power << "</h4>"
-             "<h4>Max discharge power: " << max_discharge_power << "</h4>"
-             "<h4>Max charge power: " << maximum_charge_power << "</h4>"
-             "<h4>SOH available power: " << SOH_available_power << "</h4>"
-             "<h4>SOH generated power: " << SOH_generated_power << "</h4>"
-             "<h4>Average temperature: " << average_temperature << "dC</h4>"
-             "<h4>Maximum temperature: " << maximum_temperature << "dC</h4>"
-             "<h4>Minimum temperature: " << minimum_temperature << "dC</h4>"
-             "<h4>Cumulative energy discharged: " << cumulative_energy_when_discharging << "Wh</h4>"
-             "<h4>Cumulative energy charged: " << cumulative_energy_when_charging << "Wh</h4>"
-             "<h4>Cumulative energy regen: " << cumulative_energy_in_regen << "Wh</h4>";
-  // clang-format on
-
-  return content;
 }
 
 void CmfaEvBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
@@ -384,9 +350,9 @@ void CmfaEvBattery::setup(void) {  // Performs one time setup at startup
   };
   set_pid_scan_list(pid_scan_list, sizeof(pid_scan_list) / sizeof(pid_scan_list[0]));
 
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
-  datalayer.system.status.battery_allows_contactor_closing = true;
+  if (allows_contactor_closing) {
+    *allows_contactor_closing = true;
+  }
   datalayer_battery->info.number_of_cells = 72;
   datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_DV;
   datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_DV;

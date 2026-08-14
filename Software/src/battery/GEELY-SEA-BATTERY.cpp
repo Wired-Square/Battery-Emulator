@@ -36,51 +36,51 @@ void GeelySeaBattery::
     datalayer_extended.GeelySEA.UserRequestCrashReset = false;
   }
 
-  datalayer.battery.status.voltage_dV = pack_voltage_dV;
+  datalayer_battery->status.voltage_dV = pack_voltage_dV;
 
-  datalayer.battery.status.current_dA = -pack_current_dA;
+  datalayer_battery->status.current_dA = -pack_current_dA;
 
   if (datalayer_extended.GeelySEA.soc_bms > 0) {
-    datalayer.battery.status.real_soc = datalayer_extended.GeelySEA.soc_bms;
+    datalayer_battery->status.real_soc = datalayer_extended.GeelySEA.soc_bms;
   }
 
   if (datalayer_extended.GeelySEA.soh_bms > 0) {
-    datalayer.battery.status.soh_pptt = datalayer_extended.GeelySEA.soh_bms;
+    datalayer_battery->status.soh_pptt = datalayer_extended.GeelySEA.soh_bms;
   }
 
   if (datalayer_extended.GeelySEA.CellTempHighest > 0) {
-    datalayer.battery.status.temperature_max_dC = ((datalayer_extended.GeelySEA.CellTempHighest / 100.0) - 50.0) * 10;
+    datalayer_battery->status.temperature_max_dC = ((datalayer_extended.GeelySEA.CellTempHighest / 100.0) - 50.0) * 10;
   }
 
   if (datalayer_extended.GeelySEA.CellTempLowest > 0) {
-    datalayer.battery.status.temperature_min_dC = ((datalayer_extended.GeelySEA.CellTempLowest / 100.0) - 50.0) * 10;
+    datalayer_battery->status.temperature_min_dC = ((datalayer_extended.GeelySEA.CellTempLowest / 100.0) - 50.0) * 10;
   }
 
-  datalayer.battery.status.remaining_capacity_Wh = static_cast<uint32_t>(
-      (static_cast<double>(datalayer.battery.status.real_soc) / 10000) * datalayer.battery.info.total_capacity_Wh);
+  datalayer_battery->status.remaining_capacity_Wh = static_cast<uint32_t>(
+      (static_cast<double>(datalayer_battery->status.real_soc) / 10000) * datalayer_battery->info.total_capacity_Wh);
 
   //The allowed charge power is not available. We use user set value for now
   // Gets ramped down by inverter function on the webserver
-  datalayer.battery.status.max_charge_power_W = datalayer.battery.status.override_charge_power_W;
+  datalayer_battery->status.max_charge_power_W = datalayer_battery->status.override_charge_power_W;
 
   //The allowed discharge power is not available. We use user set value for now
   // Gets ramped down by inverter function on the webserver
-  datalayer.battery.status.max_discharge_power_W = datalayer.battery.status.override_discharge_power_W;
+  datalayer_battery->status.max_discharge_power_W = datalayer_battery->status.override_discharge_power_W;
 
-  if (datalayer.battery.info.chemistry == LFP) {  //If configured LFP in use (or we autodetected it), switch to it
-    datalayer.battery.info.total_capacity_Wh = MAX_CAPACITY_LFP_WH;  //EX30 51kWh LFP battery
-    datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_LFP_120S_DV;
-    datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_LFP_120S_DV;
-  } else if (datalayer.battery.info.chemistry ==
+  if (datalayer_battery->info.chemistry == LFP) {  //If configured LFP in use (or we autodetected it), switch to it
+    datalayer_battery->info.total_capacity_Wh = MAX_CAPACITY_LFP_WH;  //EX30 51kWh LFP battery
+    datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_LFP_120S_DV;
+    datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_LFP_120S_DV;
+  } else if (datalayer_battery->info.chemistry ==
              NMC) {  //If configured NCM in use (or we autodetected it), switch to it
-    if (datalayer.battery.info.number_of_cells == 107) {  //EX30 69kWh battery
-      datalayer.battery.info.total_capacity_Wh = MAX_CAPACITY_NCM_107S_WH;
-      datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_NCM_107S_DV;
-      datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_NCM_107S_DV;
-    } else if (datalayer.battery.info.number_of_cells == 110) {  //Zeekr 100kWh battery
-      datalayer.battery.info.total_capacity_Wh = MAX_CAPACITY_NCM_110S_WH;
-      datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_NCM_110S_DV;
-      datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_NCM_110S_DV;
+    if (datalayer_battery->info.number_of_cells == 107) {  //EX30 69kWh battery
+      datalayer_battery->info.total_capacity_Wh = MAX_CAPACITY_NCM_107S_WH;
+      datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_NCM_107S_DV;
+      datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_NCM_107S_DV;
+    } else if (datalayer_battery->info.number_of_cells == 110) {  //Zeekr 100kWh battery
+      datalayer_battery->info.total_capacity_Wh = MAX_CAPACITY_NCM_110S_WH;
+      datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_NCM_110S_DV;
+      datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_NCM_110S_DV;
     }
   }
 
@@ -97,98 +97,98 @@ void GeelySeaBattery::
 void GeelySeaBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
   switch (rx_frame.ID) {
     case 0x53:  //100ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x140:  //20ms EX30 only 00 00 00 00 01 7F F9 03
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x141:  //20ms EX30+Zeekr
       battery_alive = true;
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       //frame0 counter, 0x00 -> 0x0D and repeating
       //frame1 CRC most likely
       break;
     case 0x142:  //20ms EX30+Zeekr
       battery_alive = true;
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       if (rx_frame.data.u8[0] == 0x00) {
         pack_voltage_dV = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[4]) >> 3;
       } else if (rx_frame.data.u8[0] == 0x01) {
-        datalayer.battery.status.cell_max_voltage_mV = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[4]) >> 3;
+        datalayer_battery->status.cell_max_voltage_mV = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[4]) >> 3;
       } else if (rx_frame.data.u8[0] == 0x02) {
-        datalayer.battery.status.cell_min_voltage_mV = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[4]) >> 3;
+        datalayer_battery->status.cell_min_voltage_mV = ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[4]) >> 3;
       } else if (rx_frame.data.u8[0] > 0x02) {
-        datalayer.battery.status.cell_voltages_mV[rx_frame.data.u8[2] - 1] =
+        datalayer_battery->status.cell_voltages_mV[rx_frame.data.u8[2] - 1] =
             ((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[4]) >> 3;
-        if (rx_frame.data.u8[2] > datalayer.battery.info.number_of_cells)  // Detect number of cells
+        if (rx_frame.data.u8[2] > datalayer_battery->info.number_of_cells)  // Detect number of cells
         {
-          datalayer.battery.info.number_of_cells = rx_frame.data.u8[2];
+          datalayer_battery->info.number_of_cells = rx_frame.data.u8[2];
         }
       }
       break;
     case 0x143:  //20ms EX30+Zeekr
       battery_alive = true;
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       pack_current_dA = sign_extend_to_int16((((rx_frame.data.u8[0] & 0x0F) << 8) | rx_frame.data.u8[1]), 12);
       pack_current_dA = pack_current_dA + 4;
       break;
       /*
     case 0x145:  //100ms EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x175:  //100ms EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x17B:  //100ms EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x178:  //70ms EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x182:  //100ms Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x183:  //100ms EX30
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x18A:  //100ms EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x286:  //120ms EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x288:  //100ms EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x290:  //100ms EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x293:  //EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x295:  //Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x296:  //Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x298:  //Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x301:  //Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x302:  //EX30
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x309:  //EX30
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x313:  //EX30
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x315:  //EX30+Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
     case 0x316:  //Zeekr
     case 0x331:  //Zeekr
@@ -209,11 +209,11 @@ void GeelySeaBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
     case 0x5C1:  //Zeekr
     case 0x5D0:  //Zeekr
     case 0x5D1:  //Zeekr
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       break;
       */
     case 0x635:  //Diag
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
 
       if (DTC_readout_in_progress) {
 
@@ -349,13 +349,11 @@ void GeelySeaBattery::transmit_can(unsigned long currentMillis) {
 }
 
 void GeelySeaBattery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
-  datalayer.battery.info.total_capacity_Wh = MAX_CAPACITY_NCM_110S_WH;          //Startout in NCM mode
-  datalayer.battery.info.max_design_voltage_dV = MAX_PACK_VOLTAGE_NCM_110S_DV;  //Startout with max allowed range
-  datalayer.battery.info.min_design_voltage_dV = MIN_PACK_VOLTAGE_NCM_110S_DV;  //Startout with min allowed range
-  datalayer.battery.info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
-  datalayer.battery.info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
-  datalayer.battery.info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
+  datalayer_battery->info.total_capacity_Wh = MAX_CAPACITY_NCM_110S_WH;          //Startout in NCM mode
+  datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_NCM_110S_DV;  //Startout with max allowed range
+  datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_NCM_110S_DV;  //Startout with min allowed range
+  datalayer_battery->info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
+  datalayer_battery->info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
+  datalayer_battery->info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
   datalayer_extended.GeelySEA.Interlock = 255;  //Set all interlock bits to 1 (open) at startup
 }

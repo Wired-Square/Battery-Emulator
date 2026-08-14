@@ -1,29 +1,131 @@
 #ifndef VOLVO_SPA_HYBRID_BATTERY_H
 #define VOLVO_SPA_HYBRID_BATTERY_H
+#include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "VOLVO-SPA-HYBRID-HTML.h"
 
 class VolvoSpaHybridBattery : public CanBattery {
  public:
+  VolvoSpaHybridBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Volvo PHEV battery";
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { datalayer_extended.VolvoHybrid.UserRequestDTCreset = true; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  bool supports_read_DTC() { return true; }
-  void read_DTC() { datalayer_extended.VolvoHybrid.UserRequestDTCreadout = true; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
 
-  bool supports_reset_BECM() { return true; }
-  void reset_BECM() { datalayer_extended.VolvoHybrid.UserRequestBECMecuReset = true; }
+    s.fields.push_back(kv("BECM reported SOC", String(datalayer_extended.VolvoHybrid.soc_bms)));
+    s.fields.push_back(kv("Calculated SOC", String(datalayer_extended.VolvoHybrid.soc_calc)));
+    s.fields.push_back(kv("Rescaled SOC", String(datalayer_extended.VolvoHybrid.soc_rescaled / 10)));
+    s.fields.push_back(kv("BECM reported SOH", String(datalayer_extended.VolvoHybrid.soh_bms)));
+    s.fields.push_back(kv("BECM supply voltage", String(datalayer_extended.VolvoHybrid.BECMsupplyVoltage), "mV"));
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+    s.fields.push_back(kv("HV voltage", String(datalayer_extended.VolvoHybrid.BECMBatteryVoltage), "V"));
+    s.fields.push_back(kv("HV current", String(datalayer_extended.VolvoHybrid.BECMBatteryCurrent), "A"));
+    s.fields.push_back(kv("Dynamic max voltage", String(datalayer_extended.VolvoHybrid.BECMUDynMaxLim), "V"));
+    s.fields.push_back(kv("Dynamic min voltage", String(datalayer_extended.VolvoHybrid.BECMUDynMinLim), "V"));
+
+    s.fields.push_back(kv("Discharge power limit 1", String(datalayer_extended.VolvoHybrid.HvBattPwrLimDcha1), "kW"));
+    s.fields.push_back(
+        kv("Discharge soft power limit", String(datalayer_extended.VolvoHybrid.HvBattPwrLimDchaSoft), "kW"));
+
+    String hv_sys_relay_status;
+    switch (datalayer_extended.VolvoHybrid.HVSysRlySts) {
+      case 0:
+        hv_sys_relay_status = "Open";
+        break;
+      case 1:
+        hv_sys_relay_status = "Closed";
+        break;
+      case 2:
+        hv_sys_relay_status = "KeepStatus";
+        break;
+      case 3:
+        hv_sys_relay_status = "OpenAndRequestActiveDischarge";
+        break;
+      default:
+        hv_sys_relay_status = "Not valid";
+    }
+    s.fields.push_back(kv("HV system relay status", hv_sys_relay_status));
+
+    String hv_sys_dc_relay_status1;
+    switch (datalayer_extended.VolvoHybrid.HVSysDCRlySts1) {
+      case 0:
+        hv_sys_dc_relay_status1 = "Open";
+        break;
+      case 1:
+        hv_sys_dc_relay_status1 = "Closed";
+        break;
+      case 2:
+        hv_sys_dc_relay_status1 = "KeepStatus";
+        break;
+      case 3:
+        hv_sys_dc_relay_status1 = "Fault";
+        break;
+      default:
+        hv_sys_dc_relay_status1 = "Not valid";
+    }
+    s.fields.push_back(kv("HV system relay status 1", hv_sys_dc_relay_status1));
+
+    String hv_sys_dc_relay_status2;
+    switch (datalayer_extended.VolvoHybrid.HVSysDCRlySts2) {
+      case 0:
+        hv_sys_dc_relay_status2 = "Open";
+        break;
+      case 1:
+        hv_sys_dc_relay_status2 = "Closed";
+        break;
+      case 2:
+        hv_sys_dc_relay_status2 = "KeepStatus";
+        break;
+      case 3:
+        hv_sys_dc_relay_status2 = "Fault";
+        break;
+      default:
+        hv_sys_dc_relay_status2 = "Not valid";
+    }
+    s.fields.push_back(kv("HV system relay status 2", hv_sys_dc_relay_status2));
+
+    String hv_sys_iso_monitor_status;
+    switch (datalayer_extended.VolvoHybrid.HVSysIsoRMonrSts) {
+      case 0:
+        hv_sys_iso_monitor_status = "Not valid 1";
+        break;
+      case 1:
+        hv_sys_iso_monitor_status = "False";
+        break;
+      case 2:
+        hv_sys_iso_monitor_status = "True";
+        break;
+      case 3:
+        hv_sys_iso_monitor_status = "Not valid 2";
+        break;
+      default:
+        hv_sys_iso_monitor_status = "Not valid";
+    }
+    s.fields.push_back(kv("HV system isolation resistance monitoring status", hv_sys_iso_monitor_status));
+
+    status.sections.push_back(s);
+    return status;
+  }
 
  private:
-  VolvoSpaHybridHtmlRenderer renderer;
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void reset_DTC() { datalayer_extended.VolvoHybrid.UserRequestDTCreset = true; }
+  void read_DTC() { datalayer_extended.VolvoHybrid.UserRequestDTCreadout = true; }
+  void reset_BECM() { datalayer_extended.VolvoHybrid.UserRequestBECMecuReset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+      command(CMD_RESET_BECM, [this] { reset_BECM(); }),
+  };
+
   void readCellVoltages();
 
   static const int MAX_PACK_VOLTAGE_DV = 4294;  //5000 = 500.0V

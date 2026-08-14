@@ -1,33 +1,33 @@
 #ifndef TEST_FAKE_BATTERY_H
 #define TEST_FAKE_BATTERY_H
 #include "../datalayer/datalayer.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
+#include "battery_command.h"
 
 class TestFakeBattery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  TestFakeBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, CAN_Interface targetCan) : CanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-    allows_contactor_closing = nullptr;
+  TestFakeBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
   }
 
-  // Use the default constructor to create the first or single battery.
-  TestFakeBattery() {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
-  }
-
-  static constexpr const char* Name = "Fake battery for testing purposes";
 
   virtual void setup();
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  bool supports_set_fake_voltage() { return true; }
-  void set_fake_voltage(float val) { datalayer.battery.status.voltage_dV = val * 10; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
  private:
+  // Narrowing is safe: the descriptor bounds the value to the field's range.
+  void set_fake_voltage(int32_t decivolts) { datalayer_battery->status.voltage_dV = static_cast<uint16_t>(decivolts); }
+
+  std::vector<BatteryCommand> commands_{
+      value_command(CMD_SET_FAKE_VOLTAGE, [this](int32_t decivolts) { set_fake_voltage(decivolts); }),
+  };
+
   DATALAYER_BATTERY_TYPE* datalayer_battery;
   // If not null, this battery decides when the contactor can be closed and writes the value here.
   bool* allows_contactor_closing;

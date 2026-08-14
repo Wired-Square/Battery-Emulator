@@ -92,7 +92,7 @@ void RenaultZoeGen1Battery::handle_incoming_can_frame(CAN_frame rx_frame) {
       datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       LB_Heartbeat = rx_frame.data.u8[6];  // Alternates between 0x55 and 0xAA every 500ms (Same as on Nissan LEAF)
       if ((LB_Heartbeat != 0x55) && (LB_Heartbeat != 0xAA)) {
-        datalayer.battery.status.CAN_error_counter++;
+        datalayer_battery->status.CAN_error_counter++;
         break;
       }
       LB_CUV = (rx_frame.data.u8[0] & 0x03);
@@ -122,7 +122,7 @@ void RenaultZoeGen1Battery::handle_incoming_can_frame(CAN_frame rx_frame) {
       datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       LB_Heartbeat = rx_frame.data.u8[2];  // Alternates between 0x55 and 0xAA every 500ms (Same as on Nissan LEAF)
       if ((LB_Heartbeat != 0x55) && (LB_Heartbeat != 0xAA)) {
-        datalayer.battery.status.CAN_error_counter++;
+        datalayer_battery->status.CAN_error_counter++;
         break;
       }
       break;
@@ -621,9 +621,9 @@ void RenaultZoeGen1Battery::transmit_can(unsigned long currentMillis) {
 }
 
 void RenaultZoeGen1Battery::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
-  datalayer.system.status.battery_allows_contactor_closing = true;
+  if (allows_contactor_closing) {
+    *allows_contactor_closing = true;
+  }
   datalayer_battery->info.number_of_cells = 96;
   datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_DV;
   datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_DV;

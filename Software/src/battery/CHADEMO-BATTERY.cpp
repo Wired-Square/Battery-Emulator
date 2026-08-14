@@ -11,7 +11,7 @@ float (*get_measured_voltage_ptr)();
 //This function maps all the values fetched via CAN to the correct parameters used for the inverter
 void ChademoBattery::update_values() {
 
-  datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+  datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
   //On this integration, we don't care if no CAN messages flow (normal before user plugs in)
   //Always write the CAN as alive!
 
@@ -26,17 +26,17 @@ void ChademoBattery::update_values() {
     datalayer_extended.chademo.UserRequestRestart = false;
   }
 
-  datalayer.battery.status.real_soc = x102_chg_session.StateOfCharge * 100;  //Convert % to pptt
+  datalayer_battery->status.real_soc = x102_chg_session.StateOfCharge * 100;  //Convert % to pptt
 
-  datalayer.battery.status.max_discharge_power_W =
+  datalayer_battery->status.max_discharge_power_W =
       (x200_discharge_limits.MaximumDischargeCurrent * x100_chg_lim.MaximumBatteryVoltage);  //In Watts, Convert A to P
 
   if (vehicle_can_received) {  // Only update the value sent towards inverter if vehicle is connected (avoids false positive events)
-    datalayer.battery.status.voltage_dV = get_voltage_handler() * 10.0f;
-    datalayer.battery.status.current_dA = get_measured_current_ptr() * 10.0f;
+    datalayer_battery->status.voltage_dV = get_voltage_handler() * 10.0f;
+    datalayer_battery->status.current_dA = get_measured_current_ptr() * 10.0f;
   }
 
-  datalayer.battery.info.total_capacity_Wh = (x101_chg_est.RatedBatteryCapacity * 100);
+  datalayer_battery->info.total_capacity_Wh = (x101_chg_est.RatedBatteryCapacity * 100);
   //(Added in CHAdeMO v1.0.1), maybe handle hardcoded on lower protocol version?
 
   /* TODO max charging rate = 
@@ -44,8 +44,8 @@ void ChademoBattery::update_values() {
    * 	    x101_chg_est.RatedBatteryCapacity * 100;
    */
 
-  datalayer.battery.status.remaining_capacity_Wh = static_cast<uint32_t>(
-      (static_cast<double>(datalayer.battery.status.real_soc) / 10000) * datalayer.battery.info.total_capacity_Wh);
+  datalayer_battery->status.remaining_capacity_Wh = static_cast<uint32_t>(
+      (static_cast<double>(datalayer_battery->status.real_soc) / 10000) * datalayer_battery->info.total_capacity_Wh);
 
   /* To simulate or NOT to simulate battery cell voltages, that is .. A question.
    * Answer for now: Not, because they are not available in any direct manner.
@@ -628,8 +628,8 @@ void ChademoBattery::transmit_can(unsigned long currentMillis) {
  */
 void ChademoBattery::handle_chademo_sequence() {
 
-  precharge_low = digitalRead(precharge) == LOW;
-  positive_high = digitalRead(positive_contactor) == HIGH;
+  precharge_low = precharge_output == nullptr || !precharge_output->level();
+  positive_high = positive_contactor_output != nullptr && positive_contactor_output->level();
   contactors_ready = precharge_low && positive_high;
 
   vehicle_permission = digitalRead(pin4);
@@ -894,7 +894,7 @@ void ChademoBattery::setup(void) {  // Performs one time setup at startup
     get_measured_voltage_ptr = get_measured_voltage;
   }
 
-  if (!esp32hal->alloc_pins(Name, pin2, pin10, pin4, pin7, pin_lock)) {
+  if (!esp32hal->alloc_pins("Chademo V2X mode", pin2, pin10, pin4, pin7, pin_lock)) {
     return;
   }
 
@@ -912,32 +912,29 @@ void ChademoBattery::setup(void) {  // Performs one time setup at startup
     setup_ct();
   }
 
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
-
   CHADEMO_Status = CHADEMO_IDLE;
 
   /* disallow contactors until permissions is granted by vehicle */
   datalayer.system.status.battery_allows_contactor_closing = false;
 
   /* Pretend that we know the SOH, assert that it is 99% */
-  datalayer.battery.status.soh_pptt = 9900;
+  datalayer_battery->status.soh_pptt = 9900;
 
   /* Briefly assert that we're starting at a modest SOC of 30% */
-  datalayer.battery.status.real_soc = 300;
+  datalayer_battery->status.real_soc = 300;
 
   //TODO Must be user configured, most likely. Artificially capped for the time being
-  datalayer.battery.status.max_discharge_power_W = 1000;
-  datalayer.battery.status.max_charge_power_W = 1000;
+  datalayer_battery->status.max_discharge_power_W = 1000;
+  datalayer_battery->status.max_charge_power_W = 1000;
 
-  datalayer.battery.status.current_dA = 0;
-  datalayer.battery.status.remaining_capacity_Wh = 12000;
+  datalayer_battery->status.current_dA = 0;
+  datalayer_battery->status.remaining_capacity_Wh = 12000;
 
   //TODO this is probably fine for a baseline, though CHADEMO can go as low as 150v and as high as 1500v in the latest revision
   //the below is relative to a 96 cell NMC. lower end is possibly too low
-  datalayer.battery.info.max_design_voltage_dV =
+  datalayer_battery->info.max_design_voltage_dV =
       4040;  // 404.4V, over this, charging is not possible (goes into forced discharge)
-  datalayer.battery.info.min_design_voltage_dV = 2600;  // 260.0V under this, discharging further is disabled
+  datalayer_battery->info.min_design_voltage_dV = 2600;  // 260.0V under this, discharging further is disabled
 
   /* initialize EVSE data, state, and CAN frame representations */
   switch (EVSE_mode) {

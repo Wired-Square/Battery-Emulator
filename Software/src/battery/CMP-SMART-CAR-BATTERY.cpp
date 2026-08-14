@@ -555,7 +555,7 @@ void CmpSmartCarBattery::setup(void) {  // Performs one time setup at startup
 
   // Only allocate pins once, double-battery uses same WUP pin
   if (!pins_allocated) {
-    if (!esp32hal->alloc_pins(Name, esp32hal->WUP_PIN1())) {
+    if (!esp32hal->alloc_pins("Stellantis CMP Smart Car Battery", esp32hal->WUP_PIN1())) {
       return;  // Pin allocation failed
     }
     pinMode(esp32hal->WUP_PIN1(), OUTPUT);
@@ -563,8 +563,6 @@ void CmpSmartCarBattery::setup(void) {  // Performs one time setup at startup
     pins_allocated = true;
   }
 
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
   datalayer_battery->info.number_of_cells = 100;
   datalayer_battery->info.chemistry = battery_chemistry_enum::LFP;
   datalayer_battery->info.total_capacity_Wh = 41400;

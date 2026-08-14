@@ -9,30 +9,30 @@ void CellPowerBms::update_values() {
 
   /* Update values from CAN */
 
-  datalayer.battery.status.real_soc = battery_SOC_percentage * 100;
+  datalayer_battery->status.real_soc = battery_SOC_percentage * 100;
 
-  datalayer.battery.status.remaining_capacity_Wh = static_cast<uint32_t>(
-      (static_cast<double>(datalayer.battery.status.real_soc) / 10000) * datalayer.battery.info.total_capacity_Wh);
+  datalayer_battery->status.remaining_capacity_Wh = static_cast<uint32_t>(
+      (static_cast<double>(datalayer_battery->status.real_soc) / 10000) * datalayer_battery->info.total_capacity_Wh);
 
-  datalayer.battery.status.soh_pptt = battery_SOH_percentage * 100;
+  datalayer_battery->status.soh_pptt = battery_SOH_percentage * 100;
 
-  datalayer.battery.status.voltage_dV = battery_pack_voltage_dV;
+  datalayer_battery->status.voltage_dV = battery_pack_voltage_dV;
 
-  datalayer.battery.status.current_dA = battery_pack_current_dA;
+  datalayer_battery->status.current_dA = battery_pack_current_dA;
 
-  datalayer.battery.status.max_charge_power_W =
-      datalayer.battery.status.override_charge_power_W;  //TODO, is this available via CAN?
+  datalayer_battery->status.max_charge_power_W =
+      datalayer_battery->status.override_charge_power_W;  //TODO, is this available via CAN?
 
-  datalayer.battery.status.max_discharge_power_W =
-      datalayer.battery.status.override_discharge_power_W;  //TODO, is this available via CAN?
+  datalayer_battery->status.max_discharge_power_W =
+      datalayer_battery->status.override_discharge_power_W;  //TODO, is this available via CAN?
 
-  datalayer.battery.status.temperature_min_dC = (int16_t)(pack_temperature_low_C * 10);
+  datalayer_battery->status.temperature_min_dC = (int16_t)(pack_temperature_low_C * 10);
 
-  datalayer.battery.status.temperature_max_dC = (int16_t)(pack_temperature_high_C * 10);
+  datalayer_battery->status.temperature_max_dC = (int16_t)(pack_temperature_high_C * 10);
 
-  datalayer.battery.status.cell_max_voltage_mV = cell_voltage_max_mV;
+  datalayer_battery->status.cell_max_voltage_mV = cell_voltage_max_mV;
 
-  datalayer.battery.status.cell_min_voltage_mV = cell_voltage_min_mV;
+  datalayer_battery->status.cell_min_voltage_mV = cell_voltage_min_mV;
 
   /* Update webserver datalayer */
   datalayer_extended.cellpower.system_state_discharge = system_state_discharge;
@@ -116,7 +116,7 @@ void CellPowerBms::handle_incoming_can_frame(CAN_frame rx_frame) {
 
   switch (rx_frame.ID) {
     case 0x1A4:  //PDO1_TX - 200ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       cell_voltage_max_mV = (uint16_t)((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
       cell_voltage_min_mV = (uint16_t)((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]);
       pack_temperature_high_C = (int8_t)rx_frame.data.u8[4];
@@ -138,7 +138,7 @@ void CellPowerBms::handle_incoming_can_frame(CAN_frame rx_frame) {
       IO_state_IO_8 = ((rx_frame.data.u8[7] & 0x80) >> 7);
       break;
     case 0x2A4:  //PDO2_TX - 200ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       battery_pack_voltage_dV = (uint16_t)((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
       battery_pack_current_dA = (int16_t)((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]);
       battery_SOH_percentage = (uint8_t)rx_frame.data.u8[4];
@@ -146,12 +146,12 @@ void CellPowerBms::handle_incoming_can_frame(CAN_frame rx_frame) {
       battery_remaining_dAh = (uint16_t)((rx_frame.data.u8[7] << 8) | rx_frame.data.u8[6]);
       break;
     case 0x3A4:  //PDO3_TX - 200ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       cell_with_highest_voltage = (uint8_t)rx_frame.data.u8[0];
       cell_with_lowest_voltage = (uint8_t)rx_frame.data.u8[1];
       break;
     case 0x4A4:  //PDO4_TX - 200ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       error_Cell_overvoltage = (rx_frame.data.u8[0] & 0x01);
       error_Cell_undervoltage = ((rx_frame.data.u8[0] & 0x02) >> 1);
       error_Cell_end_of_life_voltage = ((rx_frame.data.u8[0] & 0x04) >> 2);
@@ -200,14 +200,14 @@ void CellPowerBms::handle_incoming_can_frame(CAN_frame rx_frame) {
       warning_Charger_not_responding = ((rx_frame.data.u8[6] & 0x04) >> 2);
       break;
     case 0x7A4:  //PDO7_TX - 200ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       requested_charge_current_dA = (uint16_t)((rx_frame.data.u8[1] << 8) | rx_frame.data.u8[0]);
       average_charge_current_dA = (uint16_t)((rx_frame.data.u8[3] << 8) | rx_frame.data.u8[2]);
       actual_charge_current_dA = (uint16_t)((rx_frame.data.u8[5] << 8) | rx_frame.data.u8[4]);
       requested_exceeding_average_current = (rx_frame.data.u8[6] & 0x01);
       break;
     case 0x7A5:  //PDO7.1_TX - 200ms
-      datalayer.battery.status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+      datalayer_battery->status.CAN_battery_still_alive = CAN_STILL_ALIVE;
       error_state = (rx_frame.data.u8[0] & 0x01);
       break;
     default:
@@ -231,11 +231,9 @@ void CellPowerBms::transmit_can(unsigned long currentMillis) {
 }
 
 void CellPowerBms::setup(void) {  // Performs one time setup at startup
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
   datalayer.system.status.battery_allows_contactor_closing = true;
-  datalayer.battery.info.max_design_voltage_dV = user_selected_max_pack_voltage_dV;
-  datalayer.battery.info.min_design_voltage_dV = user_selected_min_pack_voltage_dV;
-  datalayer.battery.info.max_cell_voltage_mV = user_selected_max_cell_voltage_mV;
-  datalayer.battery.info.min_cell_voltage_mV = user_selected_min_cell_voltage_mV;
+  datalayer_battery->info.max_design_voltage_dV = user_selected_max_pack_voltage_dV;
+  datalayer_battery->info.min_design_voltage_dV = user_selected_min_pack_voltage_dV;
+  datalayer_battery->info.max_cell_voltage_mV = user_selected_max_cell_voltage_mV;
+  datalayer_battery->info.min_cell_voltage_mV = user_selected_min_cell_voltage_mV;
 }

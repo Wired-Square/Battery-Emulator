@@ -2,13 +2,16 @@
 
 #ifndef CHARGEBYTE_CCS_BATTERY_H
 #define CHARGEBYTE_CCS_BATTERY_H
+#include "../devboard/hal/GpioOutput.h"
 #include "../devboard/hal/hal.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 #include "driver/i2c_master.h"
 
 class ChargebyteCCSBattery : public CanBattery {
  public:
+  ChargebyteCCSBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_precharge(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
@@ -17,6 +20,7 @@ class ChargebyteCCSBattery : public CanBattery {
   static constexpr const char* Name = "Chargebyte CCS V2X";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   void dump_data();
   void setPrechargeVoltage(uint16_t value, bool writeEEPROM = false);
 
@@ -36,10 +40,16 @@ class ChargebyteCCSBattery : public CanBattery {
 
   // the following configures pins for precharging the inverter side
   // battery voltage and two DC contactors are used. negative is connected all the time
-  // we differ from the official STARK CMR pins
-  virtual gpio_num_t CCS_PRECHARGE_CONTACTOR_PIN() { return esp32hal->POSITIVE_CONTACTOR_PIN(); }
-  virtual gpio_num_t CCS_MAIN_CONCTACTOR_PIN() { return esp32hal->NEGATIVE_CONTACTOR_PIN(); }
-  virtual gpio_num_t CCS_CP_PP_DISCONNECT_PIN() { return esp32hal->BMS_POWER(); }
+  // we differ from the official STARK CMR pins.
+  // The board owns these GPIOs as switched-output objects now; this driver still
+  // drives them directly, so pull the raw pin out of the bound GpioOutput.
+  gpio_num_t switched_output_pin(OutputRole role) {
+    auto* output = esp32hal->switched_output(role);
+    return output ? static_cast<GpioOutput*>(output)->pin() : GPIO_NUM_NC;
+  }
+  virtual gpio_num_t CCS_PRECHARGE_CONTACTOR_PIN() { return switched_output_pin(OutputRole::PositiveContactor); }
+  virtual gpio_num_t CCS_MAIN_CONCTACTOR_PIN() { return switched_output_pin(OutputRole::NegativeContactor); }
+  virtual gpio_num_t CCS_CP_PP_DISCONNECT_PIN() { return switched_output_pin(OutputRole::BmsPower); }
 
   CAN_frame CHARGEBYTE_307 = {.FD = false,
                               .ext_ID = true,

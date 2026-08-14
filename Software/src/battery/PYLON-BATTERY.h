@@ -2,27 +2,29 @@
 #define PYLON_BATTERY_H
 
 #include "../datalayer/datalayer.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "PYLON-HTML.h"
 
 extern uint16_t user_selected_pylon_baudrate;
 
+// Extra data parsed from the Pylon HV protocol that has no datalayer home.
+struct PylonExtendedData {
+  uint16_t charge_cutoff_dV = 0;
+  uint16_t discharge_cutoff_dV = 0;
+  uint16_t cell_max_number = 0;
+  uint16_t cell_min_number = 0;
+  uint16_t temp_max_sensor = 0;
+  uint16_t temp_min_sensor = 0;
+};
+
 class PylonBattery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  PylonBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, bool* contactor_closing_allowed_ptr, CAN_Interface targetCan)
-      : CanBattery(targetCan,
+  PylonBattery(const BatterySlotContext& ctx)
+      : CanBattery(ctx.can_interface,
                    user_selected_pylon_baudrate == 500 ? CAN_Speed::CAN_SPEED_500KBPS : CAN_Speed::CAN_SPEED_250KBPS) {
-    datalayer_battery = datalayer_ptr;
-    contactor_closing_allowed = contactor_closing_allowed_ptr;
-    allows_contactor_closing = nullptr;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  PylonBattery()
-      : CanBattery(user_selected_pylon_baudrate == 500 ? CAN_Speed::CAN_SPEED_500KBPS : CAN_Speed::CAN_SPEED_250KBPS) {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
+    datalayer_battery = ctx.datalayer;
+    // Only the primary decides contactor closing; slots never listen for it either.
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
     contactor_closing_allowed = nullptr;
   }
 
@@ -30,13 +32,30 @@ class PylonBattery : public CanBattery {
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Pylon /Dyness compatible battery";
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
+    s.fields.push_back(kv("BMS charge cutoff voltage", String(extended_data.charge_cutoff_dV / 10.0, 1), "V"));
+    s.fields.push_back(kv("BMS discharge cutoff voltage", String(extended_data.discharge_cutoff_dV / 10.0, 1), "V"));
+    s.fields.push_back(kv("Design voltage in use",
+                          String(datalayer_battery->info.min_design_voltage_dV / 10.0, 1) + " - " +
+                              String(datalayer_battery->info.max_design_voltage_dV / 10.0, 1),
+                          "V"));
+    if (extended_data.cell_max_number > 0 || extended_data.cell_min_number > 0) {
+      s.fields.push_back(kv("Highest / lowest cell",
+                            "#" + String(extended_data.cell_max_number) + " / #" + String(extended_data.cell_min_number)));
+    }
+    if (extended_data.temp_max_sensor > 0 || extended_data.temp_min_sensor > 0) {
+      s.fields.push_back(kv("Hottest / coldest sensor",
+                            "#" + String(extended_data.temp_max_sensor) + " / #" + String(extended_data.temp_min_sensor)));
+    }
+    status.sections.push_back(s);
+    return status;
+  }
 
  private:
   PylonExtendedData extended_data;
-  PylonHtmlRenderer renderer = PylonHtmlRenderer(&extended_data);
   static const int MAX_CELL_DEVIATION_MV = 150;
   static const int MAX_CELLS = 192;                                 // Maximum cells supported
   static const uint32_t EMUS_BASE_ID = 0x19B50000;                  // EMUS extended ID base for cell count

@@ -3,35 +3,37 @@
 #include <Arduino.h>
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "HYUNDAI-IONIQ-28-BATTERY-HTML.h"
 
 class HyundaiIoniq28Battery : public CanBattery {
  public:
   // Use the default constructor to create the first or single battery.
-  HyundaiIoniq28Battery() : renderer(*this) { datalayer_battery = &datalayer.battery; }
+  HyundaiIoniq28Battery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  BatteryAdvancedStatus get_advanced_status() override;
+
+  bool supports_insulation_resistance() override { return true; }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  static constexpr const char* Name = "Hyundai Ioniq Electric 28kWh";
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  // Getter methods for HTML renderer
+  // Getter methods for get_advanced_status()
   uint16_t get_lead_acid_voltage() const;
   uint16_t get_isolation_resistance() const;
   int16_t get_power_relay_temperature() const;
   uint8_t get_battery_management_mode() const;
 
-  bool supports_reset_DTC() { return true; }
-  bool supports_insulation_resistance() { return true; }
+ private:
   void reset_DTC() { UserRequestDTCreset = true; }
 
- private:
-  HyundaiIoniq28BatteryHtmlRenderer renderer;
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
 
   DATALAYER_BATTERY_TYPE* datalayer_battery;
 

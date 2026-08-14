@@ -1,52 +1,285 @@
 #ifndef BMW_PHEV_BATTERY_H
 #define BMW_PHEV_BATTERY_H
-#include "BMW-PHEV-HTML.h"
+#include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
+#include "../devboard/webserver/advanced_api.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class BmwPhevBattery : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }  //TODO: Investigate if actually needed
+  BmwPhevBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  static constexpr const char* Name = "BMW PHEV Battery";
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  bool supports_reset_DTC() { return true; }
-  bool supports_insulation_resistance() { return true; }
-  void reset_DTC() { datalayer_extended.bmwphev.UserRequestDTCreset = true; }
+  bool supports_insulation_resistance() override { return true; }
 
-  bool supports_reset_BMS() { return true; }
-  void reset_BMS() { datalayer_extended.bmwphev.UserRequestBMSReset = true; }
+  const char* get_dtc_json_filename() override { return "bmw_phev_dtc.json"; }
 
-  // Beta CAN-based contactor close support via 0x53A (see INFO section in .cpp)
-  bool supports_contactor_close() { return true; }
-  void request_open_contactors() { userRequestContactorOpen = true; }
-  void request_close_contactors() { userRequestContactorClose = true; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    auto& phev = datalayer_extended.bmwphev;
 
-  // Online balancing via the SME UDS routine (0xAD6B). Drives the user_requests_balancing flag the
-  // transmit loop reads: when set it sends startRoutine, otherwise stopRoutine (cancels any latched
-  // balancing). Renders independent, always-visible Start and Stop Balancing buttons on the advanced page.
-  //
-  // IMPORTANT (SME behaviour):
-  //  - Balancing is ONLY possible while the contactors are OPEN. The SME will not balance with the
-  //    pack connected/closed.
-  //  - While balancing is ACTIVE the SME BLOCKS contactor close (precharge is inhibited until
-  //    balancing finishes / is stopped). So requesting balancing prevents the pack from going online.
-  bool supports_balancing_request() { return true; }
-  bool is_balancing_active() { return datalayer.battery.settings.user_requests_balancing; }
-  void initiate_balancing() { datalayer.battery.settings.user_requests_balancing = true; }
-  void end_balancing() { datalayer.battery.settings.user_requests_balancing = false; }
+    // Shared across most 0/1/2/3 status fields: "not evaluated / OK / error active / invalid signal".
+    auto status_ok_error = [](uint8_t v) -> String {
+      switch (v) {
+        case 0:
+          return "Not Evaluated";
+        case 1:
+          return "OK";
+        case 2:
+          return "Error";
+        case 3:
+          return "Invalid Signal";
+        default:
+          return "Unknown";
+      }
+    };
+    // Shared across the three "request open contactors" fields.
+    auto status_active = [](uint8_t v) -> String {
+      switch (v) {
+        case 0:
+          return "Not Evaluated";
+        case 1:
+          return "Not Active";
+        case 2:
+          return "Active";
+        case 3:
+          return "Invalid Signal";
+        default:
+          return "Unknown";
+      }
+    };
 
-  // Isolation test - one-shot UDS startRoutine (0xAD61). Same one-shot pattern as DTC/BMS reset.
-  bool supports_isolation_test() { return true; }
-  void request_isolation_test() { datalayer_extended.bmwphev.UserRequestIsolationTest = true; }
+    AdvancedSection power;
+    power.title = "Power & Voltage";
+    power.fields.push_back(kv("Battery Voltage (After Contactor)", String(phev.battery_voltage_after_contactor), "dV"));
+    power.fields.push_back(kv("Max Design Voltage", String(datalayer_battery->info.max_design_voltage_dV), "dV"));
+    power.fields.push_back(kv("Min Design Voltage", String(datalayer_battery->info.min_design_voltage_dV), "dV"));
+    power.fields.push_back(kv("Allowed Charge Power", String(datalayer_battery->status.max_charge_power_W), "W"));
+    power.fields.push_back(kv("Allowed Discharge Power", String(datalayer_battery->status.max_discharge_power_W), "W"));
+    power.fields.push_back(kv("BMS Allowed Charge Amps", String(phev.allowable_charge_amps), "A"));
+    power.fields.push_back(kv("BMS Allowed Discharge Amps", String(phev.allowable_discharge_amps), "A"));
+    status.sections.push_back(power);
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+    AdvancedSection contactors;
+    contactors.title = "Contactor Status";
+
+    String dcsw;
+    switch (phev.ST_DCSW) {
+      case 0:
+        dcsw = "Contactors Open";
+        break;
+      case 1:
+        dcsw = "Precharge Ongoing";
+        break;
+      case 2:
+        dcsw = "Contactors Engaged";
+        break;
+      case 3:
+        dcsw = "Invalid Signal";
+        break;
+      default:
+        dcsw = "Unknown";
+    }
+    contactors.fields.push_back(kv("Contactor Status", dcsw));
+
+    String precharge;
+    switch (phev.ST_precharge) {
+      case 0:
+        precharge = "Not Evaluated";
+        break;
+      case 1:
+        precharge = "Not Active, Closing Not Blocked";
+        break;
+      case 2:
+        precharge = "Error - Precharge Blocked";
+        break;
+      case 3:
+        precharge = "Invalid Signal";
+        break;
+      default:
+        precharge = "Unknown";
+    }
+    contactors.fields.push_back(kv("Precharge Status", precharge));
+
+    String weld;
+    switch (phev.ST_WELD) {
+      case 0:
+        weld = "Contactors OK";
+        break;
+      case 1:
+        weld = "One Contactor Welded!";
+        break;
+      case 2:
+        weld = "Two Contactors Welded!";
+        break;
+      case 3:
+        weld = "Invalid Signal";
+        break;
+      default:
+        weld = "Unknown";
+    }
+    contactors.fields.push_back(kv("Contactor Weld Status", weld));
+
+    contactors.fields.push_back(kv("Request Open Contactors", status_active(phev.battery_request_open_contactors)));
+    contactors.fields.push_back(
+        kv("Request Open Contactors (Fast)", status_active(phev.battery_request_open_contactors_fast)));
+    contactors.fields.push_back(
+        kv("Request Open Contactors (Instantly)", status_active(phev.battery_request_open_contactors_instantly)));
+    status.sections.push_back(contactors);
+
+    AdvancedSection safety;
+    safety.title = "Safety Systems";
+    safety.fields.push_back(kv("Interlock", status_ok_error(phev.ST_interlock)));
+    safety.fields.push_back(kv("Emergency Status", status_ok_error(phev.ST_EMG)));
+    status.sections.push_back(safety);
+
+    AdvancedSection isolation;
+    isolation.title = "Isolation Monitoring";
+    isolation.fields.push_back(kv("Overall Isolation Status", status_ok_error(phev.ST_isolation)));
+    isolation.fields.push_back(kv("Internal Isolation", status_ok_error(phev.ST_iso_int)));
+    isolation.fields.push_back(kv("External Isolation", status_ok_error(phev.ST_iso_ext)));
+    isolation.fields.push_back(kv("Isolation Resistance", String(phev.iso_safety_kohm), "kΩ"));
+    isolation.fields.push_back(kv("Isolation Quality", String(phev.iso_safety_kohm_quality)));
+    isolation.fields.push_back(kv("Internal Resistance",
+                                  String(phev.iso_safety_int_kohm) + " kΩ " +
+                                      (phev.iso_safety_int_plausible ? "(Plausible)" : "(Not Plausible)")));
+    isolation.fields.push_back(kv("External Resistance",
+                                  String(phev.iso_safety_ext_kohm) + " kΩ " +
+                                      (phev.iso_safety_ext_plausible ? "(Plausible)" : "(Not Plausible)")));
+    isolation.fields.push_back(kv("Trigger Resistance",
+                                  String(phev.iso_safety_trg_kohm) + " kΩ " +
+                                      (phev.iso_safety_trg_plausible ? "(Plausible)" : "(Not Plausible)")));
+    status.sections.push_back(isolation);
+
+    AdvancedSection thermal;
+    thermal.title = "Thermal Management";
+    thermal.fields.push_back(kv("Cooling Valve Status", status_ok_error(phev.ST_valve_cooling)));
+
+    String cold_shutoff;
+    switch (phev.ST_cold_shutoff_valve) {
+      case 0:
+        cold_shutoff = "OK";
+        break;
+      case 1:
+        cold_shutoff = "Short Circuit to GND";
+        break;
+      case 2:
+        cold_shutoff = "Short Circuit to 12V";
+        break;
+      case 3:
+        cold_shutoff = "Line Break";
+        break;
+      case 6:
+        cold_shutoff = "Driver Error";
+        break;
+      case 12:
+      case 13:
+        cold_shutoff = "Stuck";
+        break;
+      default:
+        cold_shutoff = "Invalid Signal";
+    }
+    thermal.fields.push_back(kv("Cold Shutoff Valve", cold_shutoff));
+    status.sections.push_back(thermal);
+
+    AdvancedSection cells;
+    cells.title = "Cell Information";
+    cells.fields.push_back(kv("Detected Cell Count", String(datalayer_battery->info.number_of_cells)));
+    cells.fields.push_back(kv("Max Cell Design Voltage", String(datalayer_battery->info.max_cell_voltage_mV), "mV"));
+    cells.fields.push_back(kv("Min Cell Design Voltage", String(datalayer_battery->info.min_cell_voltage_mV), "mV"));
+    cells.fields.push_back(kv("Min Cell Voltage Data Age", String(phev.min_cell_voltage_data_age), "ms"));
+    cells.fields.push_back(kv("Max Cell Voltage Data Age", String(phev.max_cell_voltage_data_age), "ms"));
+    status.sections.push_back(cells);
+
+    AdvancedSection balancing;
+    balancing.title = "Balancing Status";
+    balancing.fields.push_back(
+        kv("Note", "Balancing can only run while the contactors are OPEN and after the cells have settled at "
+                   "rest for ~10 min (see \"Inactive - Cells Not at Rest (Wait 10 min)\" below). It is blocked "
+                   "while the contactors are closed."));
+
+    String balancing_status;
+    switch (phev.balancing_status) {
+      case 0:
+        balancing_status = "Inactive - Not Needed";
+        break;
+      case 1:
+        balancing_status = "Active";
+        break;
+      case 2:
+        balancing_status = "Inactive - Cells Not at Rest (Wait 10 min)";
+        break;
+      case 3:
+        balancing_status = "Inactive";
+        break;
+      default:
+        balancing_status = "Unknown";
+    }
+    balancing.fields.push_back(kv("Balancing", balancing_status));
+    balancing.fields.push_back(
+        kv("Balancing Request", datalayer_battery->settings.user_requests_balancing ? "True" : "False"));
+    status.sections.push_back(balancing);
+
+    AdvancedSection diagnostics;
+    diagnostics.title = "Diagnostics";
+    diagnostics.fields.push_back(kv("Charging Condition Delta", String(phev.battery_charging_condition_delta)));
+    status.sections.push_back(diagnostics);
+
+    // DTC data is split across two extended structs: bmwphev owns dtc_count/dtc_read_failed,
+    // while the codes/status/last-read timestamp are stored in the shared bmwix struct to save
+    // space (see the field comments in datalayer_extended.h). Assemble a local
+    // DATALAYER_BATTERY_DTC_TYPE so the shared dtc_advanced_section(*this, ) builder can be reused.
+    DATALAYER_BATTERY_DTC_TYPE dtc{};
+    dtc.dtc_count = phev.dtc_count;
+    dtc.dtc_read_failed = phev.dtc_read_failed;
+    dtc.dtc_last_read_millis = datalayer_extended.bmwix.dtc_last_read_millis;
+    for (uint8_t i = 0; i < dtc.dtc_count && i < DATALAYER_BATTERY_DTC_TYPE::MAX_DTC_COUNT; i++) {
+      dtc.dtc_codes[i] = datalayer_extended.bmwix.dtc_codes[i];
+      dtc.dtc_status[i] = datalayer_extended.bmwix.dtc_status[i];
+    }
+    status.sections.push_back(dtc_advanced_section(*this, dtc, DtcCodeStyle::kRawHex));
+
+    return status;
+  }
 
  private:
-  BmwPhevHtmlRenderer renderer;
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void reset_DTC() { datalayer_extended.bmwphev.UserRequestDTCreset = true; }
+  void reset_BMS() { datalayer_extended.bmwphev.UserRequestBMSReset = true; }
+  void request_open_contactors() { userRequestContactorOpen = true; }
+  void request_close_contactors() { userRequestContactorClose = true; }
+  void initiate_balancing() { datalayer_battery->settings.user_requests_balancing = true; }
+  void end_balancing() { datalayer_battery->settings.user_requests_balancing = false; }
+  void request_isolation_test() { datalayer_extended.bmwphev.UserRequestIsolationTest = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_BMS, [this] { reset_BMS(); }),
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      // Beta CAN-based contactor close support via 0x53A (see INFO section in .cpp)
+      command(CMD_CONTACTOR_CLOSE, [this] { request_close_contactors(); }),
+      command(CMD_CONTACTOR_OPEN, [this] { request_open_contactors(); }),
+      // Online balancing via the SME UDS routine (0xAD6B). The transmit loop reads
+      // user_requests_balancing: set sends startRoutine, clear sends stopRoutine, which cancels any
+      // latched balancing. Neither carries an availability predicate because the SME latches
+      // independently of the flag, so Stop must stay offered even when the flag reads clear.
+      //
+      // IMPORTANT (SME behaviour):
+      //  - Balancing is ONLY possible while the contactors are OPEN. The SME will not balance with the
+      //    pack connected/closed.
+      //  - While balancing is ACTIVE the SME BLOCKS contactor close (precharge is inhibited until
+      //    balancing finishes / is stopped). So requesting balancing prevents the pack from going online.
+      command(CMD_START_BALANCING_REQUEST, [this] { initiate_balancing(); }),
+      command(CMD_STOP_BALANCING_REQUEST, [this] { end_balancing(); }),
+      // Isolation test - one-shot UDS startRoutine (0xAD61). Same one-shot pattern as DTC/BMS reset.
+      command(CMD_ISOLATION_TEST, [this] { request_isolation_test(); }),
+  };
 
   static const int MAX_PACK_VOLTAGE_DV = 4650;  //4650 = 465.0V
   static const int MIN_PACK_VOLTAGE_DV = 3000;

@@ -1,22 +1,15 @@
 #ifndef GEELY_GEOMETRY_C_BATTERY_H
 #define GEELY_GEOMETRY_C_BATTERY_H
 #include "../datalayer/datalayer.h"
+#include "../datalayer/datalayer_extended.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "GEELY-GEOMETRY-C-HTML.h"
 
 class GeelyGeometryCBattery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  GeelyGeometryCBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_GEELY_GEOMETRY_C* extended,
-                        CAN_Interface targetCan)
-      : CanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-
-    battery_voltage = 0;
-  }
   // Use the default constructor to create the first or single battery.
-  GeelyGeometryCBattery() {
-    datalayer_battery = &datalayer.battery;
+  GeelyGeometryCBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
     datalayer_geometryc = &datalayer_extended.geometryC;
   }
 
@@ -24,15 +17,60 @@ class GeelyGeometryCBattery : public CanBattery {
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Geely Geometry C";
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
+
+    char readableSerialNumber[29];  // One extra space for null terminator
+    memcpy(readableSerialNumber, datalayer_extended.geometryC.BatterySerialNumber,
+           sizeof(datalayer_extended.geometryC.BatterySerialNumber));
+    readableSerialNumber[28] = '\0';   // Null terminate the string
+    char readableSoftwareVersion[17];  // One extra space for null terminator
+    memcpy(readableSoftwareVersion, datalayer_extended.geometryC.BatterySoftwareVersion,
+           sizeof(datalayer_extended.geometryC.BatterySoftwareVersion));
+    readableSoftwareVersion[16] = '\0';  // Null terminate the string
+    char readableHardwareVersion[17];    // One extra space for null terminator
+    memcpy(readableHardwareVersion, datalayer_extended.geometryC.BatteryHardwareVersion,
+           sizeof(datalayer_extended.geometryC.BatteryHardwareVersion));
+    readableHardwareVersion[16] = '\0';  // Null terminate the string
+
+    s.fields.push_back(kv("Serial number", String(readableSoftwareVersion)));
+    s.fields.push_back(kv("Software version", String(readableSerialNumber)));
+    s.fields.push_back(kv("Hardware version", String(readableHardwareVersion)));
+    s.fields.push_back(kv("SOC display", String(datalayer_extended.geometryC.soc), "ppt"));
+    s.fields.push_back(kv("CC2 voltage", String(datalayer_extended.geometryC.CC2voltage), "mV"));
+    s.fields.push_back(kv("Cell max voltage number", String(datalayer_extended.geometryC.cellMaxVoltageNumber)));
+    s.fields.push_back(kv("Cell min voltage number", String(datalayer_extended.geometryC.cellMinVoltageNumber)));
+    s.fields.push_back(kv("Cell total amount", String(datalayer_extended.geometryC.cellTotalAmount), "S"));
+    s.fields.push_back(kv("Specificial Voltage", String(datalayer_extended.geometryC.specificialVoltage), "dV"));
+    s.fields.push_back(kv("Unknown1", String(datalayer_extended.geometryC.unknown1)));
+    s.fields.push_back(kv("Raw SOC max", String(datalayer_extended.geometryC.rawSOCmax)));
+    s.fields.push_back(kv("Raw SOC min", String(datalayer_extended.geometryC.rawSOCmin)));
+    s.fields.push_back(kv("Unknown4", String(datalayer_extended.geometryC.unknown4)));
+    s.fields.push_back(kv("Capacity module max", String((datalayer_extended.geometryC.capModMax / 10)), "Ah"));
+    s.fields.push_back(kv("Capacity module min", String((datalayer_extended.geometryC.capModMin / 10)), "Ah"));
+    s.fields.push_back(kv("Unknown7", String(datalayer_extended.geometryC.unknown7)));
+    s.fields.push_back(kv("Unknown8", String(datalayer_extended.geometryC.unknown8)));
+    s.fields.push_back(kv("Module 1 temperature", String(datalayer_extended.geometryC.ModuleTemperatures[0]), "°C"));
+    s.fields.push_back(kv("Module 2 temperature", String(datalayer_extended.geometryC.ModuleTemperatures[1]), "°C"));
+    s.fields.push_back(kv("Module 3 temperature", String(datalayer_extended.geometryC.ModuleTemperatures[2]), "°C"));
+    s.fields.push_back(kv("Module 4 temperature", String(datalayer_extended.geometryC.ModuleTemperatures[3]), "°C"));
+    s.fields.push_back(kv("Module 5 temperature", String(datalayer_extended.geometryC.ModuleTemperatures[4]), "°C"));
+    s.fields.push_back(kv("Module 6 temperature", String(datalayer_extended.geometryC.ModuleTemperatures[5]), "°C"));
+
+    status.sections.push_back(s);
+    return status;
+  }
 
  private:
-  GeelyGeometryCHtmlRenderer renderer;
+  void reset_DTC() { UserRequestDTCreset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
 
   DATALAYER_BATTERY_TYPE* datalayer_battery;
   DATALAYER_INFO_GEELY_GEOMETRY_C* datalayer_geometryc;

@@ -2,39 +2,60 @@
 #define CMFA_EV_BATTERY_H
 
 #include "../datalayer/datalayer.h"
+#include "BatterySlotContext.h"
 #include "UdsCanBattery.h"
 
 class CmfaEvBattery : public UdsCanBattery {
  public:
-  // Use this constructor for the second battery.
-  CmfaEvBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, CAN_Interface targetCan) : UdsCanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-    allows_contactor_closing = nullptr;
+  CmfaEvBattery(const BatterySlotContext& ctx) : UdsCanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
     dtc = &datalayer_battery->dtc;
-
-    average_voltage_of_cells = 0;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  CmfaEvBattery() : UdsCanBattery() {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
-    dtc = &datalayer_battery->dtc;
+    if (!ctx.is_primary()) {
+      average_voltage_of_cells = 0;  // default 270000; slot must read 0 V until CAN gives a real value
+    }
   }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "CMFA platform, 27 kWh battery";
 
-  String get_uds_info_html() override;
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
+  void append_uds_info_fields(std::vector<AdvancedField>& fields) override {
+    fields.push_back(kv("SOC U", String(soc_u), "percent"));
+    fields.push_back(kv("SOC Z", String(soc_z), "percent"));
+    fields.push_back(kv("SOH Average", String(soh_average), "pptt"));
+    fields.push_back(kv("12V voltage", String(lead_acid_voltage), "mV"));
+    fields.push_back(kv("Highest cell number", String(highest_cell_voltage_number)));
+    fields.push_back(kv("Lowest cell number", String(lowest_cell_voltage_number)));
+    fields.push_back(kv("Sum of cellvoltages", String(average_voltage_of_cells)));
+    fields.push_back(kv("Max regen power", String(max_regen_power)));
+    fields.push_back(kv("Max discharge power", String(max_discharge_power)));
+    fields.push_back(kv("Max charge power", String(maximum_charge_power)));
+    fields.push_back(kv("SOH available power", String(SOH_available_power)));
+    fields.push_back(kv("SOH generated power", String(SOH_generated_power)));
+    fields.push_back(kv("Average temperature", String(average_temperature), "dC"));
+    fields.push_back(kv("Maximum temperature", String(maximum_temperature), "dC"));
+    fields.push_back(kv("Minimum temperature", String(minimum_temperature), "dC"));
+    fields.push_back(kv("Cumulative energy discharged",
+                          String(cumulative_energy_when_discharging), "Wh"));
+    fields.push_back(
+        kv("Cumulative energy charged", String(cumulative_energy_when_charging), "Wh"));
+    fields.push_back(
+        kv("Cumulative energy regen", String(cumulative_energy_in_regen), "Wh"));
+  }
 
  protected:
   // Called by the UDS superclass for each successful PID query response.
   uint16_t handle_pid(uint16_t pid, uint32_t value, const uint8_t* data, uint16_t length) override;
 
  private:
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
+
   DATALAYER_BATTERY_TYPE* datalayer_battery;
 
   // If not null, this battery decides when the contactor can be closed and writes the value here.

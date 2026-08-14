@@ -1,7 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <initializer_list>
+
+#include "../../Software/src/battery/BATTERIES.h"
 #include "../../Software/src/battery/FORD-MACH-E-BATTERY.h"
 #include "../../Software/src/datalayer/datalayer.h"
+#include "../../Software/src/devboard/hal/hal.h"
+#include "../../Software/src/devboard/webserver/advanced_api.h"
 
 #include "Arduino.h"
 
@@ -24,7 +29,7 @@ CAN_frame ford_7ec_frame(std::initializer_list<uint8_t> bytes) {
 
 // The datalayer is a global shared by every test, so put the DTC block back to its power-on state.
 void reset_dtc_state() {
-  datalayer.battery.dtc = DATALAYER_BATTERY_DTC_TYPE{};
+  datalayer.battery.pack[0].dtc = DATALAYER_BATTERY_DTC_TYPE{};
 }
 
 // Drives a battery up to the point where it is waiting for a DTC reply on 0x7EC. update_values() is
@@ -32,9 +37,10 @@ void reset_dtc_state() {
 FordMachEBattery* battery_awaiting_dtc_reply() {
   reset_dtc_state();
   set_millis64(50000);  // Non-zero, so a completed read is distinguishable from "never read"
-  auto battery = new FordMachEBattery();
+  auto battery = new FordMachEBattery(battery_slot_context(0));
   battery->setup();
-  battery->read_DTC();
+  batteries[0] = battery;
+  EXPECT_TRUE(run_advanced_command("readDTC", 0));
   battery->update_values();
   return battery;
 }
@@ -52,19 +58,23 @@ FordMachEBattery* battery_awaiting_dtc_reply() {
 // Real BMS capture holding four codes: U019B, U0100, U0293 and U0298. The announced ISO-TP length of
 // 0x013 (18 bytes) is synthetically made to cut down and only process 4 codes, all with status AF (confirmed)
 TEST(FordMachEDtcTests, ShouldParseMultiFrameReply) {
+  init_hal();
   auto battery = battery_awaiting_dtc_reply();
 
   battery->handle_incoming_can_frame(ford_7ec_frame({0x10, 0x13, 0x59, 0x02, 0xFF, 0xC1, 0x9B, 0x00}));
   battery->handle_incoming_can_frame(ford_7ec_frame({0x21, 0xAF, 0xC1, 0x00, 0x00, 0xAF, 0xC2, 0x93}));
   battery->handle_incoming_can_frame(ford_7ec_frame({0x22, 0x00, 0xAF, 0xC2, 0x98, 0x00, 0xAF, 0xFF}));
 
-  EXPECT_FALSE(datalayer.battery.dtc.dtc_read_failed);
-  ASSERT_EQ(datalayer.battery.dtc.dtc_count, 4);
-  EXPECT_EQ(datalayer.battery.dtc.dtc_codes[0], 0xC19B00u);  // U019B
-  EXPECT_EQ(datalayer.battery.dtc.dtc_codes[1], 0xC10000u);  // U0100
-  EXPECT_EQ(datalayer.battery.dtc.dtc_codes[2], 0xC29300u);  // U0293
-  EXPECT_EQ(datalayer.battery.dtc.dtc_codes[3], 0xC29800u);  // U0298
+  EXPECT_FALSE(datalayer.battery.pack[0].dtc.dtc_read_failed);
+  ASSERT_EQ(datalayer.battery.pack[0].dtc.dtc_count, 4);
+  EXPECT_EQ(datalayer.battery.pack[0].dtc.dtc_codes[0], 0xC19B00u);  // U019B
+  EXPECT_EQ(datalayer.battery.pack[0].dtc.dtc_codes[1], 0xC10000u);  // U0100
+  EXPECT_EQ(datalayer.battery.pack[0].dtc.dtc_codes[2], 0xC29300u);  // U0293
+  EXPECT_EQ(datalayer.battery.pack[0].dtc.dtc_codes[3], 0xC29800u);  // U0298
   for (int i = 0; i < 4; i++) {
-    EXPECT_EQ(datalayer.battery.dtc.dtc_status[i], 0xAF);
+    EXPECT_EQ(datalayer.battery.pack[0].dtc.dtc_status[i], 0xAF);
   }
+
+  batteries[0] = nullptr;
+  delete battery;
 }

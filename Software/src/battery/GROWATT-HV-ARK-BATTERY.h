@@ -2,6 +2,7 @@
 #define GROWATT_HV_ARK_BATTERY_H
 
 #include "../datalayer/datalayer.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 // Battery-facing integration for Growatt HV batteries.
@@ -16,6 +17,7 @@
 //  500 kbit/s, extended identifier used in this codebase.
 class GrowattHvArkBattery : public CanBattery {
  public:
+  GrowattHvArkBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   // Use the default constructor to create the first or single battery.
   GrowattHvArkBattery() {}
 
@@ -26,9 +28,9 @@ class GrowattHvArkBattery : public CanBattery {
   void update_values() override;
   void transmit_can(unsigned long currentMillis) override;
 
-  static constexpr const char* Name = "Growatt HV ARK battery (battery-facing CAN)";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   // --- Outgoing (PCS -> Battery) ---
   CAN_frame PCS_3010 = {.FD = false,
                         .ext_ID = true,

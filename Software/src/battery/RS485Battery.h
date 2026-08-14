@@ -4,6 +4,8 @@
 #include "Battery.h"
 
 #include "../communication/Transmitter.h"
+#include "../communication/can/comm_can.h"
+#include "../communication/rs485/Rs485Port.h"
 #include "../communication/rs485/comm_rs485.h"
 #include "../devboard/utils/types.h"
 
@@ -16,10 +18,17 @@ class RS485Battery : public Battery, Transmitter, Rs485Receiver {
 
   void transmit(unsigned long currentMillis) { transmit_rs485(currentMillis); }
 
-  RS485Battery() {
+  RS485Battery() : RS485Battery(can_config.battery) {}
+
+  RS485Battery(const InterfaceDescriptor* interface) : port_(resolve_rs485_port(interface)) {
     register_transmitter(this);
-    register_receiver(this);
+    if (port_ != nullptr) {
+      port_->register_receiver(this);
+    }
   }
+
+ protected:
+  Rs485Port* port_;
 };
 
 #endif

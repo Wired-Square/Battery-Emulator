@@ -2,17 +2,19 @@
 #define THINK_CITY_H
 
 #include "../system_settings.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class ThinkBattery : public CanBattery {
  public:
+  ThinkBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Think City";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   static const int MAX_PACK_VOLTAGE_DV = 3940;
   static const int MIN_PACK_VOLTAGE_DV = 2880;
   static const int MAX_CELL_DEVIATION_MV = 150;

@@ -1,9 +1,12 @@
 #pragma once
 
-#include "CanBattery.h"
-#include "freertos/FreeRTOS.h"
-
 #include <atomic>
+
+#include "../datalayer/datalayer.h"
+#include "../devboard/webserver/advanced_api.h"
+#include "../lib/uds_isotp/isotp.h"
+#include "../lib/uds_isotp/uds.h"
+#include "CanBattery.h"
 
 // Extend this class to add UDS features to a battery integration.
 //
@@ -53,31 +56,11 @@
 //   - Optionally override `on_uds_sequence_timeout(state)` to handle a step
 //     timing out (the superclass retries automatically).
 
-class UdsCanBattery;
-
-// Default HTML renderer for UDS batteries. Avoids needing a custom renderer
-// class for simple UDS batteries that just show some basic information above
-// the DTC section.
-
-class UdsBatteryHtmlRenderer : public BatteryHtmlRenderer {
- public:
-  explicit UdsBatteryHtmlRenderer(UdsCanBattery& battery) : battery(battery) {}
-
-  String get_status_html() override;
-
-  // Reads only per-instance data (the battery's own dtc pointer and info
-  // HTML), so the advanced page may also show it for battery 2/3.
-  bool renders_own_battery_data() override { return true; }
-
- private:
-  UdsCanBattery& battery;
-};
-
 class UdsCanBattery : public CanBattery, public IsoTp {
  public:
-  UdsCanBattery(CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS) : CanBattery(speed), uds_renderer(*this) {}
-  UdsCanBattery(CAN_Interface interface, CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS)
-      : CanBattery(interface, speed), uds_renderer(*this) {}
+  UdsCanBattery(CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS) : CanBattery(speed) {}
+  UdsCanBattery(const InterfaceDescriptor* interface, CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS)
+      : CanBattery(interface, speed) {}
 
   // Sequence step states for our own functions. Internal states here should
   // have the UDS_STATE_INTERNAL bit set, subclass states should not.
@@ -105,27 +88,22 @@ class UdsCanBattery : public CanBattery, public IsoTp {
            seq_pause_ticks > 0 || isotp_is_busy();
   }
 
-  virtual bool supports_read_DTC();
-  virtual bool supports_reset_DTC();
-  virtual void read_DTC();
-  virtual void reset_DTC();
+  void read_DTC();
+  void reset_DTC();
 
-  // Advanced battery page (see UdsBatteryHtmlRenderer). The built-in renderer
-  // shows the DTC section; override these hooks to customize it without
-  // writing a whole renderer class:
-  //  - get_uds_info_html(): HTML displayed above the DTC section (e.g. UDS
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
+  // Advanced battery page. Override these hooks to customize it:
+  //  - append_uds_info_fields(): fields displayed above the DTC section (e.g. UDS
   //    address, VIN, raw PID payloads).
-  //  - get_dtc_json_filename(): DTC description JSON file under
-  //    BatteryHtmlRenderer::GITHUB_RAW_BASE_URL, or "" to only offer the
+  //  - get_dtc_json_filename(): DTC description JSON file, or "" to only offer the
   //    local file picker.
   //  - get_dtc_standard_code_string(): false for raw 6-digit hex codes, true
   //    for SAE-format codes (e.g. P0C9500).
-  virtual String get_uds_info_html() { return String(); }
-  virtual const char* get_dtc_json_filename() { return ""; }
+  virtual void append_uds_info_fields(std::vector<AdvancedField>& /*fields*/) {}
   virtual bool get_dtc_standard_code_string() { return true; }
 
-  // The built-in generic renderer. Override to provide a fully custom page.
-  virtual BatteryHtmlRenderer& get_status_renderer() override { return uds_renderer; }
+  BatteryAdvancedStatus get_advanced_status() override;
 
   // Temporarily block new UDS sends for the given number of 100ms ticks. Blocks
   // transmits at or below the specified priority level, higher priority ones
@@ -137,6 +115,8 @@ class UdsCanBattery : public CanBattery, public IsoTp {
   DATALAYER_BATTERY_DTC_TYPE* dtc = nullptr;
 
  protected:
+  DATALAYER_BATTERY_TYPE* datalayer_battery = nullptr;
+
   // Initializes the UDS layer. Must be called by subclasses in their setup() function.
   void setup_uds(uint16_t uds_address, uint16_t uds_response_address);
   // Set (or change) the list of PIDs to scan, in order. The list is cycled
@@ -190,6 +170,11 @@ class UdsCanBattery : public CanBattery, public IsoTp {
   uint16_t uds_response_address = 0;
   // The address we are currently receiving a UDS response from.
   uint16_t uds_current_response_address = 0;
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
 
  private:
   // True if the current pause blocks new sends of the given priority.
@@ -263,6 +248,4 @@ class UdsCanBattery : public CanBattery, public IsoTp {
   // How many ticks left for the current request to complete, before it is
   // retried (or given up).
   int32_t uds_transaction_timeout = 0;
-
-  UdsBatteryHtmlRenderer uds_renderer;
 };

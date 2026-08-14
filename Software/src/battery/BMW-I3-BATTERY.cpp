@@ -675,12 +675,9 @@ void BmwI3Battery::transmit_can(unsigned long currentMillis) {
 }
 
 void BmwI3Battery::setup(void) {  // Performs one time setup at startup
-  if (!esp32hal->alloc_pins(Name, wakeup_pin)) {
+  if (!esp32hal->alloc_pins("BMW i3", wakeup_pin)) {
     return;
   }
-
-  strncpy(datalayer.system.info.battery_protocol, Name, 63);
-  datalayer.system.info.battery_protocol[63] = '\0';
 
   //Before we have started up and detected which battery is in use, use the widest limits
   datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_120AH;
@@ -694,4 +691,125 @@ void BmwI3Battery::setup(void) {  // Performs one time setup at startup
 
   pinMode(wakeup_pin, OUTPUT);
   digitalWrite(wakeup_pin, LOW);  // Set pin to low, prepare to wakeup later on!
+}
+
+// Helper function for safe array access
+static const char* safeArrayAccess(const char* const arr[], size_t arrSize, int idx) {
+  if (idx >= 0 && static_cast<size_t>(idx) < arrSize) {
+    return arr[idx];
+  }
+  return "Unknown";
+}
+
+BatteryAdvancedStatus BmwI3Battery::get_advanced_status() {
+  BatteryAdvancedStatus status;
+  AdvancedSection s;
+
+  s.fields.push_back(kv("SOC raw", String(SOC_raw())));
+  s.fields.push_back(kv("SOC dash", String(SOC_dash())));
+  s.fields.push_back(kv("SOC OBD2", String(SOC_OBD2())));
+
+  static const char* statusText[16] = {
+      "Not evaluated", "OK", "Error!", "Invalid signal", "", "", "", "", "", "", "", "", "", "", "", ""};
+  s.fields.push_back(kv("Interlock", safeArrayAccess(statusText, 16, ST_interlock())));
+  s.fields.push_back(kv("Isolation external", safeArrayAccess(statusText, 16, ST_iso_ext())));
+  s.fields.push_back(kv("Isolation internal", safeArrayAccess(statusText, 16, ST_iso_int())));
+  s.fields.push_back(kv("Isolation", safeArrayAccess(statusText, 16, ST_isolation())));
+  s.fields.push_back(kv("Cooling valve", safeArrayAccess(statusText, 16, ST_valve_cooling())));
+  s.fields.push_back(kv("Emergency", safeArrayAccess(statusText, 16, ST_EMG())));
+
+  static const char* prechargeText[16] = {"Not evaluated",
+                                          "Not active, closing not blocked",
+                                          "Error precharge blocked",
+                                          "Invalid signal",
+                                          "",
+                                          "",
+                                          "",
+                                          "",
+                                          "",
+                                          "",
+                                          "",
+                                          "",
+                                          "",
+                                          "",
+                                          "",
+                                          ""};
+  s.fields.push_back(kv("Precharge", safeArrayAccess(prechargeText, 16, ST_precharge())));  //Still unclear of enum
+
+  static const char* DCSWText[16] = {"Contactors open",
+                                     "Precharge ongoing",
+                                     "Contactors engaged",
+                                     "Invalid signal",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     ""};
+  s.fields.push_back(kv("Contactor status", safeArrayAccess(DCSWText, 16, ST_DCSW())));
+
+  static const char* contText[16] = {"Contactors OK",
+                                     "One contactor welded!",
+                                     "Two contactors welded!",
+                                     "Invalid signal",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     "",
+                                     ""};
+  s.fields.push_back(kv("Contactor weld", safeArrayAccess(contText, 16, ST_WELD())));
+
+  static const char* valveText[16] = {"OK",
+                                      "Short circuit to GND",
+                                      "Short circuit to 12V",
+                                      "Line break",
+                                      "",
+                                      "",
+                                      "Driver error",
+                                      "",
+                                      "",
+                                      "",
+                                      "",
+                                      "",
+                                      "Stuck",
+                                      "Stuck",
+                                      "",
+                                      "Invalid Signal"};
+  s.fields.push_back(kv("Cold shutoff valve", safeArrayAccess(valveText, 16, ST_cold_shutoff_valve())));
+
+  static const char* balancingText[16] = {"Not requested",
+                                          "Requested",
+                                          "Starting",
+                                          "Executing",
+                                          "4",
+                                          "5",
+                                          "6",
+                                          "7",
+                                          "8",
+                                          "9",
+                                          "10",
+                                          "11",
+                                          "12",
+                                          "13",
+                                          "14",
+                                          "15"};
+  s.fields.push_back(kv("Balancing status", safeArrayAccess(balancingText, 16, ST_balancing_status())));
+
+  s.fields.push_back(kv("Charge abort request", get_abort_charging_string()));
+
+  status.sections.push_back(s);
+  return status;
 }

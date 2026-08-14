@@ -1,17 +1,19 @@
 #ifndef SIMPBMS_BATTERY_H
 #define SIMPBMS_BATTERY_H
 
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 class SimpBmsBattery : public CanBattery {
  public:
+  SimpBmsBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "SIMPBMS battery";
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
   static const uint8_t SIMPBMS_MAX_CELLS = 128;
 
   unsigned long previousMillis1000 = 0;  // will store last time a 1s CAN Message was sent

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "../../Software/src/battery/BATTERIES.h"
 #include "../../Software/src/battery/FOXESS-BATTERY.h"
 #include "../../Software/src/datalayer/datalayer.h"
 #include "../../Software/src/devboard/hal/hal.h"
@@ -18,7 +19,7 @@ class FoxessTest : public ::testing::Test {
     datalayer = DataLayer();
     reset_all_events();
     init_hal();
-    battery = new FoxessBattery();
+    battery = new FoxessBattery(battery_slot_context(0));
   }
 
   void TearDown() override { delete battery; }
@@ -27,7 +28,7 @@ class FoxessTest : public ::testing::Test {
 };
 
 TEST_F(FoxessTest, RecognizedFrameRefreshesStillAliveCounter) {
-  datalayer.battery.status.CAN_battery_still_alive = 0;
+  datalayer.battery.pack[0].status.CAN_battery_still_alive = 0;
 
   // 0x1873 BMS_PackData - part of the BMS's periodic broadcast
   CAN_frame frame = {
@@ -36,7 +37,7 @@ TEST_F(FoxessTest, RecognizedFrameRefreshesStillAliveCounter) {
   };
   battery->handle_incoming_can_frame(frame);
 
-  EXPECT_EQ(datalayer.battery.status.CAN_battery_still_alive, CAN_STILL_ALIVE)
+  EXPECT_EQ(datalayer.battery.pack[0].status.CAN_battery_still_alive, CAN_STILL_ALIVE)
       << "Periodic BMS traffic must refresh the aliveness counter";
 }
 
@@ -50,8 +51,8 @@ TEST_F(FoxessTest, BmsReportedLimitsSurviveUpdateValues) {
 
   // Before any 0x1872: the table is the (fallback) source
   battery->update_values();
-  EXPECT_EQ(datalayer.battery.info.max_design_voltage_dV, 3504);
-  EXPECT_EQ(datalayer.battery.info.min_design_voltage_dV, 2400);
+  EXPECT_EQ(datalayer.battery.pack[0].info.max_design_voltage_dV, 3504);
+  EXPECT_EQ(datalayer.battery.pack[0].info.min_design_voltage_dV, 2400);
 
   // 0x1872 BMS_Limits: max 398.0 V (3980 = 0x0F8C), min 296.8 V (2968 = 0x0B98)
   // - an EP-series pack outside the HS table
@@ -62,9 +63,9 @@ TEST_F(FoxessTest, BmsReportedLimitsSurviveUpdateValues) {
   battery->handle_incoming_can_frame(limits_frame);
 
   battery->update_values();
-  EXPECT_EQ(datalayer.battery.info.max_design_voltage_dV, 3980)
+  EXPECT_EQ(datalayer.battery.pack[0].info.max_design_voltage_dV, 3980)
       << "BMS-reported limits must not be overwritten by the HS-series table";
-  EXPECT_EQ(datalayer.battery.info.min_design_voltage_dV, 2968);
+  EXPECT_EQ(datalayer.battery.pack[0].info.min_design_voltage_dV, 2968);
   // The table remains the only source for the cell count
-  EXPECT_EQ(datalayer.battery.info.number_of_cells, 96);
+  EXPECT_EQ(datalayer.battery.pack[0].info.number_of_cells, 96);
 }

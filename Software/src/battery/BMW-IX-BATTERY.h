@@ -1,7 +1,7 @@
 #ifndef BMW_IX_BATTERY_H
 #define BMW_IX_BATTERY_H
 #include <Arduino.h>
-#include "BMW-IX-HTML.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
 
 // UDS Multi-Frame Reception Context
@@ -19,29 +19,18 @@ struct UDS_CONTEXT {
 class BmwIXBattery : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }
-  BmwIXBattery() : renderer(*this) {}
+  BmwIXBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
+  BmwIXBattery() {}
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+  const char* get_dtc_json_filename() override { return "bmw_ix_dtc.json"; }
+  BatteryAdvancedStatus get_advanced_status() override;
 
-  bool supports_read_DTC() { return true; }
-  void read_DTC() { UserRequestDTCRead = true; }
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestDTCreset = true; }
-  bool supports_reset_BMS() { return true; }
-  void reset_BMS() { UserRequestBMSReset = true; }
-  bool supports_energy_saving_mode_reset() { return true; }
-  void reset_energy_saving_mode() { UserRequestEnergySavingModeReset = true; }
-  bool supports_contactor_close() { return true; }
-  void request_open_contactors() { userRequestContactorOpen = true; }
-  void request_close_contactors() { userRequestContactorClose = true; }
-
-  static constexpr const char* Name = "BMW iX and i4-7 platform";
-
-  // Getter methods for HTML renderer
+  // Getter methods for get_advanced_status()
   int get_battery_voltage_after_contactor() const;
   unsigned long get_min_cell_voltage_data_age() const;
   unsigned long get_max_cell_voltage_data_age() const;
@@ -60,6 +49,23 @@ class BmwIXBattery : public CanBattery {
   int get_pyro_status_pss6() const;
 
  private:
+  DATALAYER_BATTERY_TYPE* datalayer_battery;
+  void read_DTC() { UserRequestDTCRead = true; }
+  void reset_DTC() { UserRequestDTCreset = true; }
+  void reset_BMS() { UserRequestBMSReset = true; }
+  void reset_energy_saving_mode() { UserRequestEnergySavingModeReset = true; }
+  void request_open_contactors() { userRequestContactorOpen = true; }
+  void request_close_contactors() { userRequestContactorClose = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_BMS, [this] { reset_BMS(); }),
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+      command(CMD_CONTACTOR_CLOSE, [this] { request_close_contactors(); }),
+      command(CMD_CONTACTOR_OPEN, [this] { request_open_contactors(); }),
+      command(CMD_RESET_ENERGY_SAVING_MODE, [this] { reset_energy_saving_mode(); }),
+  };
+
   bool userRequestContactorClose = false;
   bool userRequestContactorOpen = false;
   bool UserRequestDTCreset = false;
@@ -67,7 +73,6 @@ class BmwIXBattery : public CanBattery {
   bool UserRequestDTCRead = false;
   bool UserRequestEnergySavingModeReset = false;
   bool startup_reset_complete = false;  // Track if startup BMS reset is done
-  BmwIXHtmlRenderer renderer;
   static const int MAX_PACK_VOLTAGE_78S_DV = 3354;   // 4.3V per cell | SE12 battery, BMW iX1, 66.45kWh 286.3Vnom
   static const int MIN_PACK_VOLTAGE_78S_DV = 2184;   // 2.8V per cell
   static const int MAX_PACK_VOLTAGE_90S_DV = 3870;   // 4.3V per cell | SE11 | SE 50

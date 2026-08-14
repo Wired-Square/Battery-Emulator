@@ -3,41 +3,50 @@
 
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "RENAULT-ZOE-GEN1-HTML.h"
 
 class RenaultZoeGen1Battery : public CanBattery {
  public:
-  // Use this constructor for the second battery.
-  RenaultZoeGen1Battery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_ZOE* extended, CAN_Interface targetCan)
-      : CanBattery(targetCan) {
-    datalayer_battery = datalayer_ptr;
-    allows_contactor_closing = nullptr;
-    datalayer_zoe = extended;
-
-    calculated_total_pack_voltage_mV = 0;
-  }
-
-  // Use the default constructor to create the first or single battery.
-  RenaultZoeGen1Battery() {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
-    datalayer_zoe = &datalayer_extended.zoe;
+  RenaultZoeGen1Battery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
+    datalayer_zoe = ctx.is_primary() ? &datalayer_extended.zoe : nullptr;
+    if (!ctx.is_primary()) {
+      calculated_total_pack_voltage_mV = 0;  // default 370000; slot must read 0 V until CAN gives a real value
+    }
   }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
-  static constexpr const char* Name = "Renault Zoe Gen1 22/40kWh";
 
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  bool supports_reset_DTC() { return true; }
-  void reset_DTC() { UserRequestedDTCReset = true; }
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
+    s.fields.push_back(kv("CUV", String(datalayer_extended.zoe.CUV)));
+    s.fields.push_back(kv("HVBIR", String(datalayer_extended.zoe.HVBIR)));
+    s.fields.push_back(kv("HVBUV", String(datalayer_extended.zoe.HVBUV)));
+    s.fields.push_back(kv("EOCR", String(datalayer_extended.zoe.EOCR)));
+    s.fields.push_back(kv("HVBOC", String(datalayer_extended.zoe.HVBOC)));
+    s.fields.push_back(kv("HVBOT", String(datalayer_extended.zoe.HVBOT)));
+    s.fields.push_back(kv("HVBOV", String(datalayer_extended.zoe.HVBOV)));
+    s.fields.push_back(kv("COV", String(datalayer_extended.zoe.COV)));
+    s.fields.push_back(kv("Battery mileage", String(datalayer_extended.zoe.mileage_km), "km"));
+    s.fields.push_back(kv("Alltime energy", String(datalayer_extended.zoe.alltime_kWh), "kWh"));
+    status.sections.push_back(s);
+    return status;
+  }
 
  private:
-  RenaultZoeGen1HtmlRenderer renderer;
+  void reset_DTC() { UserRequestedDTCReset = true; }
+
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+  };
 
   bool UserRequestedDTCReset = false;
 

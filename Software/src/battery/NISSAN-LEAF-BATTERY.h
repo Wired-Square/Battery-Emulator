@@ -3,28 +3,21 @@
 
 #include "../datalayer/datalayer.h"
 #include "../datalayer/datalayer_extended.h"
+#include "../devboard/webserver/advanced_api.h"
+#include "BatterySlotContext.h"
 #include "CanBattery.h"
-#include "NISSAN-LEAF-HTML.h"
 
 extern bool user_selected_LEAF_interlock_mandatory;
 
 class NissanLeafBattery : public CanBattery {
  public:
-  // Use the default constructor to create the first or single battery.battery_Total_Voltage2
-  NissanLeafBattery() : renderer(&datalayer.battery, &datalayer_extended.nissanleaf) {
-    datalayer_battery = &datalayer.battery;
-    allows_contactor_closing = &datalayer.system.status.battery_allows_contactor_closing;
-    datalayer_nissan = &datalayer_extended.nissanleaf;
-  }
-  // Use this constructor for the second battery.
-  NissanLeafBattery(DATALAYER_BATTERY_TYPE* datalayer_ptr, DATALAYER_INFO_NISSAN_LEAF* extended,
-                    CAN_Interface targetCan)
-      : CanBattery(targetCan), renderer(datalayer_ptr, extended) {
-    datalayer_battery = datalayer_ptr;
-    allows_contactor_closing = nullptr;
-    datalayer_nissan = extended;
-
-    battery_Total_Voltage2 = 0;  //Zero out pack voltage to avoid contactor closing before we know value via CAN
+  NissanLeafBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+    datalayer_battery = ctx.datalayer;
+    allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
+    datalayer_nissan = ctx.is_primary() ? &datalayer_extended.nissanleaf : nullptr;
+    if (!ctx.is_primary()) {
+      battery_Total_Voltage2 = 0;  // default 740; slot must read 0 V until CAN gives a real value
+    }
   }
 
   virtual void setup(void);
@@ -32,32 +25,106 @@ class NissanLeafBattery : public CanBattery {
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  bool supports_reset_SOH();
+  const std::vector<BatteryCommand>& get_commands() override { return commands_; }
+
+  bool supports_insulation_resistance() override { return true; }
+
+  bool soc_plausible() {
+    // When pack voltage is close to max, and SOC% is still low (<65.0%), SOC is not plausible
+    return !((datalayer_battery->status.voltage_dV > (datalayer_battery->info.max_design_voltage_dV - 100)) &&
+             (battery_SOC < 650));
+  }
+
+  uint8_t calculate_crc(CAN_frame& frame);
+
+  const char* get_dtc_json_filename() override { return "nissan_leaf_dtc.json"; }
+
+  BatteryAdvancedStatus get_advanced_status() override {
+    BatteryAdvancedStatus status;
+    AdvancedSection s;
+
+    String leaf_gen;
+    switch (datalayer_extended.nissanleaf.LEAF_gen) {
+      case 0:
+        leaf_gen = "ZE0";
+        break;
+      case 1:
+        leaf_gen = "AZE0";
+        break;
+      case 2:
+        leaf_gen = "ZE1";
+        break;
+      default:
+        leaf_gen = "Unknown";
+    }
+    s.fields.push_back(kv("LEAF generation", leaf_gen));
+
+    char readableSerialNumber[16];  // One extra space for null terminator
+    memcpy(readableSerialNumber, datalayer_extended.nissanleaf.BatterySerialNumber,
+           sizeof(datalayer_extended.nissanleaf.BatterySerialNumber));
+    readableSerialNumber[15] = '\0';  // Null terminate the string
+    s.fields.push_back(kv("Serial number", String(readableSerialNumber)));
+
+    char readablePartNumber[8];  // One extra space for null terminator
+    memcpy(readablePartNumber, datalayer_extended.nissanleaf.BatteryPartNumber,
+           sizeof(datalayer_extended.nissanleaf.BatteryPartNumber));
+    readablePartNumber[7] = '\0';  // Null terminate the string
+    s.fields.push_back(kv("Part number", String(readablePartNumber)));
+
+    s.fields.push_back(kv("GIDS", String(datalayer_extended.nissanleaf.GIDS)));
+    s.fields.push_back(kv("Hx", datalayer_extended.nissanleaf.battery_HX_pptt
+                                    ? String(datalayer_extended.nissanleaf.battery_HX_pptt / 100.0f, 2)
+                                    : String("Unknown"),
+                          datalayer_extended.nissanleaf.battery_HX_pptt ? "%" : ""));
+    //A used pack always has AC charges on it, so a zero L1/L2 count means the group was not read yet.
+    s.fields.push_back(kv("QC charge count", datalayer_extended.nissanleaf.ChargeCountL1L2
+                                                 ? String(datalayer_extended.nissanleaf.ChargeCountQC)
+                                                 : String("Unknown")));
+    s.fields.push_back(kv("AC charge count", datalayer_extended.nissanleaf.ChargeCountL1L2
+                                                 ? String(datalayer_extended.nissanleaf.ChargeCountL1L2)
+                                                 : String("Unknown")));
+    s.fields.push_back(kv("Regen kW", String(datalayer_extended.nissanleaf.ChargePowerLimit)));
+    s.fields.push_back(kv("Charge kW", String(datalayer_extended.nissanleaf.MaxPowerForCharger)));
+    s.fields.push_back(kv("Temperature 1", String(datalayer_extended.nissanleaf.temperature1 / 10.0), "°C"));
+    s.fields.push_back(kv("Temperature 2", String(datalayer_extended.nissanleaf.temperature2 / 10.0), "°C"));
+    if (datalayer_extended.nissanleaf.LEAF_gen == 0) {
+      s.fields.push_back(kv("Temperature 3", String(datalayer_extended.nissanleaf.temperature3 / 10.0), "°C"));
+    }
+    s.fields.push_back(kv("Temperature 4", String(datalayer_extended.nissanleaf.temperature4 / 10.0), "°C"));
+    s.fields.push_back(kv("Insulation", String(datalayer_extended.nissanleaf.Insulation), "kΩ"));
+    s.fields.push_back(kv("Fully charged", String(datalayer_extended.nissanleaf.Full)));
+    s.fields.push_back(kv("Battery empty", String(datalayer_extended.nissanleaf.Empty)));
+    s.fields.push_back(kv("Failsafe status", String(datalayer_extended.nissanleaf.FailsafeStatus)));
+    s.fields.push_back(kv("Interlock", String(datalayer_extended.nissanleaf.Interlock)));
+    s.fields.push_back(kv("Main relay ON", String(datalayer_extended.nissanleaf.MainRelayOn)));
+    s.fields.push_back(kv("Relay cut request", String(datalayer_extended.nissanleaf.RelayCutRequest)));
+    s.fields.push_back(kv("Heater present", String(datalayer_extended.nissanleaf.HeatExist)));
+    s.fields.push_back(kv("Heating requested", String(datalayer_extended.nissanleaf.HeaterSendRequest)));
+    s.fields.push_back(kv("Heating started", String(datalayer_extended.nissanleaf.HeatingStart)));
+    s.fields.push_back(kv("Heating stopped", String(datalayer_extended.nissanleaf.HeatingStop)));
+    s.fields.push_back(kv("CryptoChallenge", datalayer_extended.nissanleaf.CryptoChallenge != 0xFFFFFFFF
+                                                 ? String(datalayer_extended.nissanleaf.CryptoChallenge)
+                                                 : String("Not run")));
+    s.fields.push_back(
+        kv("SolvedChallenge",
+           (datalayer_extended.nissanleaf.SolvedChallengeMSB || datalayer_extended.nissanleaf.SolvedChallengeLSB)
+               ? String(datalayer_extended.nissanleaf.SolvedChallengeMSB) + "-" +
+                     String(datalayer_extended.nissanleaf.SolvedChallengeLSB)
+               : String("Not run")));
+    s.fields.push_back(kv("Challenge failed", String(datalayer_extended.nissanleaf.challengeFailed)));
+
+    status.sections.push_back(s);
+    status.sections.push_back(dtc_advanced_section(*this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType));
+    return status;
+  }
+
+ private:
   void reset_SOH() { UserRequestSOHreset = true; }
-  bool supports_reset_DTC() { return true; }
   void reset_DTC() { UserRequestDTCreset = true; }
-  bool supports_read_DTC() { return true; }
   void read_DTC() {
     UserRequestDTCreadout = true;
     dtc_read_retries = 0;
   }
-  bool supports_insulation_resistance() { return true; }
-
-  bool soc_plausible() {
-    // When pack voltage is close to max, and SOC% is still low (<65.0%), SOC is not plausible
-    return !((datalayer.battery.status.voltage_dV > (datalayer.battery.info.max_design_voltage_dV - 100)) &&
-             (battery_SOC < 650));
-  }
-
-  BatteryHtmlRenderer& get_status_renderer() { return renderer; }
-  static constexpr const char* Name = "Nissan LEAF battery";
-
-  uint8_t calculate_crc(CAN_frame& frame);
-
- private:
-  bool UserRequestDTCreset = false;
-  bool UserRequestDTCreadout = false;
-  bool UserRequestSOHreset = false;
 
   // Parses a fully reassembled UDS ReadDTCInformation reply out of dtc_buffer into
   // datalayer_battery->dtc.
@@ -65,13 +132,26 @@ class NissanLeafBattery : public CanBattery {
 
   // Sends pending DTC requests once the diagnostic channel is idle, and times out unanswered ones.
   void handle_DTC_requests(unsigned long currentMillis);
-  static const int MAX_PACK_VOLTAGE_DV = 4055;  //5000 = 500.0V
-  static const int MIN_PACK_VOLTAGE_DV = 2400;
-  static const int MAX_CELL_DEVIATION_MV = 150;
-  static const int MAX_CELL_VOLTAGE_MV = 4224;  //Battery is put into emergency stop if one cell goes over this value
-  static const int MIN_CELL_VOLTAGE_MV = 2500;  //Battery is put into emergency stop if one cell goes below this value
 
-  NissanLeafHtmlRenderer renderer;
+  std::vector<BatteryCommand> commands_ = {
+      command(CMD_RESET_DTC, [this] { reset_DTC(); }),
+      command(CMD_READ_DTC, [this] { read_DTC(); }),
+// The SOH reset state machine is compiled out on small-flash builds, so the
+// command would set a flag nothing reads.
+#ifndef SMALL_FLASH_DEVICE
+      // Note this should only be allowed/used on 2011-2017 24/30kWh batteries!
+      command(CMD_RESET_SOH, [this] { reset_SOH(); }, [this] { return LEAF_battery_Type != ZE1_BATTERY; }),
+#endif
+  };
+
+  bool UserRequestDTCreset = false;
+  bool UserRequestDTCreadout = false;
+  bool UserRequestSOHreset = false;
+  static const int MAX_PACK_VOLTAGE_DV = 4040;  //5000 = 500.0V
+  static const int MIN_PACK_VOLTAGE_DV = 2600;
+  static const int MAX_CELL_DEVIATION_MV = 150;
+  static const int MAX_CELL_VOLTAGE_MV = 4250;  //Battery is put into emergency stop if one cell goes over this value
+  static const int MIN_CELL_VOLTAGE_MV = 2700;  //Battery is put into emergency stop if one cell goes below this value
 
   bool is_message_corrupt(CAN_frame rx_frame);
   void clearSOH(void);

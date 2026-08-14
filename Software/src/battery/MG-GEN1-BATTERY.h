@@ -1,14 +1,12 @@
 #pragma once
 
 #include "../datalayer/datalayer.h"
+#include "BatterySlotContext.h"
 #include "UdsCanBattery.h"
 
 class MgGen1Battery : public UdsCanBattery {
  public:
-  // Use this constructor for the second battery.
-  MgGen1Battery(DATALAYER_BATTERY_TYPE* datalayer_ptr, CAN_Interface targetCan, bool* allowed_contactor_closing_ptr);
-  // Use the default constructor to create the first or single battery.
-  MgGen1Battery();
+  MgGen1Battery(const BatterySlotContext& ctx);
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
@@ -16,13 +14,12 @@ class MgGen1Battery : public UdsCanBattery {
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
   virtual void got_battery_type(uint32_t type);
-  virtual void reset_BMS() override;
-  virtual bool supports_reset_BMS() override;
+  void reset_BMS();
   virtual void on_uds_sequence_step(uint16_t state, uint8_t sid, const uint8_t* data, uint16_t len) override;
+  virtual void append_uds_info_fields(std::vector<AdvancedField>& fields) override;
 
   static constexpr const char* Name = "MG Gen1 (HS/ZS/MG5/MarvelR)";
 
-  String get_uds_info_html() override;
   const char* get_dtc_json_filename() override { return "mg_dtc.json"; }
 
  private:
@@ -149,13 +146,9 @@ class MgGen1Battery : public UdsCanBattery {
                                           .data = {0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
 };
 
-inline MgGen1Battery::MgGen1Battery(DATALAYER_BATTERY_TYPE* datalayer_ptr, CAN_Interface targetCan,
-                                    bool* allowed_contactor_closing_ptr)
-    : UdsCanBattery(targetCan) {
-  datalayer_battery = datalayer_ptr;
-  allowed_contactor_closing = allowed_contactor_closing_ptr;
-}
-
-inline MgGen1Battery::MgGen1Battery() : UdsCanBattery() {
-  datalayer_battery = &datalayer.battery;
+inline MgGen1Battery::MgGen1Battery(const BatterySlotContext& ctx) : UdsCanBattery(ctx.can_interface) {
+  datalayer_battery = ctx.datalayer;
+  dtc = &datalayer_battery->dtc;
+  allowed_contactor_closing = ctx.is_primary() ? nullptr : ctx.contactor_flag;
+  commands_.push_back(command(CMD_RESET_BMS, [this] { reset_BMS(); }));
 }
