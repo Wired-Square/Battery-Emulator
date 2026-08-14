@@ -312,24 +312,15 @@ static void end_frame() {
 // ---------------------------------------------------------------------------------------
 
 static const DATALAYER_BATTERY_TYPE* battery_data(uint8_t i) {
-  if (i == 0) {
-    return &datalayer.battery;
-  }
-  return (i == 1) ? &datalayer.battery2 : &datalayer.battery3;
+  return &datalayer.battery_slot(i);
 }
 
 static Battery* battery_instance(uint8_t i) {
-  if (i == 0) {
-    return battery;
-  }
-  return (i == 1) ? battery2 : battery3;
+  return (i < kMaxBatterySlots) ? batteries[i] : nullptr;
 }
 
 static bool battery_is_detected(uint8_t i) {
-  if (i == 0) {
-    return battery_detected;
-  }
-  return (i == 1) ? battery2_detected : battery3_detected;
+  return battery_slot_detected(i);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -450,10 +441,11 @@ static void send_battery_frame(uint8_t index) {
 
     const ChargingState charging_state = get_charging_state(d->status.current_dA);
     put_enum_field(ESPNOW_KEY_CHARGING_STATE, static_cast<uint8_t>(charging_state));
+    const auto& limits = datalayer.battery.settings;
     put_enum_field(ESPNOW_KEY_LIMITING_FACTOR,
                    static_cast<uint8_t>(get_limiting_factor(
-                       charging_state, d->settings.inverter_limits_charge, d->settings.inverter_limits_discharge,
-                       d->settings.user_settings_limit_charge, d->settings.user_settings_limit_discharge)));
+                       charging_state, limits.inverter_limits_charge, limits.inverter_limits_discharge,
+                       limits.user_settings_limit_charge, limits.user_settings_limit_discharge)));
 
     if (index == 0 && (user_selected_battery_type == BatteryType::TeslaModel3Y ||
                        user_selected_battery_type == BatteryType::TeslaModelSX)) {
@@ -616,10 +608,10 @@ void init_espnow() {
   emulator_id = static_cast<uint16_t>(ESP.getEfuseMac() & 0xFFFF);
 
   num_batteries = 1;
-  if (battery2) {
+  if (batteries[1]) {
     num_batteries++;
   }
-  if (battery3) {
+  if (batteries[2]) {
     num_batteries++;
   }
 
@@ -667,7 +659,10 @@ void update_espnow() {
       break;
 
     case PHASE_BATTERY:
-      if (cursor_battery < num_batteries) {
+      while (cursor_battery < kMaxBatterySlots && battery_instance(cursor_battery) == nullptr) {
+        cursor_battery++;
+      }
+      if (cursor_battery < kMaxBatterySlots) {
         send_battery_frame(cursor_battery++);
         break;
       }
@@ -681,7 +676,10 @@ void update_espnow() {
       break;
 
     case PHASE_CELLS: {
-      if (cursor_battery >= num_batteries) {
+      while (cursor_battery < kMaxBatterySlots && battery_instance(cursor_battery) == nullptr) {
+        cursor_battery++;
+      }
+      if (cursor_battery >= kMaxBatterySlots) {
         cursor_battery = 0;
         phase = PHASE_EVENTS;
         break;
