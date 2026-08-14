@@ -30,6 +30,8 @@ enum class comm_interface {
   Highest
 };
 
+// WS281x wire order of the board's LED chain.
+enum class led_color_order : uint8_t { RGB, GRB };
 #ifdef HW_LILYGO2CAN
 enum led_mode_enum { CLASSIC, FLOW, HEARTBEAT, GRB_CLASSIC, GRB_FLOW, GRB_HEARTBEAT };
 #else
@@ -40,7 +42,6 @@ enum PrechargeState {
   AUTO_PRECHARGE_IDLE,
   AUTO_PRECHARGE_START,
   AUTO_PRECHARGE_PRECHARGING,
-  AUTO_PRECHARGE_OFF,
   AUTO_PRECHARGE_COMPLETED,
   AUTO_PRECHARGE_FAILURE
 };
@@ -78,28 +79,6 @@ enum BMSResetState {
 #define CAN_STILL_ALIVE 60
 // Set by battery each time we get a CAN message. Decrements every second. When reaching 0, sets event
 
-enum CAN_Interface {
-  // Native CAN port on the LilyGo & Stark hardware
-  CAN_NATIVE = 0,
-
-  // Native CANFD port on the Stark CMR hardware
-  CANFD_NATIVE = 1,
-
-  // Add-on CAN MCP2515 connected to GPIO pins
-  CAN_ADDON_MCP2515 = 2,
-
-  // Add-on CAN-FD MCP2518 connected to GPIO pins
-  CANFD_ADDON_MCP2518 = 3,
-
-  // 2nd add-on CAN-FD MCP2518 sharing bus with above
-  CANFD_ADDON_MCP2518_2 = 4,
-
-  // No CAN interface
-  NO_CAN_INTERFACE = 5
-};
-
-extern const char* getCANInterfaceName(CAN_Interface interface);
-
 /* CAN Frame structure */
 typedef struct {
   bool FD;
@@ -135,68 +114,5 @@ const char* limiting_factor_to_text(LimitingFactor factor);
 const char* get_charging_status_text(int32_t current_dA, bool inverter_limits_charge, bool inverter_limits_discharge,
                                      bool user_settings_limit_charge, bool user_settings_limit_discharge);
 
-#ifdef HW_LILYGO2CAN
-/* Configurable GPIO options (device specific) */
-enum class GPIOOPT1 {
-  // T-2CAN: WUP1/WUP2 on GPIO1/GPIO2
-  DEFAULT_OPT = 0,
-  // T-2CAN: SDA/SCL on GPIO1/GPIO2
-  I2C_DISPLAY_SSD1306 = 1,
-  // T-2CAN: ESTOP on GPIO1, BMS_POWER on GPIO2
-  ESTOP_BMS_POWER = 2,
-  Highest
-};
-extern GPIOOPT1 user_selected_gpioopt1;
-#endif
-enum class GPIOOPT2 {
-  // T-CAN485: Default, BMS power on PIN18
-  DEFAULT_OPT_BMS_POWER_18 = 0,
-  // T-CAN485: Move BMS power to PIN25
-  BMS_POWER_25 = 1,
-  Highest
-};
-enum class GPIOOPT3 {
-  // T-CAN485: Default, SMA inverter pin PIN5
-  DEFAULT_SMA_ENABLE_05 = 0,
-  // T-CAN485: Move SMA inverter pin to PIN33
-  SMA_ENABLE_33 = 1,
-  Highest
-};
-enum class GPIOOPT4 {
-  // T-CAN485: Default, uSD Card
-  DEFAULT_SD_CARD = 0,
-  // T-CAN485: Disable SD,Enable Display on Pins 14,15
-  I2C_DISPLAY_SSD1306 = 1,
-  Highest
-};
-#ifdef HW_STARK
-enum class GPIOOPT5 {
-  // StarkCMR: Default, Gpio23 as BMS power
-  DEFAULT_BMS_POWER_23 = 0,
-  // StarkCMR: Gpio25 as BMS power
-  BMS_POWER_25 = 1,
-  Highest
-};
-extern GPIOOPT5 user_selected_gpioopt5;
-#endif
-#ifdef HW_WAVESHARE
-enum class GPIOOPT6 {
-  // Waveshare: GPIO2 = Status LED (default)
-  DEFAULT_STATUS_LED = 0,
-  // Waveshare: GPIO1 = I2C SDA, GPIO2 = I2C SCL
-  I2C_DISPLAY_SSD1306 = 1,
-  Highest
-};
-extern GPIOOPT6 user_selected_gpioopt6;
-#endif
-extern GPIOOPT2 user_selected_gpioopt2;
-extern GPIOOPT3 user_selected_gpioopt3;
-
-/* The system runs standalone, so events reporting the absence of a
- * grid-tied inverter are not faults. Owned core-side because the core
- * events engine is what consumes it; any inverter can be run offgrid, so it
- * describes the installation rather than a protocol capability. */
 extern bool user_selected_inverter_offgrid;
-extern GPIOOPT4 user_selected_gpioopt4;
-
 #endif

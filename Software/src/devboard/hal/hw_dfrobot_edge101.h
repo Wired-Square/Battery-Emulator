@@ -1,6 +1,8 @@
 #ifndef __HW_DFROBOT_EDGE101_H__
 #define __HW_DFROBOT_EDGE101_H__
 
+#include "../../communication/can/NativeTwai.h"
+#include "../../communication/rs485/Rs485Port.h"
 #include "hal.h"
 
 /*
@@ -11,18 +13,25 @@ IP101GRI Ethernet PHY (RMII), PCF8563T RTC (I2C 0x51).
 Pin map: see arduino-esp32 PR #12742 variants/dfrobot_edge101/pins_arduino.h.
 */
 
+// Native CAN via TJA1050 (galvanically isolated)
+inline NativeTwai dfrobot_can_bus(CAN_LOG_ID_NATIVE, TwaiController::Twai0,
+                                  {GPIO_NUM_32, GPIO_NUM_35, GPIO_NUM_NC});
+// RS485 via TPT75176H (galvanically isolated), DE and /RE are tied together
+inline Rs485Port dfrobot_rs485_port(Serial2, UART_NUM_2, {GPIO_NUM_17, GPIO_NUM_36, GPIO_NUM_16});
+
+inline constexpr InterfaceDescriptor kDFRobotEdge101Interfaces[] = {
+    {InterfaceType::Modbus, nullptr, comm_interface::Modbus, nullptr, &dfrobot_rs485_port},
+    {InterfaceType::Rs485, nullptr, comm_interface::RS485, nullptr, &dfrobot_rs485_port},
+    {InterfaceType::CanNative, nullptr, comm_interface::CanNative, &dfrobot_can_bus},
+};
+static_assert(has_type(make_interface_list(kDFRobotEdge101Interfaces), InterfaceType::CanNative),
+              "every board table needs a native CAN descriptor");
+
 class DFRobotEdge101Hal : public Esp32Hal {
  public:
   const char* name() { return "DFRobot Edge101 IOT Controller"; }
 
-  // RS485 via TPT75176H (galvanically isolated), DE and /RE are tied together
-  virtual gpio_num_t RS485_TX_PIN() { return GPIO_NUM_17; }
-  virtual gpio_num_t RS485_RX_PIN() { return GPIO_NUM_36; }
-  virtual gpio_num_t RS485_DE_PIN() { return GPIO_NUM_16; }
-
-  // Native CAN via TJA1050 (galvanically isolated)
-  virtual gpio_num_t CAN_TX_PIN() { return GPIO_NUM_32; }
-  virtual gpio_num_t CAN_RX_PIN() { return GPIO_NUM_35; }
+  InterfaceList interfaces() { return make_interface_list(kDFRobotEdge101Interfaces); }
 
   // microSD (SPI)
 #ifdef SDCARD
@@ -39,30 +48,6 @@ class DFRobotEdge101Hal : public Esp32Hal {
   // User button — GPIO 38 is input-only on ESP32, no internal pull-up available; board has external pull-up
   virtual gpio_num_t AP_BUTTON_PIN() { return GPIO_NUM_38; }
 
-  std::vector<comm_interface> available_interfaces() {
-    return {comm_interface::Modbus, comm_interface::RS485, comm_interface::CanNative};
-  }
-
-  virtual const char* name_for_comm_interface(comm_interface comm) {
-    switch (comm) {
-      case comm_interface::CanNative:
-        return "CAN (Native)";
-      case comm_interface::CanFdNative:
-        return "";
-      case comm_interface::CanAddonMcp2515:
-        return "CAN (MCP2515 add-on)";
-      case comm_interface::CanFdAddonMcp2518:
-        return "CAN FD (MCP2518 add-on)";
-      case comm_interface::Modbus:
-        return "Modbus";
-      case comm_interface::RS485:
-        return "RS485";
-      case comm_interface::Highest:
-        return "";
-      default:
-        return Esp32Hal::name_for_comm_interface(comm);
-    }
-  }
 };
 
 #define HalClass DFRobotEdge101Hal

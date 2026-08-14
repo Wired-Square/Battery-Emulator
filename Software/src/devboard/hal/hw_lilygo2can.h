@@ -1,7 +1,14 @@
 #ifndef __HW_LILYGO2CAN_H__
 #define __HW_LILYGO2CAN_H__
 
+#include <SPI.h>
+
+#include "../../communication/can/Mcp2515.h"
+#include "../../communication/can/Mcp2517fd.h"
+#include "../../communication/can/NativeTwai.h"
+#include "../../communication/rs485/Rs485Port.h"
 #include "hal.h"
+#include "GpioOutput.h"
 
 #include "../utils/types.h"
 
@@ -32,62 +39,126 @@ if opi PSRAM is enabled.
 
 */
 
+inline NativeTwai lilygo2can_can_bus(CAN_LOG_ID_NATIVE, TwaiController::Twai0, {GPIO_NUM_7, GPIO_NUM_6, GPIO_NUM_NC});
+inline Mcp2515 lilygo2can_mcp2515_bus(CAN_LOG_ID_MCP2515, HSPI, "CAN",
+                                      {GPIO_NUM_12, GPIO_NUM_13, GPIO_NUM_11, GPIO_NUM_10, GPIO_NUM_8, GPIO_NUM_9},
+                                      16000000);
+inline Mcp2517fd lilygo2can_builtin_fd_bus(CAN_LOG_ID_MCP2517FD, FSPI, "CANFD",
+                                           {GPIO_NUM_12, GPIO_NUM_13, GPIO_NUM_11, GPIO_NUM_10, GPIO_NUM_NC, GPIO_NUM_9,
+                                            GPIO_NUM_3},
+                                           40000000, MCP2517_CLKODIV_DIV10, Mcp2517fdSettingsSlot::Fd1);
+inline Mcp2517fd lilygo2can_addon_fd_bus(CAN_LOG_ID_MCP2517FD, FSPI, "CANFD",
+                                         {GPIO_NUM_38, GPIO_NUM_37, GPIO_NUM_42, GPIO_NUM_41, GPIO_NUM_39, GPIO_NUM_NC,
+                                          GPIO_NUM_NC},
+                                         MCP2517_OSC_AUTODETECT, MCP2517_CLKODIV_DIV10, Mcp2517fdSettingsSlot::Fd1);
+inline Mcp2517fd lilygo2can_addon_fd2_bus(CAN_LOG_ID_MCP2517FD_2, HSPI, "CANFD2",
+                                          {GPIO_NUM_38, GPIO_NUM_37, GPIO_NUM_42, GPIO_NUM_41, GPIO_NUM_39, GPIO_NUM_NC,
+                                           GPIO_NUM_NC},
+                                          MCP2517_OSC_AUTODETECT, MCP2517_CLKODIV_UNSET, Mcp2517fdSettingsSlot::Fd2);
+// Note: these are used by the bootloader UART, so there'll be some bootloader
+// chatter sent down the RS485 bus when the chip starts up. Hopefully this
+// won't matter (it'll be 115200 baud, so much higher than the normal Modbus
+// 9600 baud) - if it's a problem we can burn fuses to disable it.
+inline Rs485Port lilygo2can_rs485_port(Serial2, UART_NUM_2, {GPIO_NUM_43, GPIO_NUM_44, GPIO_NUM_NC});
+
+inline GpioOutput lilygo2can_positive_contactor(GPIO_NUM_48, kLedcChannelPositive);
+inline GpioOutput lilygo2can_negative_contactor(GPIO_NUM_17, kLedcChannelNegative);
+inline GpioOutput lilygo2can_precharge(GPIO_NUM_21);
+inline GpioOutput lilygo2can_bms_power_3(GPIO_NUM_3);
+inline GpioOutput lilygo2can_bms_power_2(GPIO_NUM_2);
+// GPIO3 is used as INT1 on a T-2CAN FD (MCP2518), so use GPIO45 instead.
+inline GpioOutput lilygo2can_bms_power_45(GPIO_NUM_45);
+inline GpioOutput lilygo2can_second_battery_contactors(GPIO_NUM_5);
+inline GpioOutput lilygo2can_third_battery_contactors(GPIO_NUM_4);
+
+inline constexpr SwitchedOutputBinding kLilyGo2CanOutputs[] = {
+    {OutputRole::PositiveContactor, &lilygo2can_positive_contactor},
+    {OutputRole::NegativeContactor, &lilygo2can_negative_contactor},
+    {OutputRole::Precharge, &lilygo2can_precharge},
+    {OutputRole::BmsPower, &lilygo2can_bms_power_3},
+    {OutputRole::SecondBatteryContactors, &lilygo2can_second_battery_contactors},
+    {OutputRole::ThirdBatteryContactors, &lilygo2can_third_battery_contactors},
+};
+inline constexpr SwitchedOutputBinding kLilyGo2CanOutputsFd[] = {
+    {OutputRole::PositiveContactor, &lilygo2can_positive_contactor},
+    {OutputRole::NegativeContactor, &lilygo2can_negative_contactor},
+    {OutputRole::Precharge, &lilygo2can_precharge},
+    {OutputRole::BmsPower, &lilygo2can_bms_power_45},
+    {OutputRole::SecondBatteryContactors, &lilygo2can_second_battery_contactors},
+    {OutputRole::ThirdBatteryContactors, &lilygo2can_third_battery_contactors},
+};
+inline constexpr SwitchedOutputBinding kLilyGo2CanOutputsEstopBms[] = {
+    {OutputRole::PositiveContactor, &lilygo2can_positive_contactor},
+    {OutputRole::NegativeContactor, &lilygo2can_negative_contactor},
+    {OutputRole::Precharge, &lilygo2can_precharge},
+    {OutputRole::BmsPower, &lilygo2can_bms_power_2},
+    {OutputRole::SecondBatteryContactors, &lilygo2can_second_battery_contactors},
+    {OutputRole::ThirdBatteryContactors, &lilygo2can_third_battery_contactors},
+};
+
+// Non-default choices relocate WUP1/WUP2 off the top port rather than disabling them.
+inline constexpr PinAssignment kLilyGo2CanOpt1WupPins[] = {
+    {GpioPinRole::Wup1, GPIO_NUM_1},
+    {GpioPinRole::Wup2, GPIO_NUM_2},
+    {GpioPinRole::EquipmentStop, GPIO_NUM_36},
+    {GpioPinRole::DisplaySda, kGpioPinNotConnected},
+    {GpioPinRole::DisplayScl, kGpioPinNotConnected},
+};
+inline constexpr PinAssignment kLilyGo2CanOpt1DisplayPins[] = {
+    {GpioPinRole::Wup1, GPIO_NUM_18},
+    {GpioPinRole::Wup2, GPIO_NUM_14},
+    {GpioPinRole::EquipmentStop, GPIO_NUM_36},
+    {GpioPinRole::DisplaySda, GPIO_NUM_1},
+    {GpioPinRole::DisplayScl, GPIO_NUM_2},
+};
+inline constexpr PinAssignment kLilyGo2CanOpt1EstopPins[] = {
+    {GpioPinRole::Wup1, GPIO_NUM_18},
+    {GpioPinRole::Wup2, GPIO_NUM_14},
+    {GpioPinRole::EquipmentStop, GPIO_NUM_1},
+    {GpioPinRole::DisplaySda, kGpioPinNotConnected},
+    {GpioPinRole::DisplayScl, kGpioPinNotConnected},
+};
+inline constexpr GpioOptionChoice kLilyGo2CanGpioOpt1Choices[] = {
+    {0, "WUP1 / WUP2", kLilyGo2CanOpt1WupPins, 5, 0},
+#ifndef SMALL_FLASH_DEVICE
+    {1, "I2C Display (SSD1306)", kLilyGo2CanOpt1DisplayPins, 5, 0},
+#else
+    {1, nullptr, kLilyGo2CanOpt1DisplayPins, 5, 0},
+#endif
+    {2, "E-Stop / BMS Power", kLilyGo2CanOpt1EstopPins, 5, 1},
+};
+inline constexpr GpioOptionGroup kLilyGo2CanGpioOptions[] = {
+    {"GPIOOPT1", "Configurable port", kLilyGo2CanGpioOpt1Choices, 3, 0},
+};
+static_assert(gpio_choices_valid(kLilyGo2CanGpioOptions[0]));
+static_assert(gpio_choices_cover_same_roles(kLilyGo2CanGpioOptions[0]));
+static_assert(gpio_groups_roles_disjoint(make_gpio_option_catalog(kLilyGo2CanGpioOptions)));
+
+inline constexpr InterfaceDescriptor kLilyGo2CanInterfaces[] = {
+    {InterfaceType::Modbus, "Modbus (Add-on)", comm_interface::Modbus, nullptr, &lilygo2can_rs485_port},
+    {InterfaceType::Rs485, "RS485 (Add-on)", comm_interface::RS485, nullptr, &lilygo2can_rs485_port},
+    {InterfaceType::CanNative, "CAN B (Native)", comm_interface::CanNative, &lilygo2can_can_bus},
+    {InterfaceType::CanMcp2515, "CAN A (MCP2515)", comm_interface::CanAddonMcp2515, &lilygo2can_mcp2515_bus},
+    {InterfaceType::CanMcp2517fd, nullptr, comm_interface::CanFdAddonMcp2518, &lilygo2can_addon_fd_bus},
+};
+inline constexpr InterfaceDescriptor kLilyGo2CanFdInterfaces[] = {
+    {InterfaceType::Modbus, "Modbus (Add-on)", comm_interface::Modbus, nullptr, &lilygo2can_rs485_port},
+    {InterfaceType::Rs485, "RS485 (Add-on)", comm_interface::RS485, nullptr, &lilygo2can_rs485_port},
+    {InterfaceType::CanNative, "CAN B (Native)", comm_interface::CanNative, &lilygo2can_can_bus},
+    {InterfaceType::CanMcp2517fd, "CAN FD A (MCP2518)", comm_interface::CanFdAddonMcp2518, &lilygo2can_builtin_fd_bus},
+    {InterfaceType::CanMcp2517fd, nullptr, comm_interface::CanFdAddonMcp2518_2, &lilygo2can_addon_fd2_bus},
+};
+static_assert(has_type(make_interface_list(kLilyGo2CanInterfaces), InterfaceType::CanNative),
+              "every board table needs a native CAN descriptor");
+static_assert(has_type(make_interface_list(kLilyGo2CanFdInterfaces), InterfaceType::CanNative),
+              "every board table needs a native CAN descriptor");
+
 class LilyGo2CANHal : public Esp32Hal {
  public:
   const char* name() { return "LilyGo T_2CAN"; }
 
-  virtual gpio_num_t CAN_TX_PIN() { return GPIO_NUM_7; }
-  virtual gpio_num_t CAN_RX_PIN() { return GPIO_NUM_6; }
-
-  // Note: these are used by the bootloader UART, so there'll be some bootloader
-  // chatter sent down the RS485 bus when the chip starts up. Hopefully this
-  // won't matter (it'll be 115200 baud, so much higher than the normal Modbus
-  // 9600 baud) - if it's a problem we can burn fuses to disable it.
-  virtual gpio_num_t RS485_TX_PIN() { return GPIO_NUM_43; }
-  virtual gpio_num_t RS485_RX_PIN() { return GPIO_NUM_44; }
-
-  // Built In MCP2515 CAN_ADDON
-  virtual gpio_num_t MCP2515_SCK() { return is_fd() ? GPIO_NUM_NC : GPIO_NUM_12; }
-  virtual gpio_num_t MCP2515_MOSI() { return is_fd() ? GPIO_NUM_NC : GPIO_NUM_11; }
-  virtual gpio_num_t MCP2515_MISO() { return is_fd() ? GPIO_NUM_NC : GPIO_NUM_13; }
-  virtual gpio_num_t MCP2515_CS() { return is_fd() ? GPIO_NUM_NC : GPIO_NUM_10; }
-  virtual gpio_num_t MCP2515_INT() { return is_fd() ? GPIO_NUM_NC : GPIO_NUM_8; }
-  virtual gpio_num_t MCP2515_RST() { return is_fd() ? GPIO_NUM_NC : GPIO_NUM_9; }
-  virtual uint32_t MCP2515_FREQ() { return 16000000; }
-
-  // CANFD_ADDON defines for MCP2517
-  virtual gpio_num_t MCP2517_SCK() { return is_fd() ? GPIO_NUM_12 : GPIO_NUM_38; }
-  virtual gpio_num_t MCP2517_SDI() { return is_fd() ? GPIO_NUM_11 : GPIO_NUM_42; }
-  virtual gpio_num_t MCP2517_SDO() { return is_fd() ? GPIO_NUM_13 : GPIO_NUM_37; }
-  virtual gpio_num_t MCP2517_CS() { return is_fd() ? GPIO_NUM_10 : GPIO_NUM_41; }
-  virtual gpio_num_t MCP2517_INT() { return is_fd() ? GPIO_NUM_NC : GPIO_NUM_39; }
-  virtual gpio_num_t MCP2517_INT0() { return is_fd() ? GPIO_NUM_9 : GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_INT1() { return is_fd() ? GPIO_NUM_3 : GPIO_NUM_NC; }
-  virtual uint32_t MCP2517_FREQ() { return is_fd() ? 40000000 : 0; }
-
-  // Use the 2515 SPI bus for the add-on on the FD (as it isn't being used for a 2515)
-  virtual uint8_t MCP2517_BUS2() { return DEFAULT_MCP2515_BUS; }
-  virtual gpio_num_t MCP2517_SCK2() { return is_fd() ? GPIO_NUM_38 : GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_SDI2() { return is_fd() ? GPIO_NUM_42 : GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_SDO2() { return is_fd() ? GPIO_NUM_37 : GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_CS2() { return is_fd() ? GPIO_NUM_41 : GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_INT2() { return is_fd() ? GPIO_NUM_39 : GPIO_NUM_NC; }
-
-  // Contactor handling
-  virtual gpio_num_t POSITIVE_CONTACTOR_PIN() { return GPIO_NUM_48; }
-  virtual gpio_num_t NEGATIVE_CONTACTOR_PIN() { return GPIO_NUM_17; }
-  virtual gpio_num_t PRECHARGE_PIN() { return GPIO_NUM_21; }
-  virtual gpio_num_t BMS_POWER() {
-    if (user_selected_gpioopt1 == GPIOOPT1::ESTOP_BMS_POWER) {
-      return GPIO_NUM_2;
-    }
-    // GPIO3 is used as INT1 on a T-2CAN FD (MCP2518), so use GPIO45 instead.
-    return is_fd() ? GPIO_NUM_45 : GPIO_NUM_3;
-  }
   // Pins to be latched across a reset/OTA reboot (RTC-capable pins only): BMS_POWER is either GPIO2, GPIO3, or GPIO45
   virtual std::vector<gpio_num_t> reset_hold_pins() { return {GPIO_NUM_2, is_fd() ? GPIO_NUM_45 : GPIO_NUM_3}; }
-  virtual gpio_num_t SECOND_BATTERY_CONTACTORS_PIN() { return GPIO_NUM_5; }
-  virtual gpio_num_t TRIPLE_BATTERY_CONTACTORS_PIN() { return GPIO_NUM_4; }
 
   // Automatic precharging
   virtual gpio_num_t HIA4V1_PIN() { return GPIO_NUM_18; }
@@ -98,8 +169,6 @@ class LilyGo2CANHal : public Esp32Hal {
 
   // LED
   virtual gpio_num_t LED_PIN() { return GPIO_NUM_35; }
-  virtual uint8_t LED_MAX_BRIGHTNESS() { return 40; }
-
   // CHAdeMO support pin dependencies
   virtual gpio_num_t CHADEMO_PIN_2() { return GPIO_NUM_16; }
   virtual gpio_num_t CHADEMO_PIN_10() { return GPIO_NUM_15; }
@@ -108,75 +177,34 @@ class LilyGo2CANHal : public Esp32Hal {
   virtual gpio_num_t CHADEMO_LOCK() { return GPIO_NUM_40; }
   virtual gpio_num_t CHADEMO_CT_PIN() { return GPIO_NUM_5; }  // ADC1_CH4
 
+  GpioOptionCatalog gpio_options() override { return make_gpio_option_catalog(kLilyGo2CanGpioOptions); }
+
 #ifndef SMALL_FLASH_DEVICE
   // i2c display
-  virtual gpio_num_t DISPLAY_SDA_PIN() {
-    if (user_selected_gpioopt1 == GPIOOPT1::I2C_DISPLAY_SSD1306) {
-      return GPIO_NUM_1;
-    }
-    return GPIO_NUM_NC;
-  }
-  virtual gpio_num_t DISPLAY_SCL_PIN() {
-    if (user_selected_gpioopt1 == GPIOOPT1::I2C_DISPLAY_SSD1306) {
-      return GPIO_NUM_2;
-    }
-    return GPIO_NUM_NC;
-  }
+  virtual gpio_num_t DISPLAY_SDA_PIN() { return pin_for(GpioPinRole::DisplaySda, GPIO_NUM_NC); }
+  virtual gpio_num_t DISPLAY_SCL_PIN() { return pin_for(GpioPinRole::DisplayScl, GPIO_NUM_NC); }
 #endif  // SMALL_FLASH_DEVICE
 
   // Equipment stop pin
-  virtual gpio_num_t EQUIPMENT_STOP_PIN() {
-    if (user_selected_gpioopt1 == GPIOOPT1::ESTOP_BMS_POWER) {
-      return GPIO_NUM_1;
-    }
-    return GPIO_NUM_36;
-  }
+  virtual gpio_num_t EQUIPMENT_STOP_PIN() { return pin_for(GpioPinRole::EquipmentStop, GPIO_NUM_NC); }
 
   // Battery wake up pins
-  virtual gpio_num_t WUP_PIN1() {
-    if (user_selected_gpioopt1 == GPIOOPT1::DEFAULT_OPT) {
-      // WUP1 on top port
-      return GPIO_NUM_1;
-    }
-    return GPIO_NUM_18;
-  }
-  virtual gpio_num_t WUP_PIN2() {
-    if (user_selected_gpioopt1 == GPIOOPT1::DEFAULT_OPT) {
-      // WUP2 on top port
-      return GPIO_NUM_2;
-    }
-    return GPIO_NUM_14;
-  }
+  virtual gpio_num_t WUP_PIN1() { return pin_for(GpioPinRole::Wup1, GPIO_NUM_NC); }
+  virtual gpio_num_t WUP_PIN2() { return pin_for(GpioPinRole::Wup2, GPIO_NUM_NC); }
 
   // Momentary push-button that can be long-pressed at runtime to start the Wi-Fi AP.
   virtual gpio_num_t AP_BUTTON_PIN() { return GPIO_NUM_0; }
 
-  std::vector<comm_interface> available_interfaces() {
-    return {comm_interface::Modbus, comm_interface::RS485, comm_interface::CanNative, comm_interface::CanAddonMcp2515,
-            comm_interface::CanFdAddonMcp2518};
+  virtual SwitchedOutputList switched_outputs() {
+    if (gpio_output_variant(0) != 0) {
+      return make_switched_output_list(kLilyGo2CanOutputsEstopBms);
+    }
+    return is_fd() ? make_switched_output_list(kLilyGo2CanOutputsFd)
+                   : make_switched_output_list(kLilyGo2CanOutputs);
   }
 
-  virtual const char* name_for_comm_interface(comm_interface comm) {
-    switch (comm) {
-      case comm_interface::CanNative:
-        return "CAN B (Native)";
-      case comm_interface::CanFdNative:
-        return "";
-      case comm_interface::CanAddonMcp2515:
-        return is_fd() ? "" : "CAN A (MCP2515)";
-      case comm_interface::CanFdAddonMcp2518:
-        return is_fd() ? "CAN FD A (MCP2518)" : "CAN FD (MCP2518 add-on)";
-      case comm_interface::CanFdAddonMcp2518_2:
-        return is_fd() ? "CAN FD (MCP2518 add-on)" : "";
-      case comm_interface::Modbus:
-        return "Modbus (Add-on)";
-      case comm_interface::RS485:
-        return "RS485 (Add-on)";
-      case comm_interface::Highest:
-        return "";
-      default:
-        return Esp32Hal::name_for_comm_interface(comm);
-    }
+  InterfaceList interfaces() {
+    return is_fd() ? make_interface_list(kLilyGo2CanFdInterfaces) : make_interface_list(kLilyGo2CanInterfaces);
   }
 
   bool is_fd() {
@@ -244,8 +272,6 @@ class LilyGo2CANHal : public Esp32Hal {
     return detected_fd;
   }
 };
-
-#define HalClass LilyGo2CANHal
 
 /* ----- Error checks below, don't change (can't be moved to separate file) ----- */
 #ifndef HW_CONFIGURED

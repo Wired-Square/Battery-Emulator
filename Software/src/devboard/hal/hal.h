@@ -1,26 +1,18 @@
 #ifndef _HAL_H_
 #define _HAL_H_
 
-#include <SPI.h>
 #include <soc/gpio_num.h>
 #include <chrono>
 #include <unordered_map>
-#include "../../../src/communication/nvm/comm_nvm.h"
+#include <utility>
+#include <vector>
 #include "../../../src/devboard/utils/events.h"
 #include "../../../src/devboard/utils/logging.h"
 #include "../../../src/devboard/utils/types.h"
-
-// We need to use #ifdef trickery since the SPI buses are only defined on the
-// respective architectures.
-// The spare ESP32 SPI buses are called HSPI and VSPI, whereas on a ESP32S3
-// they are called FSPI and HSPI.
-#ifdef CONFIG_IDF_TARGET_ESP32S3
-#define DEFAULT_MCP2515_BUS HSPI
-#define DEFAULT_MCP2517_BUS FSPI
-#else
-#define DEFAULT_MCP2515_BUS VSPI
-#define DEFAULT_MCP2517_BUS HSPI
-#endif
+#include "interface_descriptor.h"
+#include "SwitchedOutput.h"
+#include "LoadSwitch.h"
+#include "gpio_options.h"
 
 // Hardware Abstraction Layer base class.
 // Derive a class to define board-specific parameters such as GPIO pin numbers
@@ -39,6 +31,15 @@ class Esp32Hal {
   virtual int WIFICORE() { return 0; }
 
   virtual void set_default_configuration_values() {}
+
+  // Board peripheral bring-up (IO expanders, transceiver standby, ...).
+  // Runs once from setup(), after stored settings load and before any
+  // communication interface initialises.
+  virtual void board_init() {}
+
+  // Software-switchable bus termination, keyed by descriptor index.
+  virtual bool supports_interface_termination(size_t /*interface_index*/) { return false; }
+  virtual bool set_interface_termination(size_t /*interface_index*/, bool /*enabled*/) { return false; }
 
   template <typename... Pins>
   bool alloc_pins(const char* name, Pins... pins) {
@@ -69,95 +70,7 @@ class Esp32Hal {
     return true;
   }
 
-  // Helper to forward vector to variadic template
-  template <typename Vec, size_t... Is>
-  bool alloc_pins_from_vector(const char* name, const Vec& pins, std::index_sequence<Is...>) {
-    return alloc_pins(name, pins[Is]...);
-  }
-
-  // Base case: no more pins
-  inline bool alloc_pins_ignore_unused_impl(const char* name) {
-    return alloc_pins(name);  // Call with 0 pins
-  }
-
-  // Recursive case: process one pin at a time
-  template <typename... Rest>
-  bool alloc_pins_ignore_unused_impl(const char* name, gpio_num_t first, Rest... rest) {
-    if (first == GPIO_NUM_NC) {
-      return alloc_pins_ignore_unused_impl(name, rest...);
-    } else {
-      return call_alloc_pins_filtered(name, first, rest...);
-    }
-  }
-
-  // This helper just forwards pins after filtering is done
-  template <typename... Pins>
-  bool call_alloc_pins_filtered(const char* name, Pins... pins) {
-    return alloc_pins(name, pins...);
-  }
-
-  // Entry point
-  template <typename... Pins>
-  bool alloc_pins_ignore_unused(const char* name, Pins... pins) {
-    return alloc_pins_ignore_unused_impl(name, static_cast<gpio_num_t>(pins)...);
-  }
-
   virtual bool always_enable_bms_power() { return false; }
-
-  virtual gpio_num_t PIN_5V_EN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t RS485_EN_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t RS485_TX_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t RS485_RX_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t RS485_SE_PIN() { return GPIO_NUM_NC; }
-
-  // Direction pin for half-duplex RS485 transceivers with DE and /RE tied together.
-  // Default polarity: HIGH = transmit, LOW = receive.
-  virtual gpio_num_t RS485_DE_PIN() { return GPIO_NUM_NC; }
-  virtual bool RS485_DE_ACTIVE_HIGH() { return true; }
-
-  virtual gpio_num_t CAN_TX_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t CAN_RX_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t CAN_SE_PIN() { return GPIO_NUM_NC; }
-
-  // CAN_ADDON
-  // SPI bus number of MCP2515
-  virtual uint8_t MCP2515_BUS() { return DEFAULT_MCP2515_BUS; }
-  // SCK input of MCP2515
-  virtual gpio_num_t MCP2515_SCK() { return GPIO_NUM_NC; }
-  // SDI input of MCP2515
-  virtual gpio_num_t MCP2515_MOSI() { return GPIO_NUM_NC; }
-  // SDO output of MCP2515
-  virtual gpio_num_t MCP2515_MISO() { return GPIO_NUM_NC; }
-  // CS input of MCP2515
-  virtual gpio_num_t MCP2515_CS() { return GPIO_NUM_NC; }
-  // INT output of MCP2515
-  virtual gpio_num_t MCP2515_INT() { return GPIO_NUM_NC; }
-  // Reset pin for MCP2515
-  virtual gpio_num_t MCP2515_RST() { return GPIO_NUM_NC; }
-  virtual uint32_t MCP2515_FREQ() { return 0; }  // 0 means unknown
-
-  // CANFD_ADDON defines for MCP2517
-  virtual uint8_t MCP2517_BUS() { return DEFAULT_MCP2517_BUS; }
-  virtual gpio_num_t MCP2517_SCK() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_SDI() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_SDO() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_CS() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_INT() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_INT0() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_INT1() { return GPIO_NUM_NC; }
-  virtual uint32_t MCP2517_FREQ() { return 0; }  // 0 means unknown
-
-  // 2nd CANFD Interface: MCP2517/8
-  virtual uint8_t MCP2517_BUS2() { return DEFAULT_MCP2517_BUS; }
-  virtual gpio_num_t MCP2517_SCK2() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_SDI2() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_SDO2() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_CS2() { return GPIO_NUM_NC; }
-  virtual gpio_num_t MCP2517_INT2() { return GPIO_NUM_NC; }
-  virtual uint32_t MCP2517_FREQ2() { return 0; }  // 0 means unknown
-
-  // Value for first MCP2517 CLKODIV register (default, divide by 10)
-  virtual int MCP2517_CLKODIV() { return 0b11; }
 
   // CHAdeMO support pin dependencies
   virtual gpio_num_t CHADEMO_PIN_2() { return GPIO_NUM_NC; }
@@ -167,13 +80,24 @@ class Esp32Hal {
   virtual gpio_num_t CHADEMO_LOCK() { return GPIO_NUM_NC; }
   virtual gpio_num_t CHADEMO_CT_PIN() { return GPIO_NUM_NC; }
 
-  // Contactor handling
-  virtual gpio_num_t POSITIVE_CONTACTOR_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t NEGATIVE_CONTACTOR_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t PRECHARGE_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t BMS_POWER() { return GPIO_NUM_NC; }
-  virtual gpio_num_t SECOND_BATTERY_CONTACTORS_PIN() { return GPIO_NUM_NC; }
-  virtual gpio_num_t TRIPLE_BATTERY_CONTACTORS_PIN() { return GPIO_NUM_NC; }
+  // Contactor-role outputs, bound by board data. Boot-stable.
+  virtual SwitchedOutputList switched_outputs() { return {nullptr, 0}; }
+
+  SwitchedOutput* switched_output(OutputRole role) {
+    SwitchedOutputList list = switched_outputs();
+    for (size_t i = 0; i < list.count; i++) {
+      if (list.data[i].role == role) {
+        return list.data[i].output;
+      }
+    }
+    return nullptr;
+  }
+
+  // Board-owned multichannel load switch; nullptr when the board has none.
+  // Generic seam: BOARD_HAS_LOAD_SWITCH code must reach the device only
+  // through this, so envs that gate the feature on without the driver
+  // source still link.
+  virtual LoadSwitch* load_switch() { return nullptr; }
 
   // Output pins to latch at their driven level across a firmware-initiated reset/OTA
   // reboot, so they don't float during the boot window. RTC-capable pins only.
@@ -189,20 +113,25 @@ class Esp32Hal {
   virtual gpio_num_t INVERTER_CONTACTOR_ENABLE_LED_PIN() { return GPIO_NUM_NC; }
 
 #ifdef SDCARD
-  // SD card
   virtual uint8_t SD_SPI_BUS() = 0;
+#endif  // SDCARD
+
+  // SD card
   virtual gpio_num_t SD_MISO_PIN() { return GPIO_NUM_NC; }
   virtual gpio_num_t SD_MOSI_PIN() { return GPIO_NUM_NC; }
   virtual gpio_num_t SD_SCLK_PIN() { return GPIO_NUM_NC; }
   virtual gpio_num_t SD_CS_PIN() { return GPIO_NUM_NC; }
-#endif  // SDCARD
 
   // LED
   virtual gpio_num_t LED_PIN() { return GPIO_NUM_NC; }
   virtual uint8_t LED_MAX_BRIGHTNESS() { return 40; }
-  // Number of LEDs chained off LED_PIN(). Pixel 0 is always the STATUS LED; boards that replace
-  // additional hardwired indicator LEDs with RGB LEDs on the same chain report more than 1 here.
-  virtual uint8_t LED_COUNT() { return 1; }
+  // WS281x chain length and role→pixel map; -1 = no LED for that role.
+  virtual uint16_t LED_COUNT() { return 1; }
+  virtual uint16_t LED_STATUS_INDEX() { return 0; }
+  virtual int LED_INTERFACE_ACTIVITY_INDEX(size_t /*interface_index*/) { return -1; }
+  virtual int LED_SWITCHED_OUTPUT_INDEX(size_t /*channel*/) { return -1; }
+  virtual int LED_INDICATOR_INDEX(size_t /*indicator*/) { return -1; }
+  virtual led_color_order LED_COLOR_ORDER() { return led_color_order::RGB; }
 
 #ifndef SMALL_FLASH_DEVICE
   // i2c display
@@ -213,6 +142,10 @@ class Esp32Hal {
   // Equipment stop pin
   virtual gpio_num_t EQUIPMENT_STOP_PIN() { return GPIO_NUM_NC; }
 
+  // Runtime input on the BOOT strapping button. GPIO_NUM_NC on boards that
+  // repurpose the strapping pin or have no button.
+  virtual gpio_num_t BOOT_BUTTON_PIN() { return GPIO_NUM_0; }
+
   // Battery wake up pins
   virtual gpio_num_t WUP_PIN1() { return GPIO_NUM_NC; }
   virtual gpio_num_t WUP_PIN2() { return GPIO_NUM_NC; }
@@ -220,32 +153,40 @@ class Esp32Hal {
   // Momentary push-button that can be long-pressed at runtime to start the Wi-Fi AP. Usually the BOOT button on GPIO0.
   virtual gpio_num_t AP_BUTTON_PIN() { return GPIO_NUM_NC; }
 
-  // Returns the available comm interfaces on this HW
-  virtual std::vector<comm_interface> available_interfaces() = 0;
-
-  virtual const char* name_for_comm_interface(comm_interface comm) {
-    switch (comm) {
-      case comm_interface::Modbus:
-        return "Modbus";
-      case comm_interface::RS485:
-        return "RS485";
-      case comm_interface::CanNative:
-        return "CAN (Native)";
-      case comm_interface::CanFdNative:
-        return "";
-      case comm_interface::CanAddonMcp2515:
-        return "CAN (MCP2515 add-on)";
-      case comm_interface::CanFdAddonMcp2518:
-        return "CAN FD (MCP2518 add-on)";
-      case comm_interface::CanFdAddonMcp2518_2:
-        return "";
-      default:
-        return nullptr;
-    }
+  // Route through WUP_PIN1/WUP_PIN2 so per-board overrides still apply.
+  virtual gpio_num_t wakeup_pin(size_t battery_index) {
+    return battery_index == 0 ? WUP_PIN1() : (battery_index == 1 ? WUP_PIN2() : GPIO_NUM_NC);
   }
+
+  virtual InterfaceList interfaces() = 0;
 
   String failed_allocator() { return allocator_name; }
   String conflicting_allocator() { return allocated_name; }
+
+  // Default: no options. Boards override gpio_options() with their static catalog.
+  virtual GpioOptionCatalog gpio_options() { return {nullptr, 0}; }
+  uint8_t gpio_option_value(size_t group_index) const {
+    return group_index < kMaxGpioOptionGroups ? gpio_option_selections_[group_index] : 0;
+  }
+  void set_gpio_option_value(size_t group_index, uint8_t value) {
+    if (group_index < kMaxGpioOptionGroups) {
+      gpio_option_selections_[group_index] = value;
+    }
+  }
+  gpio_num_t pin_for(GpioPinRole role, gpio_num_t fallback) {
+    return (gpio_num_t)resolve_gpio_pin(gpio_options(), gpio_option_selections_, kMaxGpioOptionGroups, role,
+                                        (int16_t)fallback);
+  }
+
+  // Boards that swap switched-output tables key on this, not a raw choice value.
+  uint8_t gpio_output_variant(size_t group_index) {
+    GpioOptionCatalog catalog = gpio_options();
+    if (group_index >= catalog.group_count) {
+      return 0;
+    }
+    const GpioOptionChoice* choice = find_gpio_option_choice(catalog.groups[group_index], gpio_option_value(group_index));
+    return choice != nullptr ? choice->output_variant : 0;
+  }
 
  private:
   std::unordered_map<gpio_num_t, std::string> allocated_pins;
@@ -254,6 +195,8 @@ class Esp32Hal {
   // for failed gpio allocations.
   String allocator_name;
   String allocated_name;
+
+  uint8_t gpio_option_selections_[kMaxGpioOptionGroups] = {0};
 };
 
 extern Esp32Hal* esp32hal;
