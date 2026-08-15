@@ -829,6 +829,26 @@ TEST_F(SettingsApiTest, HaDiscoveryTopicDefaultAndApply) {
   EXPECT_STREQ(store.getString("HADISCTOPIC", "").c_str(), "hass");
 }
 
+TEST_F(SettingsApiTest, HaDiscoveryTriggersDefaultFalseAndApply) {
+  {
+    BatteryEmulatorSettingsStore reader(true);
+    const JsonDocument doc = parse_values(build_settings_json(reader));
+    ASSERT_FALSE(doc["values"]["HADISC"].isNull()) << "HADISC missing from the settings schema";
+    ASSERT_FALSE(doc["values"]["HADISCFWU"].isNull()) << "HADISCFWU missing from the settings schema";
+    EXPECT_FALSE(doc["values"]["HADISC"].as<bool>()) << "autodiscovery must not publish unless asked";
+    EXPECT_FALSE(doc["values"]["HADISCFWU"].as<bool>()) << "autodiscovery must not publish unless asked";
+  }
+
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["HADISCFWU"] = true;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_TRUE(store.getBool("HADISCFWU", false));
+  EXPECT_FALSE(store.getBool("HADISC", false)) << "arming the firmware-update trigger must not arm the next-boot one";
+}
+
 #ifndef SMALL_FLASH_DEVICE
 TEST_F(SettingsApiTest, SyslogFieldsPresentWithDefaultsAndApply) {
   {
