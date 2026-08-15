@@ -455,25 +455,25 @@ void BmwPhevBattery::wake_battery_via_canbus() {
   // Dominant for at least ~7 µs (min) and at most ~38 µs (max)
   // Followed by a Recessive interval of at least ~3 µs (min) and at most ~10 µs (max)
   // Then a second dominant pulse of similar timing.
-  static unsigned long wakeup_start_time = 0;
-  static bool waiting_for_completion = false;
-
-  if (!waiting_for_completion) {
-    logging.println("Setting Canbus to 100kbps");
-    change_can_speed(CAN_Speed::CAN_SPEED_100KBPS);
-    transmit_can_frame(&BMW_PHEV_BUS_WAKEUP_REQUEST);
-    transmit_can_frame(&BMW_PHEV_BUS_WAKEUP_REQUEST);
-    logging.println("Sent magic wakeup packet to SME at 100kbps");
-    wakeup_start_time = millis();
-    waiting_for_completion = true;
+  logging.println("Setting Canbus to 100kbps");
+  if (!change_can_speed(can_interface, CAN_Speed::CAN_SPEED_100KBPS)) {
     return;
   }
+  transmit_can_frame(&BMW_PHEV_BUS_WAKEUP_REQUEST);
+  transmit_can_frame(&BMW_PHEV_BUS_WAKEUP_REQUEST);
+  logging.println("Sent magic wakeup packet to SME at 100kbps");
+  wakeup_dip_started_ms = millis();
+  wakeup_dip_active = true;
+}
 
-  if (millis() - wakeup_start_time >= 50) {
-    logging.println("Resetting Canbus speed");
-    change_can_speed(CAN_Speed::CAN_SPEED_500KBPS);
+void BmwPhevBattery::restore_can_speed_after_wakeup() {
+  if (millis() - wakeup_dip_started_ms < WAKEUP_DIP_DURATION_MS) {
+    return;
+  }
+  logging.println("Resetting Canbus speed");
+  if (change_can_speed(can_interface, CAN_Speed::CAN_SPEED_500KBPS)) {
     logging.println("CAN speed restored, ready for operation");
-    waiting_for_completion = false;
+    wakeup_dip_active = false;
   }
 }
 
@@ -1234,7 +1234,9 @@ void BmwPhevBattery::transmit_can(unsigned long currentMillis) {
     }
   } else {
     // Battery is asleep - try and wake it every 1 seconds
-    if (currentMillis - previousMillis1000 >= INTERVAL_1_S) {
+    if (wakeup_dip_active) {
+      restore_can_speed_after_wakeup();
+    } else if (currentMillis - previousMillis1000 >= INTERVAL_1_S) {
       previousMillis1000 = currentMillis;
       logging.println("Battery asleep, sending wakeup packet");
       wake_battery_via_canbus();

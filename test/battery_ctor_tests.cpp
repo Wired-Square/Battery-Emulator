@@ -40,10 +40,16 @@ class SpeedProbeBus : public CanBus {
   SpeedProbeBus() : CanBus(CAN_LOG_ID_NONE) {}
   void receive() override {}
   bool transmit_frame(const CAN_frame&) override { return true; }
-  CAN_Speed requested_speed() { return speed(); }
+  CAN_Speed resolved_speed() {
+    init();
+    return speed();
+  }
 
  protected:
   bool init_hw() override { return true; }
+  bool retune_hw(CAN_Speed) override { return true; }
+  void stop_hw() override {}
+  bool restart_hw(CAN_Speed) override { return true; }
 };
 
 template <typename T>
@@ -52,7 +58,7 @@ CAN_Speed speed_registered_by() {
   const InterfaceDescriptor iface{InterfaceType::CanNative, "probe", comm_interface::Highest, &bus};
   const BatterySlotContext ctx{0, &datalayer.battery.pack[0], nullptr, &iface, GPIO_NUM_NC};
   T driver(ctx);
-  return bus.requested_speed();
+  return bus.resolved_speed();
 }
 
 }  // namespace
@@ -346,8 +352,7 @@ TEST(SetupBatterySlotGateTest, TripleOnDoubleOffSkipsSecondSlot) {
   datalayer.system.status = saved_status;
 }
 
-// A slot configured onto an already-used CAN interface must not start.
-TEST(SetupBatterySlotGateTest, DuplicateInterfaceSkipsSecondSlot) {
+TEST(SetupBatterySlotGateTest, DuplicateInterfaceFaultsTheBusAtResolve) {
   init_hal();
   init_events();
 
@@ -363,7 +368,8 @@ TEST(SetupBatterySlotGateTest, DuplicateInterfaceSkipsSecondSlot) {
   auto* saved_iface = can_config.battery;
   auto* saved_iface_double = can_config.battery_double;
 
-  static InterfaceDescriptor shared_iface{InterfaceType::CanNative, nullptr, comm_interface::Highest, nullptr};
+  static SpeedProbeBus shared_bus;
+  static InterfaceDescriptor shared_iface{InterfaceType::CanNative, nullptr, comm_interface::Highest, &shared_bus};
   batteries[0] = nullptr;
   batteries[1] = nullptr;
   batteries[2] = nullptr;
@@ -375,13 +381,15 @@ TEST(SetupBatterySlotGateTest, DuplicateInterfaceSkipsSecondSlot) {
 
   setup_battery();
 
-  EXPECT_NE(batteries[0], nullptr);
-  EXPECT_EQ(batteries[1], nullptr);
-  const EVENTS_STRUCT_TYPE* conflict = get_event_pointer(EVENT_BATTERY_INTERFACE_CONFLICT);
-  EXPECT_EQ(conflict->state, EVENT_STATE_ACTIVE);
-  EXPECT_EQ(conflict->data, 2);
+  EXPECT_NE(batteries[0], nullptr) << "construction records the demand; refusal is the resolver's job";
+  EXPECT_NE(batteries[1], nullptr) << "construction records the demand; refusal is the resolver's job";
+  EXPECT_FALSE(shared_bus.init());
+  EXPECT_EQ(shared_bus.resolution(), CanResolveError::MultipleBatteries)
+      << "two packs on one bus decode each other's frames and can transmit conflicting contactor frames";
+  EXPECT_FALSE(shared_bus.initialized()) << "an invalid bus must never program its controller";
 
   delete batteries[0];
+  delete batteries[1];
   batteries[0] = saved_battery;
   batteries[1] = saved_battery2;
   batteries[2] = saved_battery3;

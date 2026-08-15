@@ -19,9 +19,10 @@ void transmit_can_frame_to_interface(const CAN_frame* tx_frame, const InterfaceD
   g_recorded.push_back(*tx_frame);
 }
 
-void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface, CAN_Speed speed) {
+void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface, CanRole role, CAN_Speed speed,
+                           CanSpeedMode mode) {
   if (interface != nullptr && interface->can_bus != nullptr) {
-    interface->can_bus->register_receiver(receiver, speed);
+    interface->can_bus->register_receiver(receiver, role, speed, mode);
   }
 }
 
@@ -46,11 +47,13 @@ void NativeTwai::receive() {}
 bool NativeTwai::transmit_frame(const CAN_frame&) {
   return true;
 }
-bool NativeTwai::change_speed(CAN_Speed) {
+bool NativeTwai::retune_hw(CAN_Speed) {
   return true;
 }
-void NativeTwai::stop() {}
-void NativeTwai::restart() {}
+void NativeTwai::stop_hw() {}
+bool NativeTwai::restart_hw(CAN_Speed) {
+  return true;
+}
 
 bool Mcp2515::init_hw() {
   return true;
@@ -59,11 +62,13 @@ void Mcp2515::receive() {}
 bool Mcp2515::transmit_frame(const CAN_frame&) {
   return true;
 }
-bool Mcp2515::change_speed(CAN_Speed) {
+bool Mcp2515::retune_hw(CAN_Speed) {
   return true;
 }
-void Mcp2515::stop() {}
-void Mcp2515::restart() {}
+void Mcp2515::stop_hw() {}
+bool Mcp2515::restart_hw(CAN_Speed) {
+  return true;
+}
 
 bool Mcp2517fd::init_hw() {
   return true;
@@ -72,5 +77,10 @@ void Mcp2517fd::receive() {}
 bool Mcp2517fd::transmit_frame(const CAN_frame&) {
   return true;
 }
-void Mcp2517fd::stop() {}
-void Mcp2517fd::restart() {}
+bool Mcp2517fd::retune_hw(CAN_Speed) {
+  return true;
+}
+void Mcp2517fd::stop_hw() {}
+bool Mcp2517fd::restart_hw(CAN_Speed) {
+  return true;
+}

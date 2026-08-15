@@ -9,7 +9,10 @@
 class BmwPhevBattery : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }  //TODO: Investigate if actually needed
-  BmwPhevBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
+  BmwPhevBattery(const BatterySlotContext& ctx)
+      : CanBattery(ctx.can_interface, CAN_Speed::CAN_SPEED_500KBPS, CanSpeedMode::Variable) {
+    datalayer_battery = ctx.datalayer;
+  }
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();
@@ -317,6 +320,12 @@ class BmwPhevBattery : public CanBattery {
   unsigned long previousMillis10000 = 0;  // will store last time a 10000ms CAN Message was send
   unsigned long min_cell_voltage_lastchanged = 0;
   unsigned long max_cell_voltage_lastchanged = 0;
+
+  static const unsigned long WAKEUP_DIP_DURATION_MS = 50;
+  unsigned long wakeup_dip_started_ms = 0;
+  bool wakeup_dip_active = false;
+
+  void restore_can_speed_after_wakeup();
 
   static const int ALIVE_MAX_VALUE = 14;  // BMW CAN messages contain alive counter, goes from 0...14
 

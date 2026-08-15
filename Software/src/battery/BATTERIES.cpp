@@ -283,21 +283,6 @@ void setup_battery() {
       set_event(EVENT_BATTERY_INTERFACE_UNSUPPORTED, slot + 1);
       continue;
     }
-    // Frames broadcast to every receiver on a bus and all slots share one
-    // battery type, so a duplicate interface would decode one pack twice.
-    bool interface_in_use = false;
-    for (uint8_t lower = 0; lower < slot; lower++) {
-      if (batteries[lower] && ctx.can_interface != nullptr &&
-          battery_slot_context(lower).can_interface == ctx.can_interface) {
-        interface_in_use = true;
-      }
-    }
-    if (interface_in_use) {
-      DEBUG_PRINTF("Battery %u shares its CAN interface with a lower slot, not starting it!\n", slot + 1);
-      set_event(EVENT_BATTERY_INTERFACE_CONFLICT, slot + 1);
-      continue;
-    }
-
     Battery* created = create_battery(user_selected_battery_type, ctx);
     if (!created) {
       if (slot > 0) {

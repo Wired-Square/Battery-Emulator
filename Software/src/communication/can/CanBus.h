@@ -21,6 +21,19 @@ enum class CAN_Speed {
   CAN_SPEED_1000KBPS = 1000
 };
 
+enum class CanRole : uint8_t { Battery, Inverter, Charger, Shunt };
+
+enum class CanSpeedMode : uint8_t { Fixed, Variable };
+
+struct CanDemand {
+  CanReceiver* receiver;
+  CanRole role;
+  CAN_Speed speed;
+  CanSpeedMode mode;
+};
+
+enum class CanResolveError : uint8_t { None, Unresolved, SpeedConflict, VariableShared, MultipleBatteries };
+
 // Frame-log/event slots preserve the retired legacy interface numbering so
 // SavvyCAN logs and event data stay comparable across firmware versions.
 // Slot 1 (the retired CAN-FD-native alias) is deliberately unassigned: the
@@ -43,32 +56,59 @@ class CanBus {
   explicit CanBus(uint8_t log_id) : log_id_(log_id) {}
 
   bool init() {
+    resolution_ = resolve();
+    if (resolution_ != CanResolveError::None) {
+      return false;
+    }
     initialized_ = init_hw();
     return initialized_;
   }
   virtual void receive() = 0;
   virtual bool transmit_frame(const CAN_frame& frame) = 0;
-  virtual bool change_speed(CAN_Speed /*speed*/) { return false; }
-  virtual void stop() {}
-  virtual void restart() {}
+  bool change_speed(CAN_Speed speed) {
+    if (!initialized_ || stopped_) {
+      return false;
+    }
+    return retune_hw(speed);
+  }
+  void stop() {
+    if (!initialized_) {
+      return;
+    }
+    stopped_ = true;
+    stop_hw();
+  }
+  void restart() {
+    if (!initialized_ || !stopped_) {
+      return;
+    }
+    stopped_ = !restart_hw(speed_);
+  }
 
-  void register_receiver(CanReceiver* receiver, CAN_Speed receiver_speed);
-  bool has_receivers() const { return !receivers_.empty(); }
+  void register_receiver(CanReceiver* receiver, CanRole role, CAN_Speed speed,
+                         CanSpeedMode mode = CanSpeedMode::Fixed);
+  bool has_receivers() const { return !demands_.empty(); }
   bool initialized() const { return initialized_; }
+  CanResolveError resolution() const { return resolution_; }
   uint8_t log_id() const { return log_id_; }
   bool recently_received(uint32_t hold_ms) const;
 
  protected:
   virtual bool init_hw() = 0;
+  virtual bool retune_hw(CAN_Speed speed) = 0;
+  virtual void stop_hw() = 0;
+  virtual bool restart_hw(CAN_Speed speed) = 0;
   void dispatch_frame(CAN_frame& frame);
   CAN_Speed speed() const { return speed_; }
 
  private:
-  std::vector<CanReceiver*> receivers_;
-  // First registration wins.
-  CAN_Speed speed_ = CAN_Speed::CAN_SPEED_500KBPS;
+  CanResolveError resolve();
+  std::vector<CanDemand> demands_;
+  CAN_Speed speed_{};
+  CanResolveError resolution_ = CanResolveError::Unresolved;
   uint8_t log_id_;
   bool initialized_ = false;
+  bool stopped_ = false;
   uint32_t last_rx_ms_ = 0;
 };
 

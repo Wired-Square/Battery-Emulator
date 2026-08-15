@@ -5,6 +5,7 @@
 #include "src/devboard/hal/hal.h"
 #include "src/devboard/safety/safety.h"
 #include "src/devboard/sdcard/sdcard.h"
+#include "src/devboard/utils/events.h"
 #include "src/devboard/utils/logging.h"
 #include "src/devboard/webserver/webserver_can_streaming.h"
 
@@ -18,9 +19,10 @@ bool use_canfd2_as_can = false;
 //CAN logging filter settings
 uint16_t user_selected_CAN_ID_cutoff_filter = 0;  //Messages below this ID will not be logged in webserver
 
-void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface, CAN_Speed speed) {
+void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface, CanRole role, CAN_Speed speed,
+                           CanSpeedMode mode) {
   if (interface != nullptr && interface->can_bus != nullptr) {
-    interface->can_bus->register_receiver(receiver, speed);
+    interface->can_bus->register_receiver(receiver, role, speed, mode);
   }
 }
 
@@ -29,7 +31,9 @@ bool init_CAN() {
   for_each_unique_binding(esp32hal->interfaces(), &InterfaceDescriptor::can_bus, [&ok](CanBus* bus) {
     if (bus->has_receivers() && !bus->init()) {
       ok = false;
-      return false;
+      if (bus->resolution() != CanResolveError::None) {
+        set_event_latched(EVENT_CAN_CONFIG_INVALID, can_config_invalid_event_data(bus->log_id(), bus->resolution()));
+      }
     }
     return true;
   });
@@ -218,18 +222,14 @@ void dump_can_frame(CAN_frame& frame, const InterfaceDescriptor* interface, fram
 
 void stop_can() {
   for_each_unique_binding(esp32hal->interfaces(), &InterfaceDescriptor::can_bus, [](CanBus* bus) {
-    if (bus->initialized()) {
-      bus->stop();
-    }
+    bus->stop();
     return true;
   });
 }
 
 void restart_can() {
   for_each_unique_binding(esp32hal->interfaces(), &InterfaceDescriptor::can_bus, [](CanBus* bus) {
-    if (bus->initialized()) {
-      bus->restart();
-    }
+    bus->restart();
     return true;
   });
 }

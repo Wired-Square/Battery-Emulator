@@ -23,12 +23,12 @@ class NativeTwai : public CanBus {
       : CanBus(log_id), controller_(controller), pins_(pins) {}
   void receive() override;
   bool transmit_frame(const CAN_frame& frame) override;
-  bool change_speed(CAN_Speed new_speed) override;
-  void stop() override;
-  void restart() override;
 
  protected:
   bool init_hw() override;
+  bool retune_hw(CAN_Speed new_speed) override;
+  void stop_hw() override;
+  bool restart_hw(CAN_Speed new_speed) override;
 
  private:
   uint32_t begin_driver(CAN_Speed new_speed, gpio_num_t tx_pin, gpio_num_t rx_pin);

@@ -40,14 +40,16 @@ class Mcp2517fd : public CanBus {
         slot_(slot) {}
   void receive() override;
   bool transmit_frame(const CAN_frame& frame) override;
-  void stop() override;
-  void restart() override;
   void run_driver_isr();
 
  protected:
   bool init_hw() override;
+  bool retune_hw(CAN_Speed new_speed) override;
+  void stop_hw() override;
+  bool restart_hw(CAN_Speed new_speed) override;
 
  private:
+  bool begin_at(CAN_Speed new_speed);
   ACAN2517FD* driver_ = nullptr;
   ACAN2517FDSettings* settings_ = nullptr;
   uint8_t spi_bus_;

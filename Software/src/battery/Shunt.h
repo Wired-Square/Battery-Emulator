@@ -33,7 +33,7 @@ class CanShunt : public Transmitter, CanReceiver {
   CanShunt() {
     can_interface = can_config.shunt;
     register_transmitter(this);
-    register_can_receiver(this, can_interface);
+    register_can_receiver(this, can_interface, CanRole::Shunt, CAN_Speed::CAN_SPEED_500KBPS);
   }
 
   void transmit_can_frame(CAN_frame* frame) { transmit_can_frame_to_interface(frame, can_interface); }

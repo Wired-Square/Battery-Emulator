@@ -1,18 +1,9 @@
 #include "CanBattery.h"
 
-CanBattery::CanBattery(CAN_Speed speed) : CanBattery(can_config.battery, speed) {}
+CanBattery::CanBattery(CAN_Speed speed, CanSpeedMode mode) : CanBattery(can_config.battery, speed, mode) {}
 
-CanBattery::CanBattery(const InterfaceDescriptor* interface, CAN_Speed speed) {
+CanBattery::CanBattery(const InterfaceDescriptor* interface, CAN_Speed speed, CanSpeedMode mode) {
   can_interface = interface;
-  initial_speed = speed;
   register_transmitter(this);
-  register_can_receiver(this, can_interface, speed);
-}
-
-bool CanBattery::change_can_speed(CAN_Speed speed) {
-  return ::change_can_speed(can_interface, speed);
-}
-
-void CanBattery::reset_can_speed() {
-  ::change_can_speed(can_interface, initial_speed);
+  register_can_receiver(this, can_interface, CanRole::Battery, speed, mode);
 }

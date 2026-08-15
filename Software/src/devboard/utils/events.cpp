@@ -163,7 +163,7 @@ void init_events(void) {
   events.entries[EVENT_CAN_BATTERY_MISSING].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_CAN_BATTERY2_MISSING].level = EVENT_LEVEL_WARNING;
   events.entries[EVENT_CAN_BATTERY3_MISSING].level = EVENT_LEVEL_WARNING;
-  events.entries[EVENT_BATTERY_INTERFACE_CONFLICT].level = EVENT_LEVEL_WARNING;
+  events.entries[EVENT_CAN_CONFIG_INVALID].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_BATTERY_INTERFACE_UNSUPPORTED].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_BATTERY_SLOT_UNSUPPORTED].level = EVENT_LEVEL_WARNING;
   events.entries[EVENT_CAN_CHARGER_MISSING].level = EVENT_LEVEL_INFO;
@@ -359,9 +359,9 @@ String get_event_message_string(EVENTS_ENUM_TYPE event) {
       return "Secondary battery not sending messages via CAN for the last 60 seconds. Check wiring!";
     case EVENT_CAN_BATTERY3_MISSING:
       return "Third battery not sending messages via CAN for the last 60 seconds. Check wiring!";
-    case EVENT_BATTERY_INTERFACE_CONFLICT:
-      return "Extra battery not started: it is configured on the same CAN interface as a lower-numbered battery. "
-             "Assign each battery its own interface.";
+    case EVENT_CAN_CONFIG_INVALID:
+      return "A CAN interface was not started: the devices assigned to it need incompatible bus speeds, or more than "
+             "one battery shares it. Give each battery its own interface and matching speeds, then reboot.";
     case EVENT_BATTERY_INTERFACE_UNSUPPORTED:
       return "Battery not started: the selected battery type needs a bus the assigned interface does not provide. "
              "Assign a suitable interface, or select a battery type this hardware supports.";

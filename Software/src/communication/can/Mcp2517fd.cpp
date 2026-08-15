@@ -110,11 +110,24 @@ bool Mcp2517fd::init_hw() {
     logging.println("CAN FD add-on 2 (ESP32+MCP2517) selected");
   }
 
+  isr_ = claim_isr_slot(this);
+  if (isr_ == nullptr) {
+    return false;
+  }
+
+  return begin_at(speed());
+}
+
+bool Mcp2517fd::begin_at(CAN_Speed new_speed) {
+  if (settings_ != nullptr) {
+    delete settings_;
+  }
+
   ACAN2517FDSettings::Oscillator osc_freq =
       (osc_hz_ == MCP2517_OSC_AUTODETECT
            ? ACAN2517FDSettings::OSC_AUTODETECT
            : (osc_hz_ == MCP2517_OSC_20MHZ ? ACAN2517FDSettings::OSC_20MHz : ACAN2517FDSettings::OSC_40MHz));
-  auto bitRate = (int)speed() * 1000UL;
+  auto bitRate = (int)new_speed * 1000UL;
   settings_ = new ACAN2517FDSettings(osc_freq, bitRate, DataBitRateFactor::x4);
 
   if (clkodiv_ != MCP2517_CLKODIV_UNSET) {
@@ -124,11 +137,6 @@ bool Mcp2517fd::init_hw() {
 
   const bool as_can = slot_ == Mcp2517fdSettingsSlot::Fd1 ? use_canfd_as_can : use_canfd2_as_can;
   settings_->mRequestedMode = as_can ? ACAN2517FDSettings::Normal20B : ACAN2517FDSettings::NormalFD;
-
-  isr_ = claim_isr_slot(this);
-  if (isr_ == nullptr) {
-    return false;
-  }
 
   const uint32_t errorCode = driver_->begin(*settings_, isr_);
   driver_->poll();
@@ -143,6 +151,11 @@ bool Mcp2517fd::init_hw() {
     return false;
   }
   return true;
+}
+
+bool Mcp2517fd::retune_hw(CAN_Speed new_speed) {
+  driver_->end();
+  return begin_at(new_speed);
 }
 
 void Mcp2517fd::receive() {
@@ -181,15 +194,10 @@ bool Mcp2517fd::transmit_frame(const CAN_frame& tx_frame) {
   return true;
 }
 
-void Mcp2517fd::stop() {
-  if (driver_ != nullptr) {
-    driver_->end();
-  }
+void Mcp2517fd::stop_hw() {
+  driver_->end();
 }
 
-void Mcp2517fd::restart() {
-  if (driver_ != nullptr && settings_ != nullptr) {
-    driver_->begin(*settings_, isr_);
-    driver_->poll();
-  }
+bool Mcp2517fd::restart_hw(CAN_Speed new_speed) {
+  return begin_at(new_speed);
 }

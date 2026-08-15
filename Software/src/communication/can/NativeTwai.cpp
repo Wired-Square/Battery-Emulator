@@ -143,10 +143,7 @@ bool NativeTwai::transmit_frame(const CAN_frame& tx_frame) {
   return true;
 }
 
-bool NativeTwai::change_speed(CAN_Speed new_speed) {
-  if (settings_ == nullptr) {
-    return false;
-  }
+bool NativeTwai::retune_hw(CAN_Speed new_speed) {
   // Pin args are read before begin_driver replaces settings_.
   const uint32_t errorCode = begin_driver(new_speed, settings_->mTxPin, settings_->mRxPin);
   if (errorCode != 0) {
@@ -159,12 +156,10 @@ bool NativeTwai::change_speed(CAN_Speed new_speed) {
   return true;
 }
 
-void NativeTwai::stop() {
+void NativeTwai::stop_hw() {
   wiring_for(controller_).driver->end();
 }
 
-void NativeTwai::restart() {
-  if (settings_ != nullptr) {
-    wiring_for(controller_).driver->begin(*settings_);
-  }
+bool NativeTwai::restart_hw(CAN_Speed new_speed) {
+  return retune_hw(new_speed);
 }

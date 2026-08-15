@@ -26,12 +26,12 @@ class Mcp2515 : public CanBus {
       : CanBus(log_id), spi_bus_(spi_bus), pin_owner_(pin_owner), pins_(pins), quartz_frequency_(quartz_hz) {}
   void receive() override;
   bool transmit_frame(const CAN_frame& frame) override;
-  bool change_speed(CAN_Speed new_speed) override;
-  void stop() override;
-  void restart() override;
 
  protected:
   bool init_hw() override;
+  bool retune_hw(CAN_Speed new_speed) override;
+  void stop_hw() override;
+  bool restart_hw(CAN_Speed new_speed) override;
 
  private:
   MCP2515_Lite* driver_ = nullptr;

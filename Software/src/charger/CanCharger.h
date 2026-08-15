@@ -64,7 +64,7 @@ class CanCharger : public Charger, Transmitter, CanReceiver {
   CanCharger(ChargerType type) : Charger(type) {
     can_interface = can_config.charger;
     register_transmitter(this);
-    register_can_receiver(this, can_interface);
+    register_can_receiver(this, can_interface, CanRole::Charger, CAN_Speed::CAN_SPEED_500KBPS);
   }
 
   void transmit_can_frame(CAN_frame* frame) { transmit_can_frame_to_interface(frame, can_interface); }

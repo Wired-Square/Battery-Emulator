@@ -69,22 +69,17 @@ bool Mcp2515::transmit_frame(const CAN_frame& tx_frame) {
   return true;
 }
 
-bool Mcp2515::change_speed(CAN_Speed new_speed) {
-  if (driver_ == nullptr) {
-    return false;
-  }
+bool Mcp2515::retune_hw(CAN_Speed new_speed) {
   driver_->changeSpeed({(int)new_speed * 1000UL, quartz_frequency_});
   return true;
 }
 
-void Mcp2515::stop() {
-  if (driver_ != nullptr) {
-    driver_->pause(true);
-  }
+void Mcp2515::stop_hw() {
+  driver_->pause(true);
 }
 
-void Mcp2515::restart() {
-  if (driver_ != nullptr) {
-    driver_->pause(false);
-  }
+bool Mcp2515::restart_hw(CAN_Speed new_speed) {
+  driver_->pause(false);
+  driver_->changeSpeed({(int)new_speed * 1000UL, quartz_frequency_});
+  return true;
 }

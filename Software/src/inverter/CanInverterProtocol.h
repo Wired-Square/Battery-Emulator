@@ -31,7 +31,7 @@ class CanInverterProtocol : public InverterProtocol, Transmitter, CanReceiver {
   explicit CanInverterProtocol(CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS) {
     can_interface = can_config.inverter;
     register_transmitter(this);
-    register_can_receiver(this, can_interface, speed);
+    register_can_receiver(this, can_interface, CanRole::Inverter, speed);
     logging.print("Requesting ");
     logging.print((uint32_t)speed);
     logging.print(" kbps for inverter CAN interface (");

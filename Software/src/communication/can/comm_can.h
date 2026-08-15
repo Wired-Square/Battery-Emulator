@@ -34,10 +34,13 @@ typedef struct {
 
 extern volatile CAN_Configuration can_config;
 
-// Register a receiver for the given interface. The bus is initialised at the
-// first-registered receiver's speed.
-void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface,
-                           CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS);
+void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface, CanRole role, CAN_Speed speed,
+                           CanSpeedMode mode = CanSpeedMode::Fixed);
+
+inline constexpr uint8_t CAN_CONFIG_EVENT_BUS_SHIFT = 4;
+constexpr uint8_t can_config_invalid_event_data(uint8_t log_id, CanResolveError reason) {
+  return static_cast<uint8_t>(log_id << CAN_CONFIG_EVENT_BUS_SHIFT) | static_cast<uint8_t>(reason);
+}
 
 // Event-data byte for interface-scoped events; preserves the legacy
 // interface numbering via the bus log id.
