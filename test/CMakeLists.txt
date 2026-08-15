@@ -92,6 +92,7 @@ add_executable(tests
     millis_wrap_tests.cpp
     estop_graceful_open_tests.cpp
     contactor_sequence_tests.cpp
+    precharge_control_tests.cpp
     hal_interface_tests.cpp
     interface_descriptor_tests.cpp
     can_bus_tests.cpp
@@ -123,6 +124,7 @@ add_executable(tests
     ../Software/src/lib/tca9538/tca9538.cpp
     ../Software/src/lib/vn9dxxxxxx/vn9dxxxxxx.cpp
     ../Software/src/communication/contactorcontrol/comm_contactorcontrol.cpp
+    ../Software/src/communication/precharge_control/precharge_control.cpp
     ../Software/src/communication/rs485/comm_rs485.cpp
     ../Software/src/communication/rs485/Rs485Port.cpp
     ../Software/src/devboard/safety/safety.cpp

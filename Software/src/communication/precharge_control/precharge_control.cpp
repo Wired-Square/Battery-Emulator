@@ -5,7 +5,7 @@
 #include "../../devboard/hal/GpioOutput.h"
 #include "../../devboard/hal/PwmTone.h"
 #include "../../devboard/hal/hal.h"
-#include "src/battery/BATTERIES.h"
+#include "../../battery/BATTERIES.h"
 
 // Parameters adjustable by user in Settings page
 bool precharge_control_enabled = false;
@@ -69,7 +69,7 @@ void handle_precharge_control(unsigned long currentMillis) {
   }
 
   // If we are running in test mode (No battery configured, enable precharge sequence so user can test HW)
-  if (batteries[0] == nullptr) {
+  if (user_selected_battery_type == BatteryType::None) {
     datalayer.system.info.start_precharging = true;
     datalayer.battery.pack[0].status.real_bms_status = BMS_STANDBY;
   }
@@ -79,7 +79,8 @@ void handle_precharge_control(unsigned long currentMillis) {
 
   switch (datalayer.system.status.precharge_status) {
     case AUTO_PRECHARGE_IDLE:
-      if (datalayer.system.info.start_precharging && datalayer.system.status.inverter_allows_contactor_closing) {
+      if (datalayer.system.info.start_precharging && datalayer.system.status.system_status == ACTIVE &&
+          datalayer.system.status.inverter_allows_contactor_closing) {
         datalayer.system.status.precharge_status = AUTO_PRECHARGE_START;
       }
       break;

@@ -126,6 +126,31 @@ TEST_F(ContactorSequenceTest, StaysDisconnectedWhileEquipmentStopIsActive) {
   EXPECT_EQ(datalayer.system.status.contactors_engaged, kEngagedNone);
 }
 
+TEST_F(ContactorSequenceTest, StaysDisconnectedWhileSystemIsNotActive) {
+  datalayer.system.status.system_status = FAULT;
+
+  tick_at(kBootMs);
+
+  EXPECT_EQ(contactorStatus, ContactorState::DISCONNECTED)
+      << "a faulted system must not enter the closing ladder even before the shutdown latch trips";
+  EXPECT_EQ(datalayer.system.status.contactors_engaged, kEngagedNone);
+}
+
+TEST_F(ContactorSequenceTest, FaultLatchedAtBootCannotRaceTheStartupGate) {
+  datalayer.system.status.system_status = FAULT;
+
+  for (unsigned long t = 0; t <= INTERVAL_10_S + 2000; t += 10) {
+    tick_at(t);
+    ASSERT_TRUE(contactorStatus == ContactorState::DISCONNECTED ||
+                contactorStatus == ContactorState::SHUTDOWN_REQUESTED)
+        << "at t=" << t
+        << " the ladder engaged: the 10 s startup gate and MAX_ALLOWED_FAULT_TICKS expire together, leaving a "
+           "tick-sized window unless DISCONNECTED itself refuses a faulted system";
+  }
+
+  EXPECT_EQ(contactorStatus, ContactorState::SHUTDOWN_REQUESTED);
+}
+
 // The DISCONNECTED check and the ladder's switch both run in the same pass, so
 // permission being granted closes the negative contactor on that very tick -
 // START_PRECHARGE is never observable from outside. Pinned because it means

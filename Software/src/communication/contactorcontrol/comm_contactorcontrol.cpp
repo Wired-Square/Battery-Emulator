@@ -208,7 +208,8 @@ void handle_contactors() {
       set_indicator_led(IndicatorLed::CONTACTOR_POS, false);
       datalayer.system.status.contactors_engaged = 0;
 
-      if (datalayer.system.status.inverter_allows_contactor_closing && !datalayer.system.info.equipment_stop_active) {
+      if (datalayer.system.status.system_status == ACTIVE &&
+          datalayer.system.status.inverter_allows_contactor_closing && !datalayer.system.info.equipment_stop_active) {
         contactorStatus = ContactorState::START_PRECHARGE;
       }
     }
