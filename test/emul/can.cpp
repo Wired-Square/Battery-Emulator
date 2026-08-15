@@ -19,7 +19,11 @@ void transmit_can_frame_to_interface(const CAN_frame* tx_frame, const InterfaceD
   g_recorded.push_back(*tx_frame);
 }
 
-void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface, CAN_Speed speed) {}
+void register_can_receiver(CanReceiver* receiver, const InterfaceDescriptor* interface, CAN_Speed speed) {
+  if (interface != nullptr && interface->can_bus != nullptr) {
+    interface->can_bus->register_receiver(receiver, speed);
+  }
+}
 
 bool change_can_speed(const InterfaceDescriptor* interface, CAN_Speed speed) {
   return true;

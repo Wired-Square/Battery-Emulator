@@ -8,8 +8,9 @@
 class RjxzsBms : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }
-  RjxzsBms(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
-  RjxzsBms() : CanBattery(CAN_Speed::CAN_SPEED_250KBPS) {}
+  RjxzsBms(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface, CAN_Speed::CAN_SPEED_250KBPS) {
+    datalayer_battery = ctx.datalayer;
+  }
 
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);

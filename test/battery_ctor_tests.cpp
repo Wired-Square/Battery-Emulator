@@ -33,6 +33,40 @@ class BatteryCtorTest : public testing::Test {
   BatteryType saved_type_;
 };
 
+namespace {
+
+class SpeedProbeBus : public CanBus {
+ public:
+  SpeedProbeBus() : CanBus(CAN_LOG_ID_NONE) {}
+  void receive() override {}
+  bool transmit_frame(const CAN_frame&) override { return true; }
+  CAN_Speed requested_speed() { return speed(); }
+
+ protected:
+  bool init_hw() override { return true; }
+};
+
+template <typename T>
+CAN_Speed speed_registered_by() {
+  SpeedProbeBus bus;
+  const InterfaceDescriptor iface{InterfaceType::CanNative, "probe", comm_interface::Highest, &bus};
+  const BatterySlotContext ctx{0, &datalayer.battery.pack[0], nullptr, &iface, GPIO_NUM_NC};
+  T driver(ctx);
+  return bus.requested_speed();
+}
+
+}  // namespace
+
+TEST_F(BatteryCtorTest, SlotContextConstructorsKeepTheirDeclaredBusSpeed) {
+  EXPECT_EQ(speed_registered_by<RjxzsBms>(), CAN_Speed::CAN_SPEED_250KBPS)
+      << "RJXZS is a 250k protocol; a slot-context ctor that omits the speed silently runs it at the 500k default";
+  EXPECT_EQ(speed_registered_by<CellPowerBms>(), CAN_Speed::CAN_SPEED_250KBPS)
+      << "Cellpower is a 250k protocol; a slot-context ctor that omits the speed silently runs it at the 500k default";
+  EXPECT_EQ(speed_registered_by<RelionBattery>(), CAN_Speed::CAN_SPEED_250KBPS);
+  EXPECT_EQ(speed_registered_by<EcmpBattery>(), CAN_Speed::CAN_SPEED_500KBPS)
+      << "a driver with no speed of its own must still land on the 500k default";
+}
+
 TEST_F(BatteryCtorTest, EcmpBindsSlotDatalayer) {
   auto* primary = new EcmpBattery(battery_slot_context(0));
   ASSERT_NE(primary, nullptr);
