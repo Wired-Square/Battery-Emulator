@@ -311,12 +311,10 @@ void setup_battery() {
     }
 
     batteries[slot] = created;
+    auto& slot_name = datalayer.battery_slot(slot).info.battery_name;
+    strncpy(slot_name, name_for_battery_type(type), sizeof(slot_name) - 1);
+    slot_name[sizeof(slot_name) - 1] = '\0';
     created->setup();
-    if (slot == 0) {
-      strncpy(datalayer.system.info.battery_protocol, name_for_battery_type(type),
-              sizeof(datalayer.system.info.battery_protocol) - 1);
-      datalayer.system.info.battery_protocol[sizeof(datalayer.system.info.battery_protocol) - 1] = '\0';
-    }
   }
 }
 

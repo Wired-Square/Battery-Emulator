@@ -54,6 +54,8 @@ struct DATALAYER_BATTERY_INFO_TYPE {
   /** Other */
   /** Chemistry of the pack. Autodetect, or force specific chemistry */
   battery_chemistry_enum chemistry = battery_chemistry_enum::NCA;
+
+  char battery_name[64] = {0};
 };
 
 struct DATALAYER_BATTERY_STATUS_TYPE {
@@ -314,8 +316,6 @@ struct DATALAYER_SHUNT_TYPE {
 struct DATALAYER_SYSTEM_INFO_TYPE {
   /** array with incoming CAN messages, for displaying on webserver */
   char logged_can_messages[15000] = {0};
-  /** array with type of battery used, for displaying on webserver */
-  char battery_protocol[64] = {0};
   /** array with type of battery used, for displaying on webserver */
   char shunt_protocol[32] = {0};
   /** array with type of inverter brand used, for displaying on webserver */

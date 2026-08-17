@@ -142,6 +142,7 @@ TEST_F(BatteryCtorTest, TeslaBindsSlotDatalayer) {
   // Pin the setup() branch (3Y/NCMA pack-voltage table) so the expected
   // value isn't order-dependent on other tests mutating these globals.
   user_selected_battery_types[0] = BatteryType::TeslaModel3Y;
+  user_selected_battery_types[1] = BatteryType::TeslaModel3Y;
   datalayer.battery.pack[0].info.chemistry = battery_chemistry_enum::NCA;
   datalayer.battery.pack[1].info.chemistry = battery_chemistry_enum::NCA;
   constexpr uint16_t kExpectedMaxDesignVoltageDv3YNcma = 4030;
@@ -561,7 +562,7 @@ static void expect_protocol_after_setup(BatteryType type, const char* expected) 
   setup_battery();
 
   ASSERT_NE(batteries[0], nullptr);
-  EXPECT_STREQ(datalayer.system.info.battery_protocol, expected)
+  EXPECT_STREQ(datalayer.battery.pack[0].info.battery_name, expected)
       << "the name the dashboard shows must be the one the settings list offers";
 
   delete batteries[0];
@@ -582,6 +583,73 @@ TEST(SetupBatteryNameTest, ChargebyteReportsItsRegisteredName) {
   expect_protocol_after_setup(BatteryType::ChargebyteCCSBattery, ChargebyteCCSBattery::Name);
 }
 #endif
+
+TEST(SetupBatteryNameTest, HeterogeneousSlotsCarryTheirOwnNames) {
+  init_hal();
+  SavedSlotTypes saved_types;
+  Battery* saved_battery = batteries[0];
+  Battery* saved_battery2 = batteries[1];
+  DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
+  DATALAYER_BATTERY_TYPE saved_datalayer_battery2 = datalayer.battery.pack[1];
+  DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
+
+  batteries[0] = nullptr;
+  batteries[1] = nullptr;
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
+  user_selected_battery_types[1] = BatteryType::BmwI3;
+  user_selected_battery_types[2] = BatteryType::None;
+
+  setup_battery();
+
+  ASSERT_NE(batteries[0], nullptr);
+  ASSERT_NE(batteries[1], nullptr);
+  EXPECT_STREQ(datalayer.battery.pack[0].info.battery_name, name_for_battery_type(BatteryType::NissanLeaf));
+  EXPECT_STREQ(datalayer.battery.pack[1].info.battery_name, name_for_battery_type(BatteryType::BmwI3))
+      << "each slot names its own pack; a system-scoped name could only describe one of them";
+
+  delete batteries[0];
+  delete batteries[1];
+  batteries[0] = saved_battery;
+  batteries[1] = saved_battery2;
+  datalayer.battery.pack[0] = saved_datalayer_battery;
+  datalayer.battery.pack[1] = saved_datalayer_battery2;
+  datalayer.system.status = saved_status;
+}
+
+TEST(SetupBatteryNameTest, NonPrimaryLeafNamesItsOwnSlot) {
+  init_hal();
+  SavedSlotTypes saved_types;
+  Battery* saved_battery = batteries[0];
+  Battery* saved_battery2 = batteries[1];
+  DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
+  DATALAYER_BATTERY_TYPE saved_datalayer_battery2 = datalayer.battery.pack[1];
+  DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
+
+  batteries[0] = nullptr;
+  batteries[1] = nullptr;
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
+  user_selected_battery_types[1] = BatteryType::NissanLeaf;
+  user_selected_battery_types[2] = BatteryType::None;
+
+  setup_battery();
+  ASSERT_NE(batteries[1], nullptr);
+  EXPECT_STREQ(datalayer.battery.pack[1].info.battery_name, name_for_battery_type(BatteryType::NissanLeaf))
+      << "the non-primary LEAF has no extended block, so its name must come from the registry in the slot loop";
+
+  batteries[1]->update_values();
+  EXPECT_STREQ(datalayer.battery.pack[1].info.battery_name, "Nissan LEAF ZE0")
+      << "generation refinement writes the driver's own slot, not a system-scoped field";
+  EXPECT_STREQ(datalayer.battery.pack[0].info.battery_name, name_for_battery_type(BatteryType::NissanLeaf))
+      << "the secondary's refinement must not leak into the primary's slot";
+
+  delete batteries[0];
+  delete batteries[1];
+  batteries[0] = saved_battery;
+  batteries[1] = saved_battery2;
+  datalayer.battery.pack[0] = saved_datalayer_battery;
+  datalayer.battery.pack[1] = saved_datalayer_battery2;
+  datalayer.system.status = saved_status;
+}
 
 TEST(BatteryRegistryCharacterization, NamePresenceMatchesValidIds) {
   for (int i = 0; i < static_cast<int>(BatteryType::Highest); i++) {

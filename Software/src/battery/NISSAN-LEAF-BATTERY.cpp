@@ -271,16 +271,15 @@ void NissanLeafBattery::
     }
   }
 
+  static const char LEAF_gen_name[3][5] = {"ZE0", "AZE0", "ZE1"};
+  snprintf(datalayer_battery->info.battery_name, sizeof(datalayer_battery->info.battery_name), "Nissan LEAF %s",
+           LEAF_gen_name[LEAF_battery_Type]);
+
   // Update webserver datalayer
   if (datalayer_nissan) {
     memcpy(datalayer_nissan->BatterySerialNumber, BatterySerialNumber, sizeof(BatterySerialNumber));
     memcpy(datalayer_nissan->BatteryPartNumber, BatteryPartNumber, sizeof(BatteryPartNumber));
     datalayer_nissan->LEAF_gen = LEAF_battery_Type;
-    if (allows_contactor_closing) {  //Only the main battery names the protocol shown on the status page
-      static const char LEAF_gen_name[3][5] = {"ZE0", "AZE0", "ZE1"};
-      snprintf(datalayer.system.info.battery_protocol, sizeof(datalayer.system.info.battery_protocol),
-               "Nissan LEAF %s", LEAF_gen_name[LEAF_battery_Type]);
-    }
     datalayer_nissan->GIDS = battery_GIDS;
     datalayer_nissan->ChargePowerLimit = battery_Charge_Power_Limit;
     datalayer_nissan->MaxPowerForCharger = battery_MAX_POWER_FOR_CHARGER;

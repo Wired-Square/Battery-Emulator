@@ -1024,8 +1024,8 @@ String state_json() {
 
   const DATALAYER_BATTERY_STATUS_TYPE& battery_status = datalayer.battery.combined.status;
   JsonObject battery = doc["battery"].to<JsonObject>();
-  if (datalayer.system.info.battery_protocol[0] != '\0') {
-    battery["name"] = datalayer.system.info.battery_protocol;
+  if (datalayer.battery.pack[0].info.battery_name[0] != '\0') {
+    battery["name"] = datalayer.battery.pack[0].info.battery_name;
   }
   battery["soc"] = battery_status.reported_soc / PPTT_PER_PERCENT;
   battery["soc_real"] = battery_status.real_soc / PPTT_PER_PERCENT;
