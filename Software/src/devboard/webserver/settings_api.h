@@ -68,13 +68,13 @@ struct SettingsApplyResult {
 
 // Applies a POSTed settings document back to NVS through kSettingFields (the same
 // descriptors build_settings_json reads, so the two directions cannot drift). root
-// carries "values" (scalar map) and optional "dynamic" (termination + load switch).
-// A field absent from "values" — or present as JSON null — is preserved, never
-// wiped. The nothing-written-on-wrong-type guarantee is scalar-table-scoped: any
-// wrong-type scalar rejects the whole values pass with ok=false. The dynamic
-// section applies valid entries best-effort per entry (presence-gated, bounds-
-// checked, type-skipped), matching the legacy handler; it is not atomic with the
-// scalar pass.
+// carries "values" (scalar map) and optional "dynamic" (batteries + termination +
+// load switch). A field absent from "values" — or present as JSON null — is
+// preserved, never wiped. Wrong-type scalars and any invalid batteries entry
+// (bad slot, disallowed type, empty primary with occupied extras) reject the
+// whole POST before anything is written; termination and load-switch entries
+// apply best-effort per entry (presence-gated, bounds-checked, type-skipped),
+// matching the legacy handler, and are not atomic with the scalar pass.
 SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, JsonObjectConst root);
 
 // Returns nullptr when every present field is well-formed and in range, else

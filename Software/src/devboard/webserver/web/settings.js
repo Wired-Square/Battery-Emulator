@@ -79,18 +79,12 @@ const LABELS = {
   HTTPPASSCONFIRM: 'Repeat web interface password',
   SSID: 'SSID',
   PASSWORD: 'Password',
-  battery: 'Battery',
   BATTCHEM: 'Battery chemistry',
-  BATTCOMM: 'Battery interface',
   BATTPVMAX: 'Battery max design voltage (V)',
   BATTPVMIN: 'Battery min design voltage (V)',
   BATTCVMAX: 'Cell max design voltage (mV)',
   BATTCVMIN: 'Cell min design voltage (mV)',
   PYLONBAUD: 'Pylon CAN baudrate (kbps)',
-  battery2: 'Battery 2',
-  BATT2COMM: 'Battery 2 interface',
-  battery3: 'Battery 3',
-  BATT3COMM: 'Battery 3 interface',
   INTERLOCKREQ: 'Interlock required',
   SOCESTIMATED: 'Use estimated SOC',
   DALYPWRPCT: 'Power limit per percent SOC above 80 / below 20 (W/pct)',
@@ -145,9 +139,6 @@ const LABELS = {
   CANFDASCAN: 'Use CanFD as classic CAN',
   CANFD2ASCAN: 'Use CanFD2 as classic CAN',
   EQSTOP: 'Equipment stop button',
-  CNTCTRL: 'Contactor control via GPIO',
-  CNTCTRLDBL: 'Double-Battery Contactor control via GPIO',
-  CNTCTRLTRI: 'Triple-Battery Contactor control via GPIO',
   PRECHGMS: 'Precharge time ms',
   NCCONTACTOR: 'Use Normally Closed logic',
   PWMCNTCTRL: 'PWM contactor control',
@@ -264,7 +255,6 @@ const inList = (list, value) => list.includes(Number(value));
 
 // Value-driven show/hide; board-gated absence is already handled by the schema.
 const VISIBILITY = {
-  BATTCOMM: (s) => Number(s.battery) !== 0,
   BATTCHEM: (s) => Number(s.battery) !== 0,
   PYLONBAUD: (s) => inList(BAT.PYLON, s.battery),
   BATTPVMAX: (s) => inList(BAT.CBMS, s.battery),
@@ -288,9 +278,6 @@ const VISIBILITY = {
   RAMPDOWNSOC: (s) => inList(BAT.ESTIMATED, s.battery),
   SOCESTIMATED: (s) => inList(BAT.SOCEST, s.battery),
   CHGESTIMATED: (s) => inList(BAT.CHGEST, s.battery),
-  BATT2COMM: (s) => Number(s.battery2) !== 0,
-  battery3: (s) => Number(s.battery2) !== 0 || Number(s.battery3) !== 0,
-  BATT3COMM: (s) => Number(s.battery3) !== 0,
   SOFAR_ID: (s) => inList(INV.SOFAR, s.inverter),
   INVCOMM: (s) => Number(s.inverter) !== 0,
   LOWPASSFILTER: (s) => Number(s.inverter) !== 0,
@@ -322,8 +309,6 @@ const VISIBILITY = {
   CTANOM: (s) => Number(s.shunttype) === SHUNT_CTCLAMP,
   CTATTEN: (s) => Number(s.shunttype) === SHUNT_CTCLAMP,
   CTINVERT: (s) => Number(s.shunttype) === SHUNT_CTCLAMP,
-  CNTCTRLDBL: (s) => Number(s.battery2) !== 0,
-  CNTCTRLTRI: (s) => Number(s.battery3) !== 0,
   PRECHGMS: (s) => s.CNTCTRL === true,
   NCCONTACTOR: (s) => s.CNTCTRL === true,
   PWMCNTCTRL: (s) => s.CNTCTRL === true,
@@ -365,6 +350,9 @@ const labelFor = (field) => field.label ?? LABELS[field.key] ?? prettify(field.k
 const LIVE_CATEGORY = 'live';
 
 const DYNAMIC_CATEGORY = 'hardware';
+const BATTERY_CATEGORY = 'battery';
+const BATTERIES_TITLE = 'Batteries';
+const MAX_BATTERY_SLOTS = 3;
 const TERMINATION_TITLE = 'Bus termination';
 const LOAD_SWITCH_TITLE = 'Load switch';
 const LOAD_SWITCH_NOTE = 'Role changes take effect after reboot; duty and divisor apply immediately on save.';
@@ -479,7 +467,7 @@ let saveBarEl = null;
 let saveErrorEl = null;
 let editcards = null;
 let editcardsError = false;
-let dynamicState = { termination: null, loadswitch: null };
+let dynamicState = { termination: null, loadswitch: null, batteries: null };
 let liveErrors = {};
 let dynamicSnapshot = 'null';
 let activeCategory = CATEGORIES[0][0];
@@ -611,6 +599,7 @@ function onControlChange(field, ctrl) {
 
 function buildPanel() {
   const panel = el('div', 'settings-panel');
+  if (activeCategory === BATTERY_CATEGORY && dynamicState.batteries) panel.append(buildBatteriesSection());
   (data.schema ?? [])
     .filter((field) => field.category === activeCategory)
     .forEach((field) => {
@@ -653,6 +642,57 @@ function dynNumberRow(label, current, onSet) {
   });
   row.append(el('label', null, label), input);
   return row;
+}
+
+function syncBatteryShim() {
+  const primary = dynamicState.batteries?.find((b) => b.slot === 0);
+  if (!primary) return;
+  state.battery = primary.type;
+  state.CNTCTRL = primary.contactor_control;
+}
+
+function onBatterySlotChange() {
+  syncBatteryShim();
+  const panel = root.querySelector('.settings-panel');
+  const existing = panel?.querySelector('[data-section="batteries"]');
+  if (existing) existing.replaceWith(buildBatteriesSection());
+  if (panel) applyVisibility(panel);
+  refreshSaveBar();
+}
+
+function buildBatteriesSection() {
+  const wrap = el('div', 'settings-subsection');
+  wrap.dataset.section = 'batteries';
+  wrap.append(el('h3', null, BATTERIES_TITLE));
+  const types = data.options?.battery ?? [];
+  const interfaces = (data.interfaces ?? []).map((iface) => ({ v: iface.id, n: iface.name }));
+  dynamicState.batteries.forEach((b, i) => {
+    const prev = i > 0 ? dynamicState.batteries[i - 1] : null;
+    if (i > 0 && b.type === 0 && (!prev || prev.type === 0)) return;
+    const card = el('div', 'settings-channel-config');
+    card.append(el('h4', null, `Battery ${b.slot + 1}`));
+    const slotTypes = types.filter((t) => t.v === 0 || (t.s ?? MAX_BATTERY_SLOTS) > b.slot);
+    card.append(dynSelectRow('Type', slotTypes, b.type, (v) => {
+      b.type = v;
+      if (v === 0) b.contactor_control = false;
+      onBatterySlotChange();
+    }));
+    if (b.type !== 0) {
+      if (interfaces.length) card.append(dynSelectRow('Interface', interfaces, b.comm, (v) => { b.comm = v; }));
+      const row = el('div', 'field');
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.checked = b.contactor_control === true;
+      cb.addEventListener('change', () => {
+        b.contactor_control = cb.checked;
+        onBatterySlotChange();
+      });
+      row.append(el('label', null, 'Contactor control via GPIO'), cb);
+      card.append(row);
+    }
+    wrap.append(card);
+  });
+  return wrap;
 }
 
 function buildTerminationSection() {
@@ -699,7 +739,15 @@ function appendDynamicControls(panel) {
 
 // Keeps the render-only `name`; buildDynamic drops it back to the shapes apply_settings_json expects.
 function seedDynamic(dyn) {
-  dynamicState = { termination: null, loadswitch: null };
+  dynamicState = { termination: null, loadswitch: null, batteries: null };
+  if (Array.isArray(dyn?.batteries)) {
+    dynamicState.batteries = dyn.batteries.map((b) => ({
+      slot: b.slot,
+      type: Number(b.type),
+      comm: Number(b.comm),
+      contactor_control: b.contactor_control === true,
+    }));
+  }
   if (dyn?.termination) {
     dynamicState.termination = dyn.termination.map((t) => ({
       index: t.index,
@@ -718,6 +766,7 @@ function seedDynamic(dyn) {
     };
   }
   dynamicSnapshot = JSON.stringify(dynamicState);
+  syncBatteryShim();
 }
 
 // The applier null-guards each sub-field, so emitting only changed-vs-snapshot fields
@@ -745,6 +794,15 @@ function buildDynamic() {
       if (Object.keys(entry).length > 1) channels.push(entry);
     });
     if (channels.length) out.loadswitch = { channels };
+  }
+  if (dynamicState.batteries) {
+    const changed = dynamicState.batteries
+      .filter((b) => {
+        const s = base?.batteries?.find((x) => x.slot === b.slot);
+        return !s || s.type !== b.type || s.comm !== b.comm || s.contactor_control !== b.contactor_control;
+      })
+      .map((b) => ({ slot: b.slot, type: b.type, comm: b.comm, contactor_control: b.contactor_control }));
+    if (changed.length) out.batteries = changed;
   }
   return out;
 }

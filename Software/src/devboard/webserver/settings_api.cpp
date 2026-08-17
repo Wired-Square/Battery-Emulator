@@ -35,6 +35,18 @@ constexpr const char* kDebug = "debug";
 constexpr double kDeciUnitsPerUnit = 10.0;
 constexpr uint32_t kMillisecondsPerSecond = 1000;
 constexpr uint32_t kPercentMax = 100;
+
+struct BatterySlotKeys {
+  uint8_t slot;
+  const char* type_key;
+  const char* comm_key;
+  const char* contactor_key;
+};
+constexpr BatterySlotKeys kBatterySlotKeys[kMaxBatterySlots] = {
+    {0, "BATTTYPE", "BATTCOMM", "CNTCTRL"},
+    {1, "BATT2TYPE", "BATT2COMM", "CNTCTRLDBL"},
+    {2, "BATT3TYPE", "BATT3COMM", "CNTCTRLTRI"},
+};
 }  // namespace
 
 const SettingField kSettingFields[] = {
@@ -45,18 +57,12 @@ const SettingField kSettingFields[] = {
     {"SSID", "SSID", ST::StringVal, kNetwork, SA::Boot, 0, ""},
     {"PASSWORD", "PASSWORD", ST::StringVal, kNetwork, SA::Boot, 0, ""},
 
-    {"battery", "BATTTYPE", ST::EnumUint, kBattery, SA::Boot, 0, nullptr, "battery"},
     {"BATTCHEM", "BATTCHEM", ST::EnumUint, kBattery, SA::Boot, 1, nullptr, "chemistry"},
-    {"BATTCOMM", "BATTCOMM", ST::InterfacePacked, kBattery, SA::Boot, 0, nullptr},
     {"BATTPVMAX", "BATTPVMAX", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
     {"BATTPVMIN", "BATTPVMIN", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
     {"BATTCVMAX", "BATTCVMAX", ST::Uint, kBattery, SA::Boot, 0, nullptr},
     {"BATTCVMIN", "BATTCVMIN", ST::Uint, kBattery, SA::Boot, 0, nullptr},
     {"PYLONBAUD", "PYLONBAUD", ST::Uint, kBattery, SA::Boot, 500, nullptr},
-    {"battery2", "BATT2TYPE", ST::EnumUint, kBattery, SA::Boot, 0, nullptr, "battery"},
-    {"BATT2COMM", "BATT2COMM", ST::InterfacePacked, kBattery, SA::Boot, 0, nullptr},
-    {"battery3", "BATT3TYPE", ST::EnumUint, kBattery, SA::Boot, 0, nullptr, "battery"},
-    {"BATT3COMM", "BATT3COMM", ST::InterfacePacked, kBattery, SA::Boot, 0, nullptr},
     {"INTERLOCKREQ", "INTERLOCKREQ", ST::Bool, kBattery, SA::Boot, 0, nullptr},
     {"SOCESTIMATED", "SOCESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
     {"DALYPWRPCT", "DALYPWRPCT", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
@@ -120,9 +126,6 @@ const SettingField kSettingFields[] = {
     {"CANFD2ASCAN", "CANFD2ASCAN", ST::Bool, kHardware, SA::Boot, 0, nullptr},
 #endif
     {"EQSTOP", "EQSTOP", ST::EnumUint, kHardware, SA::Boot, 0, nullptr, "button"},
-    {"CNTCTRL", "CNTCTRL", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"CNTCTRLDBL", "CNTCTRLDBL", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"CNTCTRLTRI", "CNTCTRLTRI", ST::Bool, kHardware, SA::Boot, 0, nullptr},
     {"PRECHGMS", "PRECHGMS", ST::Uint, kHardware, SA::Boot, 100, nullptr, nullptr, 1, 65000},
     {"NCCONTACTOR", "NCCONTACTOR", ST::Bool, kHardware, SA::Boot, 0, nullptr},
     {"PWMCNTCTRL", "PWMCNTCTRL", ST::Bool, kHardware, SA::Boot, 0, nullptr},
@@ -363,6 +366,13 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
   emit_enum_options(
       options, "battery",
       [](BatteryType t) { return board_supports_battery_type(t) ? name_for_battery_type(t) : nullptr; }, &battery_none);
+  JsonArray battery_options = options["battery"].as<JsonArray>();
+  for (JsonObject opt : battery_options) {
+    const BatteryType type = static_cast<BatteryType>(opt["v"].as<uint32_t>());
+    if (type != BatteryType::None) {
+      opt["s"] = battery_type_allowed_in_slot(type, 2) ? 3 : battery_type_allowed_in_slot(type, 1) ? 2 : 1;
+    }
+  }
   emit_enum_options<battery_chemistry_enum>(options, "chemistry", name_for_chemistry);
   const InverterProtocolType inverter_none = InverterProtocolType::None;
   emit_enum_options(options, "inverter", name_for_inverter_type, &inverter_none);
@@ -438,6 +448,22 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
   // hostname default is MAC-derived and known only at runtime.
   JsonObject placeholders = doc["placeholders"].to<JsonObject>();
   set_json_string(placeholders, "HOSTNAME", default_hostname());
+
+  JsonArray battery_slots = doc["dynamic"]["batteries"].to<JsonArray>();
+  for (const BatterySlotKeys& keys : kBatterySlotKeys) {
+    JsonObject slot = battery_slots.add<JsonObject>();
+    slot["slot"] = keys.slot;
+    slot["type"] = store.getUInt(keys.type_key, static_cast<uint32_t>(BatteryType::None));
+    uint32_t comm = store.getUInt(keys.comm_key, 0);
+    if (esp32hal != nullptr) {
+      InterfaceList iface_list = esp32hal->interfaces();
+      if (resolve_interface_config(iface_list, comm) == nullptr) {
+        comm = default_interface_config(iface_list);
+      }
+    }
+    slot["comm"] = comm;
+    slot["contactor_control"] = store.getBool(keys.contactor_key, false);
+  }
 
   if (esp32hal != nullptr) {
     InterfaceList list = esp32hal->interfaces();
@@ -603,34 +629,46 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     }
   }
 
-  JsonVariantConst battery_value = values["battery"];
-  if (!battery_value.isNull() && !board_supports_battery_type(static_cast<BatteryType>(battery_value.as<int>()))) {
-    result.ok = false;
-    result.error = "This hardware has no interface that battery type can use.";
-    return result;
+  JsonArrayConst battery_section = root["dynamic"]["batteries"].as<JsonArrayConst>();
+  BatteryType effective_types[kMaxBatterySlots];
+  for (const BatterySlotKeys& keys : kBatterySlotKeys) {
+    effective_types[keys.slot] =
+        static_cast<BatteryType>(store.getUInt(keys.type_key, static_cast<uint32_t>(BatteryType::None)));
   }
-
-  static const struct {
-    const char* json_key;
-    const char* nvs_key;
-    uint8_t slot;
-  } kExtraBatterySlots[] = {{"battery2", "BATT2TYPE", 1}, {"battery3", "BATT3TYPE", 2}};
-
-  BatteryType effective_types[kMaxBatterySlots] = {
-      static_cast<BatteryType>(battery_value.isNull() ? store.getUInt("BATTTYPE", 0) : battery_value.as<int>()),
-      BatteryType::None, BatteryType::None};
-  for (const auto& extra : kExtraBatterySlots) {
-    JsonVariantConst value = values[extra.json_key];
-    const BatteryType type =
-        static_cast<BatteryType>(value.isNull() ? store.getUInt(extra.nvs_key, 0) : value.as<int>());
-    effective_types[extra.slot] = type;
-    if (!battery_type_allowed_in_slot(type, extra.slot)) {
+  for (JsonObjectConst entry : battery_section) {
+    if (!entry["slot"].is<uint8_t>() || entry["slot"].as<uint8_t>() >= kMaxBatterySlots) {
       result.ok = false;
-      result.error = String("Setting ") + extra.json_key + " selects a battery type this slot cannot run";
+      result.error = "Unknown battery slot";
+      return result;
+    }
+    const uint8_t slot = entry["slot"].as<uint8_t>();
+    JsonVariantConst type_value = entry["type"];
+    if (!type_value.isNull()) {
+      if (!type_value.is<uint32_t>()) {
+        result.ok = false;
+        result.error = "Invalid type for battery slot";
+        return result;
+      }
+      const BatteryType type = static_cast<BatteryType>(type_value.as<uint32_t>());
+      if (!battery_type_allowed_in_slot(type, slot)) {
+        result.ok = false;
+        result.error = String("Battery ") + (slot + 1) + " cannot run the selected battery type on this hardware";
+        return result;
+      }
+      effective_types[slot] = type;
+    }
+    if (!entry["comm"].isNull() && !entry["comm"].is<uint32_t>()) {
+      result.ok = false;
+      result.error = "Invalid interface for battery slot";
+      return result;
+    }
+    if (!entry["contactor_control"].isNull() && !entry["contactor_control"].is<bool>()) {
+      result.ok = false;
+      result.error = "Invalid contactor control value for battery slot";
       return result;
     }
   }
-  if (effective_types[0] == BatteryType::None &&
+  if (!battery_section.isNull() && effective_types[0] == BatteryType::None &&
       (effective_types[1] != BatteryType::None || effective_types[2] != BatteryType::None)) {
     result.ok = false;
     result.error = "Configure the primary battery before adding extra batteries.";
@@ -732,6 +770,29 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       const uint32_t applied = find_gpio_option_choice(group, requested) != nullptr ? requested : group.default_value;
       reboot_required |= store.getUInt(group.nvs_key, group.default_value) != applied;
       store.saveUInt(group.nvs_key, applied);
+    }
+  }
+
+  for (JsonObjectConst entry : root["dynamic"]["batteries"].as<JsonArrayConst>()) {
+    const uint8_t slot = entry["slot"].as<uint8_t>();
+    if (slot >= kMaxBatterySlots) {
+      continue;
+    }
+    const BatterySlotKeys& keys = kBatterySlotKeys[slot];
+    if (entry["type"].is<uint32_t>()) {
+      const uint32_t type = entry["type"].as<uint32_t>();
+      reboot_required |= store.getUInt(keys.type_key, static_cast<uint32_t>(BatteryType::None)) != type;
+      store.saveUInt(keys.type_key, type);
+    }
+    if (entry["comm"].is<uint32_t>()) {
+      const uint32_t comm = entry["comm"].as<uint32_t>();
+      reboot_required |= store.getUInt(keys.comm_key, 0) != comm;
+      store.saveUInt(keys.comm_key, comm);
+    }
+    if (entry["contactor_control"].is<bool>()) {
+      const bool contactor = entry["contactor_control"].as<bool>();
+      reboot_required |= store.getBool(keys.contactor_key, false) != contactor;
+      store.saveBool(keys.contactor_key, contactor);
     }
   }
 

@@ -49,7 +49,6 @@ TEST_F(SettingsApiTest, EmitsScalarsWithCorrectJsonTypes) {
     BatteryEmulatorSettingsStore store;
     store.saveBool("MQTTENABLED", true);
     store.saveUInt("MQTTPORT", 8883);
-    store.saveUInt("BATTTYPE", 4);  // EnumUint (via alias "battery")
     store.saveString("MQTTSERVER", "broker.local");
     store.saveUInt("BATTPVMAX", 4125);      // FloatX10 -> 412.5
     store.saveUInt("MQTTPUBLISHMS", 7000);  // SecondsToMs -> 7
@@ -64,8 +63,6 @@ TEST_F(SettingsApiTest, EmitsScalarsWithCorrectJsonTypes) {
 
   EXPECT_TRUE(values["MQTTPORT"].is<unsigned int>());
   EXPECT_EQ(values["MQTTPORT"].as<uint32_t>(), 8883u);
-
-  EXPECT_EQ(values["battery"].as<uint32_t>(), 4u);
 
   EXPECT_STREQ(values["MQTTSERVER"].as<const char*>(), "broker.local");
 
@@ -192,7 +189,7 @@ TEST_F(SettingsApiTest, UnsetCommResolvesToASelectableInterface) {
   BatteryEmulatorSettingsStore reader(true);
   const JsonDocument doc = parse_values(build_settings_json(reader));
 
-  const uint32_t batt_comm = doc["values"]["BATTCOMM"].as<uint32_t>();
+  const uint32_t batt_comm = doc["dynamic"]["batteries"][0]["comm"].as<uint32_t>();
   bool matches = false;
   for (JsonObjectConst iface : doc["interfaces"].as<JsonArrayConst>()) {
     if (iface["id"].as<uint32_t>() == batt_comm) {
@@ -200,7 +197,59 @@ TEST_F(SettingsApiTest, UnsetCommResolvesToASelectableInterface) {
       break;
     }
   }
-  EXPECT_TRUE(matches) << "BATTCOMM=" << batt_comm << " matches no interfaces[].id";
+  EXPECT_TRUE(matches) << "battery slot 0 comm=" << batt_comm << " matches no interfaces[].id";
+}
+
+TEST_F(SettingsApiTest, BatterySlotsRoundTripThroughTheDynamicSection) {
+  {
+    BatteryEmulatorSettingsStore store;
+    store.saveUInt("BATTTYPE", (uint32_t)BatteryType::NissanLeaf);
+    store.saveUInt("BATT3TYPE", (uint32_t)BatteryType::NissanLeaf);
+    store.saveBool("CNTCTRLTRI", true);
+  }
+
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(build_settings_json(reader));
+  JsonArrayConst batteries = doc["dynamic"]["batteries"];
+
+  ASSERT_EQ(batteries.size(), (size_t)kMaxBatterySlots) << "every slot is emitted uniformly, holes included";
+  EXPECT_EQ(batteries[0]["type"].as<uint32_t>(), (uint32_t)BatteryType::NissanLeaf);
+  EXPECT_EQ(batteries[1]["type"].as<uint32_t>(), (uint32_t)BatteryType::None);
+  EXPECT_EQ(batteries[2]["type"].as<uint32_t>(), (uint32_t)BatteryType::NissanLeaf);
+  EXPECT_TRUE(batteries[2]["contactor_control"].as<bool>());
+  EXPECT_TRUE(doc["values"]["battery"].isNull()) << "the flat battery scalars left the schema with the slot section";
+
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  JsonObject entry = body["dynamic"]["batteries"].add<JsonObject>();
+  entry["slot"] = 1;
+  entry["type"] = (uint32_t)BatteryType::NissanLeaf;
+  entry["contactor_control"] = true;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_TRUE(r.reboot_required);
+  EXPECT_EQ(store.getUInt("BATT2TYPE", 0), (uint32_t)BatteryType::NissanLeaf);
+  EXPECT_TRUE(store.getBool("CNTCTRLDBL", false));
+  EXPECT_FALSE(store.settingExists("BATT2COMM")) << "an omitted comm sub-field must preserve, never write";
+  EXPECT_EQ(store.getUInt("BATT3TYPE", 999), (uint32_t)BatteryType::NissanLeaf)
+      << "an absent slot entry preserves the stored slot, never wipes it";
+
+  const auto again = apply_settings_json(store, body.as<JsonObjectConst>());
+  EXPECT_TRUE(again.ok) << again.error.c_str();
+  EXPECT_FALSE(again.reboot_required) << "re-posting identical slot values must not demand a reboot";
+}
+
+TEST_F(SettingsApiTest, PostWithoutBatterySectionLeavesStoredBadShapeAlone) {
+  BatteryEmulatorSettingsStore store;
+  store.saveUInt("BATT2TYPE", (uint32_t)BatteryType::NissanLeaf);
+  JsonDocument body;
+  body["values"]["MQTTENABLED"] = true;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_TRUE(r.ok) << "a POST that does not touch the battery section cannot create the bad shape, and rejecting it "
+                       "would lock every unrelated setting on a box whose boot already latched the config fault";
+  EXPECT_TRUE(store.getBool("MQTTENABLED", false));
 }
 
 TEST_F(SettingsApiTest, BatteryOptionsHaveExactlyOneNoneFirst) {
@@ -239,7 +288,9 @@ TEST_F(SettingsApiTest, NullHalOmitsInterfacesAndDynamic) {
   const JsonDocument doc = parse_values(build_settings_json(reader));
 
   EXPECT_TRUE(doc["interfaces"].isNull());
-  EXPECT_TRUE(doc["dynamic"].isNull());
+  EXPECT_TRUE(doc["dynamic"]["termination"].isNull());
+  EXPECT_TRUE(doc["dynamic"]["loadswitch"].isNull());
+  EXPECT_FALSE(doc["dynamic"]["batteries"].isNull()) << "battery slots exist regardless of HAL presence";
 }
 
 TEST_F(SettingsApiTest, BuildReturnsNonEmptyOnSuccess) {
@@ -385,9 +436,11 @@ TEST_F(SettingsApiTest, PresentFalseBoolIsWrittenFalse) {
 
 TEST_F(SettingsApiTest, ExtraSlotRejectsTypeBeyondItsSlotCap) {
   BatteryEmulatorSettingsStore store;
+  store.saveUInt("BATTTYPE", (uint32_t)BatteryType::NissanLeaf);
   JsonDocument body;
-  body["values"]["battery"] = (int)BatteryType::NissanLeaf;
-  body["values"]["battery3"] = (int)BatteryType::TeslaModel3Y;
+  JsonObject entry = body["dynamic"]["batteries"].add<JsonObject>();
+  entry["slot"] = 2;
+  entry["type"] = (uint32_t)BatteryType::TeslaModel3Y;
   const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
 
   EXPECT_FALSE(r.ok) << "Tesla supports two packs at most; slot 3 must be refused at save time, not left to boot as "
@@ -397,14 +450,17 @@ TEST_F(SettingsApiTest, ExtraSlotRejectsTypeBeyondItsSlotCap) {
 
 TEST_F(SettingsApiTest, EmptyPrimaryWithStoredExtraBatteryIsRejected) {
   BatteryEmulatorSettingsStore store;
+  store.saveUInt("BATTTYPE", (uint32_t)BatteryType::NissanLeaf);
   store.saveUInt("BATT2TYPE", (uint32_t)BatteryType::NissanLeaf);
   JsonDocument body;
-  body["values"]["battery"] = 0;
+  JsonObject entry = body["dynamic"]["batteries"].add<JsonObject>();
+  entry["slot"] = 0;
+  entry["type"] = 0;
   const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
 
   EXPECT_FALSE(r.ok) << "the combined view and parallel safety join from pack 0, so an empty primary with a live "
                         "extra pack must be refused even when the extra slot arrives from storage, not the POST";
-  EXPECT_FALSE(store.settingExists("BATTTYPE"));
+  EXPECT_EQ(store.getUInt("BATTTYPE", 999), (uint32_t)BatteryType::NissanLeaf);
 }
 
 TEST_F(SettingsApiTest, AliasWritesNvsKeyNotJsonKey) {
@@ -730,8 +786,10 @@ TEST_F(SettingsApiTest, RetiredKeysAbsentFromSchemaAndIgnoredOnApply) {
   ASSERT_FALSE(schema.isNull());
   ASSERT_GT(schema.size(), 0u);  // guard the absence checks below against a vacuous empty schema
 
-  const char* retired[] = {"APNAME",          "MQTTTOPICS",     "MQTTTOPIC",
-                           "MQTTOBJIDPREFIX", "MQTTDEVICENAME", "HADEVICEID"};
+  const char* retired[] = {"APNAME",     "MQTTTOPICS", "MQTTTOPIC",  "MQTTOBJIDPREFIX", "MQTTDEVICENAME",
+                           "HADEVICEID", "battery",    "battery2",   "battery3",        "BATTCOMM",
+                           "BATT2COMM",  "BATT3COMM",  "CNTCTRL",    "CNTCTRLDBL",      "CNTCTRLTRI",
+                           "DBLBTR",     "TRIBTR"};
   for (const char* key : retired) {
     for (JsonObjectConst entry : schema) {
       EXPECT_STRNE(entry["key"].as<const char*>(), key) << key << " still present in schema";
