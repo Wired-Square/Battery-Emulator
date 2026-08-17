@@ -171,21 +171,30 @@ static std::function<bool(Battery*)> heap_metrics_enabled = [](Battery* b) {
 static std::function<bool(Battery*)> supports_charged = [](Battery* b) {
   return b->supports_charged_energy();
 };
+static uint8_t slot_of(Battery* b) {
+  for (uint8_t slot = 1; slot < kMaxBatterySlots; slot++) {
+    if (batteries[slot] == b) {
+      return slot;
+    }
+  }
+  return 0;
+}
 static std::function<bool(Battery*)> supports_tesla_dcdc_metrics = [](Battery* b) {
-  return b != nullptr && (battery_type_for_slot(0) == BatteryType::TeslaModel3Y ||
-                          battery_type_for_slot(0) == BatteryType::TeslaModelSX);
+  return b != nullptr && b == batteries[0] &&
+         (battery_type_for_slot(0) == BatteryType::TeslaModel3Y ||
+          battery_type_for_slot(0) == BatteryType::TeslaModelSX);
 };
 static std::function<bool(Battery*)> supports_byd_autocal_metrics = [](Battery* b) {
-  return b != nullptr && battery_type_for_slot(0) == BatteryType::BydAtto3;
+  return b != nullptr && b != batteries[2] && battery_type_for_slot(slot_of(b)) == BatteryType::BydAtto3;
 };
 static std::function<bool(Battery*)> supports_byd_metrics = [](Battery* b) {
-  return b != nullptr && battery_type_for_slot(0) == BatteryType::BydAtto3;
+  return b != nullptr && b != batteries[2] && battery_type_for_slot(slot_of(b)) == BatteryType::BydAtto3;
 };
 static std::function<bool(Battery*)> supports_insulation = [](Battery* b) {
   return b != nullptr && b->supports_insulation_resistance();
 };
 static std::function<bool(Battery*)> supports_leaf_metrics = [](Battery* b) {
-  return b != nullptr && battery_type_for_slot(0) == BatteryType::NissanLeaf;
+  return b != nullptr && b == batteries[0] && battery_type_for_slot(0) == BatteryType::NissanLeaf;
 };
 
 SensorConfig batterySensorConfigTemplate[] = {
@@ -432,14 +441,15 @@ void set_battery_attributes(JsonDocument& doc, const DATALAYER_BATTERY_TYPE& bat
     doc["dc_dc_current" + suffix] = static_cast<float>(datalayer_extended.tesla.battery_dcdcLvOutputCurrent) * 0.1f;
     doc["dc_dc_voltage" + suffix] = static_cast<float>(datalayer_extended.tesla.battery_dcdcLvBusVolt) * 0.0390625f;
   }
-  if (supports_byd_autocal_metrics(batteries[0])) {
+  Battery* suffix_battery = (suffix == "_2") ? batteries[1] : (suffix == "_3") ? batteries[2] : batteries[0];
+  if (supports_byd_autocal_metrics(suffix_battery)) {
     const DATALAYER_INFO_BYDATTO3& byd = (suffix == "_2") ? datalayer_extended.bydAtto3_2 : datalayer_extended.bydAtto3;
     doc["autocal_taper" + suffix] = byd.autocal_crit_taper;
     doc["autocal_dwell_s" + suffix] = byd.autocal_dwell_accumulated_ms / 1000u;
     doc["autocal_cooldown_ready" + suffix] = byd.autocal_crit_cooldown_ready;
     doc["autocal_soc_drift" + suffix] = byd.autocal_drift_percent;
   }
-  if (supports_byd_metrics(batteries[0])) {
+  if (supports_byd_metrics(suffix_battery)) {
     const DATALAYER_INFO_BYDATTO3& byd = (suffix == "_2") ? datalayer_extended.bydAtto3_2 : datalayer_extended.bydAtto3;
     doc["min_cell_number" + suffix] = byd.BMS_min_cell_voltage_number;
     doc["max_cell_number" + suffix] = byd.BMS_max_cell_voltage_number;
@@ -608,7 +618,8 @@ static bool publish_common_info(void) {
     doc["max_discharge_power_combined"] = ((float)datalayer.battery.combined.status.max_discharge_power_W);
 
     //only publish these values if BMS is active and we are comunication with the battery (can send CAN messages to the battery)
-    if (datalayer.battery.pack[0].status.CAN_battery_still_alive && allowed_to_send_CAN && esp32hal->system_booted_up()) {
+    if (batteries[0] && datalayer.battery.pack[0].status.CAN_battery_still_alive && allowed_to_send_CAN &&
+        esp32hal->system_booted_up()) {
       set_battery_attributes(doc, datalayer.battery.pack[0], "", batteries[0]->supports_charged_energy());
     }
 

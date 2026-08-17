@@ -20,7 +20,8 @@ void generateTESLA_213(CAN_frame& f);
 
 class TeslaBattery : public CanBattery {
  public:
-  TeslaBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) {
+  TeslaBattery(const BatterySlotContext& ctx)
+      : CanBattery(ctx.can_interface), type_(battery_type_for_slot(ctx.slot)) {
     datalayer_battery = ctx.datalayer;
     allows_contactor_closing = ctx.is_primary() ? ctx.contactor_flag : nullptr;
     // The webserver/MQTT read the shared extended block, which belongs to the
@@ -578,6 +579,7 @@ class TeslaBattery : public CanBattery {
 
   DATALAYER_BATTERY_TYPE* datalayer_battery;
   DATALAYER_INFO_TESLA* datalayer_tesla;
+  const BatteryType type_;
 
   // Per-instance state for handle_incoming_can_frame.
   // These were previously static locals — static locals are shared across all

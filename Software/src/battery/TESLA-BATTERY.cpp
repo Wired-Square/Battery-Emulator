@@ -538,7 +538,7 @@ void TeslaBattery::
     datalayer.system.status.dc_bus_live = (battery_contactor == 4);
   }
 
-  if (user_selected_tesla_GTW_chassisType > 1) {  //{{0, "Model S"}, {1, "Model X"}, {2, "Model 3"}, {3, "Model Y"}};
+  if (type_ == BatteryType::TeslaModel3Y) {
     // Autodetect algorithm for chemistry on 3/Y packs.
     // NCM/A batteries have 96s, LFP has 102-108s
     // Drawback with this check is that it takes 3-5 minutes before all cells have been counted!
@@ -2808,7 +2808,7 @@ void TeslaBattery::setup(void) {  // Performs one time setup at startup
   }
 
   //IF 3 / Y
-  if (battery_type_for_slot(0) == BatteryType::TeslaModel3Y) {
+  if (type_ == BatteryType::TeslaModel3Y) {
     if (datalayer_battery->info.chemistry == battery_chemistry_enum::LFP) {
       datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_3Y_LFP;
       datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_3Y_LFP;

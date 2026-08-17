@@ -114,10 +114,10 @@ TEST(TeslaTests, BalancingIsOfferedOnSecondarySlots) {
 // chemistry autodetect flip, so the driver must bound them at apply time.
 TEST(TeslaTests, BalancingClampsSettingsToActiveChemistryLimits) {
   init_hal();
+  user_selected_battery_types[0] = BatteryType::TeslaModel3Y;
   auto tesla = new TeslaBattery(battery_slot_context(0));
   tesla->setup();
   batteries[0] = tesla;
-  user_selected_tesla_GTW_chassisType = 2;  // Model 3
   datalayer.battery.pack[0].info.chemistry = battery_chemistry_enum::LFP;
   auto& settings = datalayer.battery.pack[0].settings;
   settings.user_requests_balancing = true;
@@ -140,10 +140,10 @@ TEST(TeslaTests, BalancingClampsSettingsToActiveChemistryLimits) {
 
 TEST(TeslaTests, BalancingSettingsWithinChemistryLimitsPassThrough) {
   init_hal();
+  user_selected_battery_types[0] = BatteryType::TeslaModel3Y;
   auto tesla = new TeslaBattery(battery_slot_context(0));
   tesla->setup();
   batteries[0] = tesla;
-  user_selected_tesla_GTW_chassisType = 2;  // Model 3
   datalayer.battery.pack[0].info.chemistry = battery_chemistry_enum::NMC;
   auto& settings = datalayer.battery.pack[0].settings;
   settings.user_requests_balancing = true;

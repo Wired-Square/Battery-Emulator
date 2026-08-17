@@ -158,6 +158,25 @@ TEST_F(BatteryCtorTest, TeslaBindsSlotDatalayer) {
   EXPECT_EQ(datalayer.battery.pack[1].info.max_design_voltage_dV, kExpectedMaxDesignVoltageDv3YNcma);
 }
 
+TEST_F(BatteryCtorTest, SecondarySxKeepsItsLimitsBesideAPrimary3Y) {
+  user_selected_battery_types[0] = BatteryType::TeslaModel3Y;
+  user_selected_battery_types[1] = BatteryType::TeslaModelSX;
+  datalayer.battery.pack[0].info.chemistry = battery_chemistry_enum::NCA;
+  datalayer.battery.pack[1].info.chemistry = battery_chemistry_enum::NCA;
+  constexpr uint16_t kExpectedMaxDesignVoltageDvSxNcma = 4600;
+
+  auto* secondary = new TeslaBattery(battery_slot_context(1));
+  secondary->setup();
+  ASSERT_EQ(datalayer.battery.pack[1].info.max_design_voltage_dV, kExpectedMaxDesignVoltageDvSxNcma);
+
+  secondary->update_values();
+  EXPECT_EQ(datalayer.battery.pack[1].info.max_design_voltage_dV, kExpectedMaxDesignVoltageDvSxNcma)
+      << "the 3/Y chemistry-autodetect block keys off the pack's own type; keyed off the global chassis setting it "
+         "overwrote a secondary S/X's limits with 3/Y values on the first update tick";
+
+  delete secondary;
+}
+
 // The 0x1DB decode must land voltage_dV on the bound slot only.
 TEST_F(BatteryCtorTest, NissanLeafSlotBindingRoutesDecodedVoltage) {
   constexpr int kExpectedDv = 440;

@@ -457,7 +457,7 @@ static void send_battery_frame(uint8_t index) {
           ESPNOW_KEY_DCDC_VOLTAGE_MV,
           static_cast<uint16_t>((static_cast<uint32_t>(datalayer_extended.tesla.battery_dcdcLvBusVolt) * 625u) / 16u));
     }
-    if (battery_type_for_slot(0) == BatteryType::BydAtto3) {
+    if (battery_type_for_slot(index) == BatteryType::BydAtto3) {
       const DATALAYER_INFO_BYDATTO3& byd = (index == 1) ? datalayer_extended.bydAtto3_2 : datalayer_extended.bydAtto3;
       put_bool_field(ESPNOW_KEY_AUTOCAL_TAPER, byd.autocal_crit_taper);
       put_u32_field(ESPNOW_KEY_AUTOCAL_DWELL_S, byd.autocal_dwell_accumulated_ms / 1000u);
