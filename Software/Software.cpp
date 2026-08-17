@@ -337,7 +337,7 @@ void update_calculated_values(uint32_t currentMillis) {
 
   bool populated[kMaxBatterySlots];
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
-    populated[slot] = (slot < active_battery_slots()) && (batteries[slot] != nullptr);
+    populated[slot] = batteries[slot] != nullptr;
   }
   update_reported_values(populated);
 }
@@ -465,7 +465,7 @@ void core_loop(void*) {
         batteries[0]->update_values();
       }
 
-      for (uint8_t slot = 1; slot < active_battery_slots(); slot++) {
+      for (uint8_t slot = 1; slot < kMaxBatterySlots; slot++) {
         if (Battery* extra_battery = batteries[slot]) {
           extra_battery->update_values();
           // check_parallel_battery_safety() numbers batteries from 1, so

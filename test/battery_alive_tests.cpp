@@ -28,8 +28,8 @@ class BatteryAliveTest : public ::testing::Test {
     datalayer.system.info.CPU_free_heap = 200000;
     if (!batteries[1]) {
       // BMW i3 supports double battery, so one setup creates both instances
-      user_selected_battery_type = BatteryType::BmwI3;
-      user_selected_second_battery = true;
+      user_selected_battery_types[0] = BatteryType::BmwI3;
+      user_selected_battery_types[1] = BatteryType::BmwI3;
       setup_battery();
     }
     if (!charger) {

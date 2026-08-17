@@ -172,20 +172,20 @@ static std::function<bool(Battery*)> supports_charged = [](Battery* b) {
   return b->supports_charged_energy();
 };
 static std::function<bool(Battery*)> supports_tesla_dcdc_metrics = [](Battery* b) {
-  return b != nullptr && (user_selected_battery_type == BatteryType::TeslaModel3Y ||
-                          user_selected_battery_type == BatteryType::TeslaModelSX);
+  return b != nullptr && (battery_type_for_slot(0) == BatteryType::TeslaModel3Y ||
+                          battery_type_for_slot(0) == BatteryType::TeslaModelSX);
 };
 static std::function<bool(Battery*)> supports_byd_autocal_metrics = [](Battery* b) {
-  return b != nullptr && user_selected_battery_type == BatteryType::BydAtto3;
+  return b != nullptr && battery_type_for_slot(0) == BatteryType::BydAtto3;
 };
 static std::function<bool(Battery*)> supports_byd_metrics = [](Battery* b) {
-  return b != nullptr && user_selected_battery_type == BatteryType::BydAtto3;
+  return b != nullptr && battery_type_for_slot(0) == BatteryType::BydAtto3;
 };
 static std::function<bool(Battery*)> supports_insulation = [](Battery* b) {
   return b != nullptr && b->supports_insulation_resistance();
 };
 static std::function<bool(Battery*)> supports_leaf_metrics = [](Battery* b) {
-  return b != nullptr && user_selected_battery_type == BatteryType::NissanLeaf;
+  return b != nullptr && battery_type_for_slot(0) == BatteryType::NissanLeaf;
 };
 
 SensorConfig batterySensorConfigTemplate[] = {

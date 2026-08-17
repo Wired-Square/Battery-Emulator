@@ -226,17 +226,31 @@ const battery_chemistry_enum battery_chemistry_default = battery_chemistry_enum:
 
 battery_chemistry_enum user_selected_battery_chemistry = battery_chemistry_default;
 
-BatteryType user_selected_battery_type = BatteryType::None;
-bool user_selected_second_battery = false;
-bool user_selected_triple_battery = false;
+BatteryType user_selected_battery_types[kMaxBatterySlots] = {BatteryType::None, BatteryType::None, BatteryType::None};
 
-uint8_t active_battery_slots() {
-  // Highest enabled slot + 1: the third battery is not gated on the second
-  // (see setup_battery), so counting enabled flags would skip a live slot 2.
-  if (user_selected_triple_battery) {
-    return 3;
+BatteryType battery_type_for_slot(uint8_t slot) {
+  return (slot < kMaxBatterySlots) ? user_selected_battery_types[slot] : BatteryType::None;
+}
+
+bool battery_slot_occupied(uint8_t slot) {
+  return battery_type_for_slot(slot) != BatteryType::None;
+}
+
+bool any_battery_slot_occupied() {
+  for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+    if (battery_slot_occupied(slot)) {
+      return true;
+    }
   }
-  return user_selected_second_battery ? 2 : 1;
+  return false;
+}
+
+bool battery_type_allowed_in_slot(BatteryType type, uint8_t slot) {
+  if (type == BatteryType::None) {
+    return true;
+  }
+  const BatteryTypeInfo* info = find_battery_info(type);
+  return info != nullptr && slot < info->max_slots && board_supports_battery_type(type);
 }
 
 BatterySlotContext battery_slot_context(uint8_t slot) {
@@ -265,25 +279,29 @@ void setup_battery() {
     return;
   }
 
+  if (!battery_slot_occupied(0) && (battery_slot_occupied(1) || battery_slot_occupied(2))) {
+    set_event_latched(EVENT_BATTERY_CONFIG_INVALID,
+                      (battery_slot_occupied(2) << 2) | (battery_slot_occupied(1) << 1));
+  }
+
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
     datalayer.battery_slot(slot).info.chemistry = user_selected_battery_chemistry;
   }
 
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
-    bool slot_enabled =
-        (slot == 0) || (slot == 1 && user_selected_second_battery) || (slot == 2 && user_selected_triple_battery);
-    if (!slot_enabled || batteries[slot]) {
+    const BatteryType type = battery_type_for_slot(slot);
+    if (type == BatteryType::None || batteries[slot]) {
       continue;
     }
 
     const BatterySlotContext ctx = battery_slot_context(slot);
-    if (!interface_supports_battery_type(user_selected_battery_type, ctx.can_interface)) {
+    if (!interface_supports_battery_type(type, ctx.can_interface)) {
       DEBUG_PRINTF("Battery %u type %s needs an interface this one cannot provide, not starting it!\n", slot + 1,
-                   name_for_battery_type(user_selected_battery_type));
+                   name_for_battery_type(type));
       set_event(EVENT_BATTERY_INTERFACE_UNSUPPORTED, slot + 1);
       continue;
     }
-    Battery* created = create_battery(user_selected_battery_type, ctx);
+    Battery* created = create_battery(type, ctx);
     if (!created) {
       if (slot > 0) {
         DEBUG_PRINTF("User tried enabling %s battery on non-supported integration!\n", slot == 1 ? "double" : "triple");
@@ -294,9 +312,11 @@ void setup_battery() {
 
     batteries[slot] = created;
     created->setup();
-    strncpy(datalayer.system.info.battery_protocol, name_for_battery_type(user_selected_battery_type),
-            sizeof(datalayer.system.info.battery_protocol) - 1);
-    datalayer.system.info.battery_protocol[sizeof(datalayer.system.info.battery_protocol) - 1] = '\0';
+    if (slot == 0) {
+      strncpy(datalayer.system.info.battery_protocol, name_for_battery_type(type),
+              sizeof(datalayer.system.info.battery_protocol) - 1);
+      datalayer.system.info.battery_protocol[sizeof(datalayer.system.info.battery_protocol) - 1] = '\0';
+    }
   }
 }
 

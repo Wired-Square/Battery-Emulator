@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "../Software/src/battery/BATTERIES.h"
 #include "../Software/src/datalayer/datalayer.h"
 
@@ -23,25 +25,20 @@ TEST(BatterySlot, StatusFlagAccessorsAliasNamedMembers) {
   EXPECT_EQ(&status.slot_contactors_engaged(2), &status.contactors_battery3_engaged);
 }
 
-TEST(BatterySlot, ActiveBatterySlotsIsHighestEnabledSlotPlusOne) {
-  bool saved_second = user_selected_second_battery;
-  bool saved_triple = user_selected_triple_battery;
+TEST(BatterySlot, OccupancyIsPerSlotAndToleratesHoles) {
+  BatteryType saved[kMaxBatterySlots];
+  std::copy(std::begin(user_selected_battery_types), std::end(user_selected_battery_types), std::begin(saved));
 
-  user_selected_second_battery = false;
-  user_selected_triple_battery = false;
-  EXPECT_EQ(active_battery_slots(), 1);
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
+  user_selected_battery_types[1] = BatteryType::None;
+  user_selected_battery_types[2] = BatteryType::BmwI3;
 
-  user_selected_second_battery = true;
-  EXPECT_EQ(active_battery_slots(), 2);
+  EXPECT_TRUE(battery_slot_occupied(0));
+  EXPECT_FALSE(battery_slot_occupied(1)) << "a {0,2} configuration must read slot 1 as a hole, not as part of a count";
+  EXPECT_TRUE(battery_slot_occupied(2));
+  EXPECT_EQ(battery_type_for_slot(1), BatteryType::None);
+  EXPECT_EQ(battery_type_for_slot(2), BatteryType::BmwI3);
+  EXPECT_FALSE(battery_slot_occupied(kMaxBatterySlots)) << "an out-of-range slot must never read as occupied";
 
-  user_selected_triple_battery = true;
-  EXPECT_EQ(active_battery_slots(), 3);
-
-  // Triple without second still exposes slot 2: setup_battery() does not
-  // gate the third battery on the second.
-  user_selected_second_battery = false;
-  EXPECT_EQ(active_battery_slots(), 3);
-
-  user_selected_second_battery = saved_second;
-  user_selected_triple_battery = saved_triple;
+  std::copy(std::begin(saved), std::end(saved), std::begin(user_selected_battery_types));
 }

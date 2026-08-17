@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "../Software/src/battery/BATTERIES.h"
 #include "../Software/src/battery/BatterySlotContext.h"
 #include "../Software/src/battery/CHARGEBYTE-CCS.h"
@@ -16,21 +18,22 @@ class BatteryCtorTest : public testing::Test {
     saved_battery_ = datalayer.battery.pack[0];
     saved_battery2_ = datalayer.battery.pack[1];
     saved_status_ = datalayer.system.status;
-    saved_type_ = user_selected_battery_type;
+    std::copy(std::begin(user_selected_battery_types), std::end(user_selected_battery_types),
+              std::begin(saved_types_));
   }
 
   void TearDown() override {
     datalayer.battery.pack[0] = saved_battery_;
     datalayer.battery.pack[1] = saved_battery2_;
     datalayer.system.status = saved_status_;
-    user_selected_battery_type = saved_type_;
+    std::copy(std::begin(saved_types_), std::end(saved_types_), std::begin(user_selected_battery_types));
   }
 
  private:
   DATALAYER_BATTERY_TYPE saved_battery_;
   DATALAYER_BATTERY_TYPE saved_battery2_;
   DATALAYER_SYSTEM_STATUS_TYPE saved_status_;
-  BatteryType saved_type_;
+  BatteryType saved_types_[kMaxBatterySlots];
 };
 
 namespace {
@@ -50,6 +53,16 @@ class SpeedProbeBus : public CanBus {
   bool retune_hw(CAN_Speed) override { return true; }
   void stop_hw() override {}
   bool restart_hw(CAN_Speed) override { return true; }
+};
+
+struct SavedSlotTypes {
+  SavedSlotTypes() {
+    std::copy(std::begin(user_selected_battery_types), std::end(user_selected_battery_types), std::begin(saved));
+  }
+  ~SavedSlotTypes() {
+    std::copy(std::begin(saved), std::end(saved), std::begin(user_selected_battery_types));
+  }
+  BatteryType saved[kMaxBatterySlots];
 };
 
 template <typename T>
@@ -128,7 +141,7 @@ TEST_F(BatteryCtorTest, TestFakeBindsSlotDatalayer) {
 TEST_F(BatteryCtorTest, TeslaBindsSlotDatalayer) {
   // Pin the setup() branch (3Y/NCMA pack-voltage table) so the expected
   // value isn't order-dependent on other tests mutating these globals.
-  user_selected_battery_type = BatteryType::TeslaModel3Y;
+  user_selected_battery_types[0] = BatteryType::TeslaModel3Y;
   datalayer.battery.pack[0].info.chemistry = battery_chemistry_enum::NCA;
   datalayer.battery.pack[1].info.chemistry = battery_chemistry_enum::NCA;
   constexpr uint16_t kExpectedMaxDesignVoltageDv3YNcma = 4030;
@@ -309,17 +322,44 @@ TEST_F(BatteryCtorTest, BydAttoBindsSlotDatalayer) {
   EXPECT_NE(datalayer.battery.pack[1].info.max_design_voltage_dV, 0);
 }
 
-// Gate on the second/triple flags, not active_battery_slots() (triple-on
-// reports 3 even when double is off).
-TEST(SetupBatterySlotGateTest, TripleOnDoubleOffSkipsSecondSlot) {
+TEST(SetupBatterySlotGateTest, EmptyPrimaryWithExtraBatteryLatchesConfigFault) {
+  init_hal();
+  init_events();
+  SavedSlotTypes saved_types;
+  Battery* saved_battery = batteries[0];
+  Battery* saved_battery2 = batteries[1];
+  DATALAYER_BATTERY_TYPE saved_datalayer_battery2 = datalayer.battery.pack[1];
+  DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
+
+  batteries[0] = nullptr;
+  batteries[1] = nullptr;
+  user_selected_battery_types[0] = BatteryType::None;
+  user_selected_battery_types[1] = BatteryType::NissanLeaf;
+  user_selected_battery_types[2] = BatteryType::None;
+
+  setup_battery();
+
+  const EVENTS_STRUCT_TYPE* fault = get_event_pointer(EVENT_BATTERY_CONFIG_INVALID);
+  EXPECT_EQ(fault->state, EVENT_STATE_ACTIVE_LATCHED)
+      << "the combined view and parallel safety join from pack 0, so an empty primary with a live extra pack must "
+         "latch a boot fault rather than run against an empty primary";
+  EXPECT_NE(batteries[1], nullptr) << "construction still records the demand; the fault is what stops the system";
+
+  delete batteries[1];
+  batteries[0] = saved_battery;
+  batteries[1] = saved_battery2;
+  datalayer.battery.pack[1] = saved_datalayer_battery2;
+  datalayer.system.status = saved_status;
+  reset_all_events();
+}
+
+TEST(SetupBatterySlotGateTest, EmptySlotOneIsAHoleNotACutoff) {
   init_hal();
 
   Battery* saved_battery = batteries[0];
   Battery* saved_battery2 = batteries[1];
   Battery* saved_battery3 = batteries[2];
-  bool saved_second = user_selected_second_battery;
-  bool saved_triple = user_selected_triple_battery;
-  BatteryType saved_type = user_selected_battery_type;
+  SavedSlotTypes saved_types;
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_BATTERY_TYPE saved_datalayer_battery2 = datalayer.battery.pack[1];
   DATALAYER_BATTERY_TYPE saved_datalayer_battery3 = datalayer.battery.pack[2];
@@ -328,9 +368,9 @@ TEST(SetupBatterySlotGateTest, TripleOnDoubleOffSkipsSecondSlot) {
   batteries[0] = nullptr;
   batteries[1] = nullptr;
   batteries[2] = nullptr;
-  user_selected_battery_type = BatteryType::NissanLeaf;
-  user_selected_second_battery = false;
-  user_selected_triple_battery = true;
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
+  user_selected_battery_types[1] = BatteryType::None;
+  user_selected_battery_types[2] = user_selected_battery_types[0];
 
   setup_battery();
 
@@ -343,9 +383,6 @@ TEST(SetupBatterySlotGateTest, TripleOnDoubleOffSkipsSecondSlot) {
   batteries[0] = saved_battery;
   batteries[1] = saved_battery2;
   batteries[2] = saved_battery3;
-  user_selected_second_battery = saved_second;
-  user_selected_triple_battery = saved_triple;
-  user_selected_battery_type = saved_type;
   datalayer.battery.pack[0] = saved_datalayer_battery;
   datalayer.battery.pack[1] = saved_datalayer_battery2;
   datalayer.battery.pack[2] = saved_datalayer_battery3;
@@ -359,9 +396,7 @@ TEST(SetupBatterySlotGateTest, DuplicateInterfaceFaultsTheBusAtResolve) {
   Battery* saved_battery = batteries[0];
   Battery* saved_battery2 = batteries[1];
   Battery* saved_battery3 = batteries[2];
-  bool saved_second = user_selected_second_battery;
-  bool saved_triple = user_selected_triple_battery;
-  BatteryType saved_type = user_selected_battery_type;
+  SavedSlotTypes saved_types;
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_BATTERY_TYPE saved_datalayer_battery2 = datalayer.battery.pack[1];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
@@ -373,9 +408,9 @@ TEST(SetupBatterySlotGateTest, DuplicateInterfaceFaultsTheBusAtResolve) {
   batteries[0] = nullptr;
   batteries[1] = nullptr;
   batteries[2] = nullptr;
-  user_selected_battery_type = BatteryType::NissanLeaf;
-  user_selected_second_battery = true;
-  user_selected_triple_battery = false;
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
+  user_selected_battery_types[1] = user_selected_battery_types[0];
+  user_selected_battery_types[2] = BatteryType::None;
   can_config.battery = &shared_iface;
   can_config.battery_double = &shared_iface;
 
@@ -393,9 +428,6 @@ TEST(SetupBatterySlotGateTest, DuplicateInterfaceFaultsTheBusAtResolve) {
   batteries[0] = saved_battery;
   batteries[1] = saved_battery2;
   batteries[2] = saved_battery3;
-  user_selected_second_battery = saved_second;
-  user_selected_triple_battery = saved_triple;
-  user_selected_battery_type = saved_type;
   can_config.battery = saved_iface;
   can_config.battery_double = saved_iface_double;
   datalayer.battery.pack[0] = saved_datalayer_battery;
@@ -412,9 +444,7 @@ TEST(SetupBatterySlotGateTest, UnsupportedSecondSlotRaisesEvent) {
   Battery* saved_battery = batteries[0];
   Battery* saved_battery2 = batteries[1];
   Battery* saved_battery3 = batteries[2];
-  bool saved_second = user_selected_second_battery;
-  bool saved_triple = user_selected_triple_battery;
-  BatteryType saved_type = user_selected_battery_type;
+  SavedSlotTypes saved_types;
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_BATTERY_TYPE saved_datalayer_battery2 = datalayer.battery.pack[1];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
@@ -426,9 +456,9 @@ TEST(SetupBatterySlotGateTest, UnsupportedSecondSlotRaisesEvent) {
   batteries[0] = nullptr;
   batteries[1] = nullptr;
   batteries[2] = nullptr;
-  user_selected_battery_type = BatteryType::BmwIX;
-  user_selected_second_battery = true;
-  user_selected_triple_battery = false;
+  user_selected_battery_types[0] = BatteryType::BmwIX;
+  user_selected_battery_types[1] = user_selected_battery_types[0];
+  user_selected_battery_types[2] = BatteryType::None;
   can_config.battery = &first_iface;
   can_config.battery_double = &second_iface;
 
@@ -444,9 +474,6 @@ TEST(SetupBatterySlotGateTest, UnsupportedSecondSlotRaisesEvent) {
   batteries[0] = saved_battery;
   batteries[1] = saved_battery2;
   batteries[2] = saved_battery3;
-  user_selected_second_battery = saved_second;
-  user_selected_triple_battery = saved_triple;
-  user_selected_battery_type = saved_type;
   can_config.battery = saved_iface;
   can_config.battery_double = saved_iface_double;
   datalayer.battery.pack[0] = saved_datalayer_battery;
@@ -459,18 +486,16 @@ TEST(SetupBatterySlotGateTest, UnsupportedInterfaceRaisesEvent) {
   init_events();
 
   Battery* saved_battery = batteries[0];
-  BatteryType saved_type = user_selected_battery_type;
-  bool saved_second = user_selected_second_battery;
-  bool saved_triple = user_selected_triple_battery;
+  SavedSlotTypes saved_types;
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
   auto* saved_iface = can_config.battery;
 
   static InterfaceDescriptor classic_iface{InterfaceType::CanNative, nullptr, comm_interface::Highest, nullptr};
   batteries[0] = nullptr;
-  user_selected_battery_type = BatteryType::Meb;
-  user_selected_second_battery = false;
-  user_selected_triple_battery = false;
+  user_selected_battery_types[0] = BatteryType::Meb;
+  user_selected_battery_types[1] = BatteryType::None;
+  user_selected_battery_types[2] = BatteryType::None;
   can_config.battery = &classic_iface;
 
   setup_battery();
@@ -481,9 +506,6 @@ TEST(SetupBatterySlotGateTest, UnsupportedInterfaceRaisesEvent) {
   EXPECT_EQ(unsupported->data, 1);
 
   batteries[0] = saved_battery;
-  user_selected_battery_type = saved_type;
-  user_selected_second_battery = saved_second;
-  user_selected_triple_battery = saved_triple;
   can_config.battery = saved_iface;
   datalayer.battery.pack[0] = saved_datalayer_battery;
   datalayer.system.status = saved_status;
@@ -494,18 +516,16 @@ TEST(SetupBatterySlotGateTest, SatisfiedInterfaceConstructs) {
   init_events();
 
   Battery* saved_battery = batteries[0];
-  BatteryType saved_type = user_selected_battery_type;
-  bool saved_second = user_selected_second_battery;
-  bool saved_triple = user_selected_triple_battery;
+  SavedSlotTypes saved_types;
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
   auto* saved_iface = can_config.battery;
 
   static InterfaceDescriptor fd_iface{InterfaceType::CanMcp2517fd, nullptr, comm_interface::Highest, nullptr};
   batteries[0] = nullptr;
-  user_selected_battery_type = BatteryType::Meb;
-  user_selected_second_battery = false;
-  user_selected_triple_battery = false;
+  user_selected_battery_types[0] = BatteryType::Meb;
+  user_selected_battery_types[1] = BatteryType::None;
+  user_selected_battery_types[2] = BatteryType::None;
   can_config.battery = &fd_iface;
 
   setup_battery();
@@ -515,9 +535,6 @@ TEST(SetupBatterySlotGateTest, SatisfiedInterfaceConstructs) {
 
   delete batteries[0];
   batteries[0] = saved_battery;
-  user_selected_battery_type = saved_type;
-  user_selected_second_battery = saved_second;
-  user_selected_triple_battery = saved_triple;
   can_config.battery = saved_iface;
   datalayer.battery.pack[0] = saved_datalayer_battery;
   datalayer.system.status = saved_status;
@@ -529,9 +546,7 @@ static void expect_protocol_after_setup(BatteryType type, const char* expected) 
   Battery* saved_battery = batteries[0];
   Battery* saved_battery2 = batteries[1];
   Battery* saved_battery3 = batteries[2];
-  bool saved_second = user_selected_second_battery;
-  bool saved_triple = user_selected_triple_battery;
-  BatteryType saved_type = user_selected_battery_type;
+  SavedSlotTypes saved_types;
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
   DATALAYER_SYSTEM_INFO_TYPE saved_info = datalayer.system.info;
@@ -539,9 +554,9 @@ static void expect_protocol_after_setup(BatteryType type, const char* expected) 
   batteries[0] = nullptr;
   batteries[1] = nullptr;
   batteries[2] = nullptr;
-  user_selected_battery_type = type;
-  user_selected_second_battery = false;
-  user_selected_triple_battery = false;
+  user_selected_battery_types[0] = type;
+  user_selected_battery_types[1] = BatteryType::None;
+  user_selected_battery_types[2] = BatteryType::None;
 
   setup_battery();
 
@@ -553,9 +568,6 @@ static void expect_protocol_after_setup(BatteryType type, const char* expected) 
   batteries[0] = saved_battery;
   batteries[1] = saved_battery2;
   batteries[2] = saved_battery3;
-  user_selected_second_battery = saved_second;
-  user_selected_triple_battery = saved_triple;
-  user_selected_battery_type = saved_type;
   datalayer.battery.pack[0] = saved_datalayer_battery;
   datalayer.system.status = saved_status;
   datalayer.system.info = saved_info;
@@ -598,14 +610,14 @@ TEST(BatteryRegistryCharacterization, NameExactAnchors) {
 }
 
 TEST_F(BatteryCtorTest, CreateBatterySlotGating) {
-  user_selected_battery_type = BatteryType::NissanLeaf;
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
   EXPECT_NE(create_battery(BatteryType::NissanLeaf, battery_slot_context(0)), nullptr);
   EXPECT_NE(create_battery(BatteryType::NissanLeaf, battery_slot_context(2)), nullptr);  // max 3
 
-  user_selected_battery_type = BatteryType::StellantisEcmp;
+  user_selected_battery_types[0] = BatteryType::StellantisEcmp;
   EXPECT_NE(create_battery(BatteryType::StellantisEcmp, battery_slot_context(2)), nullptr);  // max 3
 
-  user_selected_battery_type = BatteryType::CmfaEv;
+  user_selected_battery_types[0] = BatteryType::CmfaEv;
   EXPECT_NE(create_battery(BatteryType::CmfaEv, battery_slot_context(1)), nullptr);  // max 2
   EXPECT_EQ(create_battery(BatteryType::CmfaEv, battery_slot_context(2)), nullptr);  // beyond 2
 

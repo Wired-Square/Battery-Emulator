@@ -2808,7 +2808,7 @@ void TeslaBattery::setup(void) {  // Performs one time setup at startup
   }
 
   //IF 3 / Y
-  if (user_selected_battery_type == BatteryType::TeslaModel3Y) {
+  if (battery_type_for_slot(0) == BatteryType::TeslaModel3Y) {
     if (datalayer_battery->info.chemistry == battery_chemistry_enum::LFP) {
       datalayer_battery->info.max_design_voltage_dV = MAX_PACK_VOLTAGE_3Y_LFP;
       datalayer_battery->info.min_design_voltage_dV = MIN_PACK_VOLTAGE_3Y_LFP;

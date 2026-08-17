@@ -165,6 +165,7 @@ void init_events(void) {
   events.entries[EVENT_CAN_BATTERY3_MISSING].level = EVENT_LEVEL_WARNING;
   events.entries[EVENT_CAN_CONFIG_INVALID].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_BATTERY_INTERFACE_UNSUPPORTED].level = EVENT_LEVEL_ERROR;
+  events.entries[EVENT_BATTERY_CONFIG_INVALID].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_BATTERY_SLOT_UNSUPPORTED].level = EVENT_LEVEL_WARNING;
   events.entries[EVENT_CAN_CHARGER_MISSING].level = EVENT_LEVEL_INFO;
   events.entries[EVENT_CAN_CHARGER_DETECTED].level = EVENT_LEVEL_INFO;
@@ -365,6 +366,9 @@ String get_event_message_string(EVENTS_ENUM_TYPE event) {
     case EVENT_BATTERY_INTERFACE_UNSUPPORTED:
       return "Battery not started: the selected battery type needs a bus the assigned interface does not provide. "
              "Assign a suitable interface, or select a battery type this hardware supports.";
+    case EVENT_BATTERY_CONFIG_INVALID:
+      return "An extra battery is configured while the primary battery slot is empty. The system reports the primary "
+             "slot's values, so it cannot run this way. Configure the primary battery, then reboot.";
     case EVENT_BATTERY_SLOT_UNSUPPORTED:
       return "Extra battery not started: the selected battery type does not support multiple packs.";
     case EVENT_CAN_CHARGER_DETECTED:

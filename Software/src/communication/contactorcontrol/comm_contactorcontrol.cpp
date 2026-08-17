@@ -387,7 +387,10 @@ static PeriodicResetVerdict periodic_bms_reset_verdict(const char** reason) {
   if (periodic_bms_reset_defer_low_soc) {
     uint16_t min_real_soc = UINT16_MAX;
     uint16_t min_reported_soc = UINT16_MAX;
-    for (uint8_t slot = 0; slot < active_battery_slots(); slot++) {
+    for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+      if (batteries[slot] == nullptr) {
+        continue;
+      }
       auto& status = datalayer.battery_slot(slot).status;
       if (status.real_soc < min_real_soc) {
         min_real_soc = status.real_soc;
@@ -411,7 +414,10 @@ static PeriodicResetVerdict periodic_bms_reset_verdict(const char** reason) {
      or less permanently cannot suppress the reset indefinitely.
      Batteries that are not present report BALANCING_STATUS_UNKNOWN, so they never skip. */
   if (periodic_bms_reset_skip_balancing && !balancingPeriodSkipped) {
-    for (uint8_t slot = 0; slot < active_battery_slots(); slot++) {
+    for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+      if (batteries[slot] == nullptr) {
+        continue;
+      }
       if (datalayer.battery_slot(slot).status.balancing_status == BALANCING_STATUS_ACTIVE) {
         *reason = "balancing active on battery";
         return PeriodicResetVerdict::SkipPeriod;
@@ -435,8 +441,10 @@ static bool bms_reset_needs_can_keepalive() {
    their counters either. */
 static void bms_reset_refresh_can_alive(uint32_t now) {
   lastCanKeepaliveTime = now;
-  for (uint8_t slot = 0; slot < active_battery_slots(); slot++) {
-    datalayer.battery_slot(slot).status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+  for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+    if (batteries[slot] != nullptr) {
+      datalayer.battery_slot(slot).status.CAN_battery_still_alive = CAN_STILL_ALIVE;
+    }
   }
 }
 

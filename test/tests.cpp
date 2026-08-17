@@ -42,8 +42,8 @@ class DataLayerResetListener : public ::testing::EmptyTestEventListener {
     inverter = nullptr;
 
     // Selection globals must be owned by each test's own fixture.
-    user_selected_second_battery = false;
-    user_selected_triple_battery = false;
+    user_selected_battery_types[1] = BatteryType::None;
+    user_selected_battery_types[2] = BatteryType::None;
 
     init_hal();
   }

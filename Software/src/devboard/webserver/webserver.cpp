@@ -942,14 +942,14 @@ String capabilities_json() {
   }
 
   JsonObject devices = doc["devices"].to<JsonObject>();
-  add_capabilities_device(devices, "battery", name_for_battery_type(user_selected_battery_type), can_config.battery,
+  add_capabilities_device(devices, "battery", name_for_battery_type(battery_type_for_slot(0)), can_config.battery,
                           list);
-  if (user_selected_second_battery) {
-    add_capabilities_device(devices, "battery2", name_for_battery_type(user_selected_battery_type),
+  if (battery_slot_occupied(1)) {
+    add_capabilities_device(devices, "battery2", name_for_battery_type(battery_type_for_slot(1)),
                             can_config.battery_double, list);
   }
-  if (user_selected_triple_battery) {
-    add_capabilities_device(devices, "battery3", name_for_battery_type(user_selected_battery_type),
+  if (battery_slot_occupied(2)) {
+    add_capabilities_device(devices, "battery3", name_for_battery_type(battery_type_for_slot(2)),
                             can_config.battery_triple, list);
   }
   add_capabilities_device(devices, "inverter", name_for_inverter_type(user_selected_inverter_protocol),

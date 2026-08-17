@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <WString.h>
 #include <limits>
+#include "../../battery/Battery.h"
 #include "../../datalayer/datalayer.h"
 #include "../../devboard/utils/events.h"
 #include "../../devboard/utils/logging.h"
@@ -152,5 +153,14 @@ class BatteryEmulatorSettingsStore {
   // To track if settings were updated
   bool settingsUpdated = false;
 };
+
+inline void migrate_battery_slot_types(BatteryEmulatorSettingsStore& settings) {
+  if (settings.getBool("DBLBTR", false) && !settings.settingExists("BATT2TYPE")) {
+    settings.saveUInt("BATT2TYPE", settings.getUInt("BATTTYPE", (uint32_t)BatteryType::None));
+  }
+  if (settings.getBool("TRIBTR", false) && !settings.settingExists("BATT3TYPE")) {
+    settings.saveUInt("BATT3TYPE", settings.getUInt("BATTTYPE", (uint32_t)BatteryType::None));
+  }
+}
 
 #endif

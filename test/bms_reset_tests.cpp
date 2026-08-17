@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "../Software/src/battery/BATTERIES.h"
 #include "../Software/src/battery/Battery.h"
 #include "../Software/src/communication/contactorcontrol/comm_contactorcontrol.h"
 #include "../Software/src/datalayer/datalayer.h"
@@ -177,6 +178,10 @@ static void setup_periodic_reset_test(uint16_t interval_h) {
   periodic_bms_reset_defer_low_soc = false;
   periodic_bms_reset_skip_balancing = false;
 
+  user_selected_battery_types[0] = BatteryType::BmwI3;
+  if (batteries[0] == nullptr) {
+    batteries[0] = create_battery(BatteryType::BmwI3, battery_slot_context(0));
+  }
   datalayer.battery.pack[0].status.real_soc = 5000;
   datalayer.battery.pack[0].status.reported_soc = 5000;
   datalayer.battery.pack[0].status.balancing_status = BALANCING_STATUS_READY;
@@ -190,6 +195,7 @@ static void setup_periodic_reset_test(uint16_t interval_h) {
 }
 
 static void teardown_periodic_reset_test() {
+  user_selected_battery_types[0] = BatteryType::None;
   periodic_bms_reset = false;
   periodic_bms_reset_interval_h = 24;
   periodic_bms_reset_defer_low_soc = false;
@@ -329,14 +335,44 @@ TEST(BmsResetTests, PeriodicBmsResetBalancingAllowanceRestored) {
 TEST(BmsResetTests, PeriodicBmsResetSkipBalancingSecondBattery) {
   setup_periodic_reset_test(24);
   periodic_bms_reset_skip_balancing = true;
-  user_selected_second_battery = true;
+  user_selected_battery_types[1] = BatteryType::BmwI3;
+  batteries[1] = create_battery(BatteryType::BmwI3, battery_slot_context(1));
 
   set_millis64(25 * ONE_HOUR_MS);
   datalayer.battery.pack[1].status.balancing_status = BALANCING_STATUS_ACTIVE;
   handle_BMSpower();
   EXPECT_EQ(datalayer.system.status.bms_reset_status, BMS_RESET_IDLE);
 
-  user_selected_second_battery = false;
+  user_selected_battery_types[1] = BatteryType::None;
+  teardown_periodic_reset_test();
+}
+
+TEST(BmsResetTests, LowSocDeferConsultsOnlyConstructedPacks) {
+  setup_periodic_reset_test(24);
+  periodic_bms_reset_defer_low_soc = true;
+  user_selected_battery_types[2] = BatteryType::NissanLeaf;
+  batteries[2] = create_battery(BatteryType::NissanLeaf, battery_slot_context(2));
+  user_selected_battery_types[1] = BatteryType::TeslaModel3Y;
+  datalayer.battery.pack[1].status.real_soc = 0;
+  datalayer.battery.pack[1].status.reported_soc = 0;
+  datalayer.battery.pack[2].status.real_soc = 1000;
+  datalayer.battery.pack[2].status.reported_soc = 1000;
+
+  set_millis64(25 * ONE_HOUR_MS);
+  handle_BMSpower();
+  EXPECT_EQ(datalayer.system.status.bms_reset_status, BMS_RESET_IDLE)
+      << "the far-side constructed pack's low SOC must defer the reset, so the walk cannot stop at a prefix";
+
+  datalayer.battery.pack[2].status.real_soc = 5000;
+  datalayer.battery.pack[2].status.reported_soc = 5000;
+  handle_BMSpower();
+  EXPECT_EQ(datalayer.system.status.bms_reset_status, BMS_RESET_POWERED_OFF)
+      << "slot 1 is selected but never constructed, so its stuck 0 % SOC must not defer the reset forever";
+
+  user_selected_battery_types[1] = BatteryType::None;
+  user_selected_battery_types[2] = BatteryType::None;
+  datalayer.battery.pack[2].status.real_soc = 0;
+  datalayer.battery.pack[2].status.reported_soc = 0;
   teardown_periodic_reset_test();
 }
 

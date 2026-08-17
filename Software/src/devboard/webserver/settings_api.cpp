@@ -53,9 +53,9 @@ const SettingField kSettingFields[] = {
     {"BATTCVMAX", "BATTCVMAX", ST::Uint, kBattery, SA::Boot, 0, nullptr},
     {"BATTCVMIN", "BATTCVMIN", ST::Uint, kBattery, SA::Boot, 0, nullptr},
     {"PYLONBAUD", "PYLONBAUD", ST::Uint, kBattery, SA::Boot, 500, nullptr},
-    {"DBLBTR", "DBLBTR", ST::Bool, kBattery, SA::Boot, 0, nullptr},
+    {"battery2", "BATT2TYPE", ST::EnumUint, kBattery, SA::Boot, 0, nullptr, "battery"},
     {"BATT2COMM", "BATT2COMM", ST::InterfacePacked, kBattery, SA::Boot, 0, nullptr},
-    {"TRIBTR", "TRIBTR", ST::Bool, kBattery, SA::Boot, 0, nullptr},
+    {"battery3", "BATT3TYPE", ST::EnumUint, kBattery, SA::Boot, 0, nullptr, "battery"},
     {"BATT3COMM", "BATT3COMM", ST::InterfacePacked, kBattery, SA::Boot, 0, nullptr},
     {"INTERLOCKREQ", "INTERLOCKREQ", ST::Bool, kBattery, SA::Boot, 0, nullptr},
     {"SOCESTIMATED", "SOCESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
@@ -607,6 +607,33 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   if (!battery_value.isNull() && !board_supports_battery_type(static_cast<BatteryType>(battery_value.as<int>()))) {
     result.ok = false;
     result.error = "This hardware has no interface that battery type can use.";
+    return result;
+  }
+
+  static const struct {
+    const char* json_key;
+    const char* nvs_key;
+    uint8_t slot;
+  } kExtraBatterySlots[] = {{"battery2", "BATT2TYPE", 1}, {"battery3", "BATT3TYPE", 2}};
+
+  BatteryType effective_types[kMaxBatterySlots] = {
+      static_cast<BatteryType>(battery_value.isNull() ? store.getUInt("BATTTYPE", 0) : battery_value.as<int>()),
+      BatteryType::None, BatteryType::None};
+  for (const auto& extra : kExtraBatterySlots) {
+    JsonVariantConst value = values[extra.json_key];
+    const BatteryType type =
+        static_cast<BatteryType>(value.isNull() ? store.getUInt(extra.nvs_key, 0) : value.as<int>());
+    effective_types[extra.slot] = type;
+    if (!battery_type_allowed_in_slot(type, extra.slot)) {
+      result.ok = false;
+      result.error = String("Setting ") + extra.json_key + " selects a battery type this slot cannot run";
+      return result;
+    }
+  }
+  if (effective_types[0] == BatteryType::None &&
+      (effective_types[1] != BatteryType::None || effective_types[2] != BatteryType::None)) {
+    result.ok = false;
+    result.error = "Configure the primary battery before adding extra batteries.";
     return result;
   }
 

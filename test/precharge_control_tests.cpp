@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <Arduino.h>
 
 #include "../Software/src/battery/BATTERIES.h"
@@ -13,22 +15,23 @@ class PrechargeControlTest : public ::testing::Test {
     datalayer = DataLayer();
     init_hal();
     set_millis64(100000);
-    saved_type_ = user_selected_battery_type;
+    std::copy(std::begin(user_selected_battery_types), std::end(user_selected_battery_types),
+              std::begin(saved_types_));
     saved_battery_ = batteries[0];
     batteries[0] = nullptr;
-    user_selected_battery_type = BatteryType::None;
+    user_selected_battery_types[0] = BatteryType::None;
     datalayer.system.status.system_status = ACTIVE;
     datalayer.system.status.inverter_allows_contactor_closing = true;
   }
 
   void TearDown() override {
     batteries[0] = saved_battery_;
-    user_selected_battery_type = saved_type_;
+    std::copy(std::begin(saved_types_), std::end(saved_types_), std::begin(user_selected_battery_types));
     set_millis64(0);
   }
 
  private:
-  BatteryType saved_type_;
+  BatteryType saved_types_[kMaxBatterySlots];
   Battery* saved_battery_;
 };
 
@@ -40,7 +43,7 @@ TEST_F(PrechargeControlTest, NoSelectedTypeIsTestMode) {
 }
 
 TEST_F(PrechargeControlTest, UnconstructedBatteryIsNotTestMode) {
-  user_selected_battery_type = BatteryType::NissanLeaf;
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
   datalayer.system.info.start_precharging = false;
   handle_precharge_control(millis());
   EXPECT_FALSE(datalayer.system.info.start_precharging)
@@ -48,8 +51,17 @@ TEST_F(PrechargeControlTest, UnconstructedBatteryIsNotTestMode) {
   EXPECT_EQ(datalayer.system.status.precharge_status, AUTO_PRECHARGE_IDLE);
 }
 
+TEST_F(PrechargeControlTest, OccupiedExtraSlotIsNotTestMode) {
+  user_selected_battery_types[1] = BatteryType::NissanLeaf;
+  datalayer.system.info.start_precharging = false;
+  handle_precharge_control(millis());
+  EXPECT_FALSE(datalayer.system.info.start_precharging)
+      << "an occupied extra slot means a real pack is wired, so an empty primary slot must not enable "
+         "hardware-test precharge";
+}
+
 TEST_F(PrechargeControlTest, IdleToStartRequiresActiveSystem) {
-  user_selected_battery_type = BatteryType::NissanLeaf;
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
   datalayer.system.info.start_precharging = true;
   datalayer.system.status.system_status = FAULT;
   handle_precharge_control(millis());
@@ -62,7 +74,7 @@ TEST_F(PrechargeControlTest, IdleToStartRequiresActiveSystem) {
 }
 
 TEST_F(PrechargeControlTest, IdleToStartRequiresInverterPermission) {
-  user_selected_battery_type = BatteryType::NissanLeaf;
+  user_selected_battery_types[0] = BatteryType::NissanLeaf;
   datalayer.system.info.start_precharging = true;
   datalayer.system.status.inverter_allows_contactor_closing = false;
   handle_precharge_control(millis());

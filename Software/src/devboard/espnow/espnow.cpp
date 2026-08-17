@@ -447,8 +447,8 @@ static void send_battery_frame(uint8_t index) {
                        charging_state, limits.inverter_limits_charge, limits.inverter_limits_discharge,
                        limits.user_settings_limit_charge, limits.user_settings_limit_discharge)));
 
-    if (index == 0 && (user_selected_battery_type == BatteryType::TeslaModel3Y ||
-                       user_selected_battery_type == BatteryType::TeslaModelSX)) {
+    if (index == 0 && (battery_type_for_slot(0) == BatteryType::TeslaModel3Y ||
+                       battery_type_for_slot(0) == BatteryType::TeslaModelSX)) {
       put_i16_field(ESPNOW_KEY_DCDC_CURRENT_DA,
                     static_cast<int16_t>(datalayer_extended.tesla.battery_dcdcLvOutputCurrent));
       // Raw unit is 0.0390625 V; 1/0.0390625 == 25.6, so *1000/25.6 == *125/3.2. Scaled
@@ -457,7 +457,7 @@ static void send_battery_frame(uint8_t index) {
           ESPNOW_KEY_DCDC_VOLTAGE_MV,
           static_cast<uint16_t>((static_cast<uint32_t>(datalayer_extended.tesla.battery_dcdcLvBusVolt) * 625u) / 16u));
     }
-    if (user_selected_battery_type == BatteryType::BydAtto3) {
+    if (battery_type_for_slot(0) == BatteryType::BydAtto3) {
       const DATALAYER_INFO_BYDATTO3& byd = (index == 1) ? datalayer_extended.bydAtto3_2 : datalayer_extended.bydAtto3;
       put_bool_field(ESPNOW_KEY_AUTOCAL_TAPER, byd.autocal_crit_taper);
       put_u32_field(ESPNOW_KEY_AUTOCAL_DWELL_S, byd.autocal_dwell_accumulated_ms / 1000u);

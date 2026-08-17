@@ -69,7 +69,7 @@ void handle_precharge_control(unsigned long currentMillis) {
   }
 
   // If we are running in test mode (No battery configured, enable precharge sequence so user can test HW)
-  if (user_selected_battery_type == BatteryType::None) {
+  if (!any_battery_slot_occupied()) {
     datalayer.system.info.start_precharging = true;
     datalayer.battery.pack[0].status.real_bms_status = BMS_STANDBY;
   }

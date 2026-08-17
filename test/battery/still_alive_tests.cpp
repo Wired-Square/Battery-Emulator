@@ -24,7 +24,7 @@ class BatteryTestFixture : public testing::Test {
     }
     init_hal();
 
-    user_selected_battery_type = type;
+    user_selected_battery_types[0] = type;
     setup_battery();
   }
 

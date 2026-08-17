@@ -64,11 +64,6 @@
 
 #include "battery_slots.h"
 
-// Number of user-enabled battery slots (highest enabled slot + 1). An enabled
-// slot can still hold a null battery when the selected type does not support
-// it, so consumers must null-check batteries[slot].
-uint8_t active_battery_slots();
-
 void setup_shunt();
 
 void setup_battery(void);

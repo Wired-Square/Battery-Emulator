@@ -39,7 +39,7 @@ class CanLogTestFixture : public testing::Test {
     // Extract battery type from log filename
     std::string filename = path_.filename().string();
     std::string batteryId = filename.substr(0, filename.find('_'));
-    user_selected_battery_type = (BatteryType)std::stoi(batteryId);
+    user_selected_battery_types[0] = (BatteryType)std::stoi(batteryId);
     batteries[0] = nullptr;
     setup_battery();
 

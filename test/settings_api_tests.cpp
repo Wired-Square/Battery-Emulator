@@ -383,6 +383,30 @@ TEST_F(SettingsApiTest, PresentFalseBoolIsWrittenFalse) {
   EXPECT_FALSE(store.getBool("MQTTCELLV", true));
 }
 
+TEST_F(SettingsApiTest, ExtraSlotRejectsTypeBeyondItsSlotCap) {
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["values"]["battery"] = (int)BatteryType::NissanLeaf;
+  body["values"]["battery3"] = (int)BatteryType::TeslaModel3Y;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok) << "Tesla supports two packs at most; slot 3 must be refused at save time, not left to boot as "
+                        "a silent no-start that strands the BMS-reset SOC walk";
+  EXPECT_FALSE(store.settingExists("BATT3TYPE"));
+}
+
+TEST_F(SettingsApiTest, EmptyPrimaryWithStoredExtraBatteryIsRejected) {
+  BatteryEmulatorSettingsStore store;
+  store.saveUInt("BATT2TYPE", (uint32_t)BatteryType::NissanLeaf);
+  JsonDocument body;
+  body["values"]["battery"] = 0;
+  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+
+  EXPECT_FALSE(r.ok) << "the combined view and parallel safety join from pack 0, so an empty primary with a live "
+                        "extra pack must be refused even when the extra slot arrives from storage, not the POST";
+  EXPECT_FALSE(store.settingExists("BATTTYPE"));
+}
+
 TEST_F(SettingsApiTest, AliasWritesNvsKeyNotJsonKey) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;

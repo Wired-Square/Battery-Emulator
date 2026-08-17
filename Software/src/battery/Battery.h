@@ -2,6 +2,7 @@
 #define BATTERY_H
 
 #include "../../src/devboard/utils/types.h"
+#include "../system_settings.h"
 #include "battery_advanced_status.h"
 #include "battery_command.h"
 
@@ -66,9 +67,11 @@ enum class BatteryType {
 extern const char* name_for_battery_type(BatteryType type);
 extern const char* name_for_chemistry(battery_chemistry_enum chem);
 
-extern BatteryType user_selected_battery_type;
-extern bool user_selected_second_battery;
-extern bool user_selected_triple_battery;
+extern BatteryType user_selected_battery_types[kMaxBatterySlots];
+BatteryType battery_type_for_slot(uint8_t slot);
+bool battery_slot_occupied(uint8_t slot);
+bool any_battery_slot_occupied();
+bool battery_type_allowed_in_slot(BatteryType type, uint8_t slot);
 
 extern battery_chemistry_enum user_selected_battery_chemistry;
 

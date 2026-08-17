@@ -9,9 +9,10 @@
 
 namespace {
 
-void emit_battery(JsonArray entries, uint8_t cell_count, const uint16_t* cell_voltages_mV,
+void emit_battery(JsonArray entries, uint8_t slot, uint8_t cell_count, const uint16_t* cell_voltages_mV,
                   const bool* cell_balancing, balancing_status_enum balancing_status) {
   JsonObject entry = entries.add<JsonObject>();
+  entry["slot"] = slot;
   JsonArray cells = entry["cells"].to<JsonArray>();
   JsonArray balancing = entry["balancing"].to<JsonArray>();
   for (uint8_t i = 0; i < cell_count; i++) {
@@ -31,18 +32,13 @@ String build_cellmonitor_json() {
   JsonDocument doc;
   JsonArray entries = doc["batteries"].to<JsonArray>();
 
-  const auto& b1 = datalayer.battery.pack[0];
-  emit_battery(entries, b1.info.number_of_cells, b1.status.cell_voltages_mV, b1.status.cell_balancing_status,
-               b1.status.balancing_status);
-  if (batteries[1]) {
-    const auto& b2 = datalayer.battery.pack[1];
-    emit_battery(entries, b2.info.number_of_cells, b2.status.cell_voltages_mV, b2.status.cell_balancing_status,
-                 b2.status.balancing_status);
-  }
-  if (batteries[2]) {
-    const auto& b3 = datalayer.battery.pack[2];
-    emit_battery(entries, b3.info.number_of_cells, b3.status.cell_voltages_mV, b3.status.cell_balancing_status,
-                 b3.status.balancing_status);
+  for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+    if (slot > 0 && batteries[slot] == nullptr) {
+      continue;
+    }
+    const auto& pack = datalayer.battery.pack[slot];
+    emit_battery(entries, slot, pack.info.number_of_cells, pack.status.cell_voltages_mV,
+                 pack.status.cell_balancing_status, pack.status.balancing_status);
   }
   return serialise_doc(doc);
 }

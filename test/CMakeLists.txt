@@ -93,6 +93,7 @@ add_executable(tests
     estop_graceful_open_tests.cpp
     contactor_sequence_tests.cpp
     precharge_control_tests.cpp
+    nvm_migration_tests.cpp
     hal_interface_tests.cpp
     interface_descriptor_tests.cpp
     can_bus_tests.cpp

@@ -107,7 +107,10 @@ void init_stored_settings() {
     datalayer.battery.settings.user_set_bms_reset_duration_ms = temp;
   }
 
-  user_selected_battery_type = (BatteryType)settings.getUInt("BATTTYPE", (int)BatteryType::None);
+  migrate_battery_slot_types(settings);
+  user_selected_battery_types[0] = (BatteryType)settings.getUInt("BATTTYPE", (int)BatteryType::None);
+  user_selected_battery_types[1] = (BatteryType)settings.getUInt("BATT2TYPE", (int)BatteryType::None);
+  user_selected_battery_types[2] = (BatteryType)settings.getUInt("BATT3TYPE", (int)BatteryType::None);
   user_selected_battery_chemistry =
       (battery_chemistry_enum)settings.getUInt("BATTCHEM", (int)battery_chemistry_enum::NCA);
   user_selected_inverter_protocol = (InverterProtocolType)settings.getUInt("INVTYPE", (int)InverterProtocolType::None);
@@ -189,8 +192,6 @@ void init_stored_settings() {
       default_interface_config(esp32hal->interfaces()) & INTERFACE_INDEX_MASK;
 
   equipment_stop_behavior = (STOP_BUTTON_BEHAVIOR)settings.getUInt("EQSTOP", (int)STOP_BUTTON_BEHAVIOR::NOT_CONNECTED);
-  user_selected_second_battery = settings.getBool("DBLBTR", false);
-  user_selected_triple_battery = settings.getBool("TRIBTR", false);
   contactor_control_enabled = settings.getBool("CNTCTRL", false);
   inverter_low_pass_filter = settings.getBool("LOWPASSFILTER", false);
   charge_taper_soc = settings.getBool("CHGTAPERSOC", false);

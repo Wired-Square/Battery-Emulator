@@ -17,7 +17,7 @@ let timer = null;
 
 function batterySection(battery, index, multi) {
   const section = el('div', 'card');
-  if (multi) section.append(el('h3', null, `Battery ${index + 1}`));
+  if (multi) section.append(el('h3', null, `Battery ${(battery.slot ?? index) + 1}`));
 
   if (!battery.cells.length) {
     section.append(el('div', 'muted', 'No cell voltages read yet.'));
