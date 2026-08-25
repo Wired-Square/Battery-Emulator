@@ -64,7 +64,7 @@ static size_t syslogLineLen = 0;
 // task sees the link come up. Record layout: [uint8 severity][text\0]
 #define SYSLOG_QUEUE_MAX 4096
 #define SYSLOG_MSG_MAX (SYSLOG_LINE_MAX + 24)  // room for the "[boot +N.NNNs] " prefix
-static char* syslogQueue = nullptr;
+static char syslogQueue[SYSLOG_QUEUE_MAX];
 static size_t syslogQueueLen = 0;  // write cursor
 static size_t syslogQueuePos = 0;  // read cursor
 static uint16_t syslogDropped = 0;
@@ -130,22 +130,12 @@ static void syslog_queue_push(uint8_t sev, const char* msg) {
   if (n < 0 || syslogMutex == nullptr) {
     return;
   }
+  if (!datalayer.system.info.syslog_logging_active) {
+    return;
+  }
   // Short timeout: the holder only ever does a memcpy, so this never actually waits.
   if (xSemaphoreTake(syslogMutex, pdMS_TO_TICKS(2)) != pdTRUE) {
     return;
-  }
-
-  if (syslogQueue == nullptr) {
-    IPAddress dst;
-    if (!dst.fromString(syslog_ip.c_str())) {
-      xSemaphoreGive(syslogMutex);  // no syslog server configured -> never allocate
-      return;
-    }
-    syslogQueue = (char*)malloc(SYSLOG_QUEUE_MAX);
-    if (syslogQueue == nullptr) {
-      xSemaphoreGive(syslogMutex);  // out of heap -> drop; logging must never be fatal
-      return;
-    }
   }
 
   size_t need = 1 + plen + 1 + (size_t)n + 1;
@@ -182,7 +172,7 @@ static void syslog_task(void* arg) {
     bool have = false;
 
     if (syslog_online() && syslogMutex != nullptr && xSemaphoreTake(syslogMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-      if (syslogQueue != nullptr && syslogQueuePos < syslogQueueLen) {
+      if (syslogQueuePos < syslogQueueLen) {
         sev = (uint8_t)syslogQueue[syslogQueuePos++];
         const char* rec = &syslogQueue[syslogQueuePos];
         snprintf(proc, sizeof(proc), "%s", rec);  // task name

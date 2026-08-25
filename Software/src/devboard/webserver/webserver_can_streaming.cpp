@@ -2,7 +2,6 @@
 #include "../../communication/can/comm_can.h"
 #include "webserver.h"
 
-#include <stdlib.h>
 #include <atomic>
 
 // ---------------------------------------------------------------------------
@@ -60,11 +59,7 @@ static constexpr size_t CAN_DUMP_RING_SIZE = 8192;
 // signal 30 overrun events even when the buffer is nearly saturated.
 static constexpr size_t CAN_DUMP_RING_OVERRUN_RESERVE = 30;
 
-// The ring buffer is heap-allocated when a /dump_can stream starts and freed
-// once the stream disconnects. It must never be torn down while the CAN task is
-// mid-write, so access to the pointer is guarded by an atomic flag (see the
-// busy-lock helpers below).
-static uint8_t* can_dump_ring = nullptr;
+static uint8_t can_dump_ring[CAN_DUMP_RING_SIZE];
 
 // Single-producer / single-consumer lock-free byte ring.
 //  - CAN receive task is the ONLY producer and only writes can_dump_ring_tail.
@@ -75,48 +70,37 @@ static uint8_t* can_dump_ring = nullptr;
 static std::atomic<size_t> can_dump_ring_head{0};
 static std::atomic<size_t> can_dump_ring_tail{0};
 
-// Guard for the lifetime of can_dump_ring. It is a single binary flag so that
-// the producer (CAN task / ISR, which must never block) can take it with a
-// non-blocking test_and_set and simply drop the frame if it is already held.
-// The free/allocation paths run in task context, where a short blocking spin is
-// acceptable. Holding the lock across the whole buffer write means a free can
-// never run against memory the producer is still touching.
-static std::atomic_flag can_dump_ring_busy = ATOMIC_FLAG_INIT;
+// Orders the stream-start index reset against an in-flight producer write: a
+// producer that loaded tail before the reset would otherwise store a stale tail
+// after it, and "used = tail - head" would then read as garbage.
+static std::atomic_flag can_dump_ring_resetting = ATOMIC_FLAG_INIT;
 
-static bool __attribute__((noinline)) can_dump_ring_test_and_set() {
-  return can_dump_ring_busy.test_and_set(std::memory_order_acquire);
+static bool __attribute__((noinline)) can_dump_ring_try_lock() {
+  return can_dump_ring_resetting.test_and_set(std::memory_order_acquire);
 }
 
-// Blocking acquisition - only ever called from task context (stream start /
-// tear-down). Never taken from an ISR.
+// Blocking acquisition - only ever called from task context (stream start).
+// Never taken from an ISR.
 static void can_dump_ring_lock() {
-  while (can_dump_ring_test_and_set()) {
+  while (can_dump_ring_try_lock()) {
     vTaskDelay(1);
   }
 }
 
 static void can_dump_ring_unlock() {
-  can_dump_ring_busy.clear(std::memory_order_release);
+  can_dump_ring_resetting.clear(std::memory_order_release);
 }
 
 // Set by the /dump_can handler when a brand-new client is installed: the drain
 // task must drop any stale bytes still in the ring before streaming resumes.
 static std::atomic<bool> can_dump_reset_pending{false};
 
-// Called ONLY from the CAN receive task, never blocks. Holds the busy lock for
-// the duration of the write so that a concurrent free (which takes the same
-// lock) can never reclaim the buffer out from under us.
+// Called ONLY from the CAN receive task, never blocks.
 static void can_dump_ring_push(const char* line, size_t len) {
-  // Non-blocking: if another thread owns the lock right now (e.g. it is tearing
-  // the stream down) just drop this frame rather than stalling the CAN task.
-  if (can_dump_ring_test_and_set())
+  // Non-blocking: if the stream-start path owns the lock right now, drop this
+  // frame rather than stalling the CAN task.
+  if (can_dump_ring_try_lock())
     return;
-
-  uint8_t* ring = can_dump_ring;
-  if (ring == nullptr) {  // Ring not allocated - no active stream.
-    can_dump_ring_busy.clear(std::memory_order_release);
-    return;
-  }
 
   const size_t tail = can_dump_ring_tail.load(std::memory_order_relaxed);
   const size_t head = can_dump_ring_head.load(std::memory_order_acquire);
@@ -131,29 +115,26 @@ static void can_dump_ring_push(const char* line, size_t len) {
     size_t n1 = CAN_DUMP_RING_SIZE - i;
     if (n1 > len)
       n1 = len;
-    memcpy(&ring[i], line, n1);
+    memcpy(&can_dump_ring[i], line, n1);
     if (len > n1) {
-      memcpy(&ring[0], line + n1, len - n1);
+      memcpy(&can_dump_ring[0], line + n1, len - n1);
     }
     can_dump_ring_tail.store(tail + len, std::memory_order_release);
   } else if (free > 0) {
     // Not enough room for a whole line, but there is still space beyond the
     // reserve for a newline indicator. These are useful signals of overflow
     // that are compatible with the log format.
-    ring[tail % CAN_DUMP_RING_SIZE] = '\n';
+    can_dump_ring[tail % CAN_DUMP_RING_SIZE] = '\n';
     can_dump_ring_tail.store(tail + 1, std::memory_order_release);
   }
   // Otherwise we just silently drop the line.
 
-  can_dump_ring_busy.clear(std::memory_order_release);
+  can_dump_ring_resetting.clear(std::memory_order_release);
 }
 
 // Move as many buffered bytes as AsyncTCP can currently accept into the client.
 // Returns false only if the socket is gone / could not be written to.
 static bool can_dump_ring_drain(AsyncClient* client) {
-  if (can_dump_ring == nullptr) {
-    return true;  // No ring buffer yet
-  }
   const size_t tail = can_dump_ring_tail.load(std::memory_order_acquire);
   size_t head = can_dump_ring_head.load(std::memory_order_relaxed);
   size_t used = tail - head;
@@ -206,23 +187,6 @@ void can_dump_drain_tick() {
     }
   }
 
-  // No active connection, so the stream has torn down (or never started). Now
-  // that the consumer is idle we may free the ring buffer. We only free when
-  // we can grab the busy lock (i.e. the CAN task is not mid-write); if we can't,
-  // defer and try again on the next tick. drain and this free both run on this
-  // same (timer-tick) thread, so they can never race each other.
-  if (can_dump_client == nullptr) {
-    if (!can_dump_ring_test_and_set()) {
-      if (can_dump_ring != nullptr) {
-        free(can_dump_ring);
-        can_dump_ring = nullptr;
-        can_dump_ring_head.store(0, std::memory_order_release);
-        can_dump_ring_tail.store(0, std::memory_order_release);
-      }
-      can_dump_ring_busy.clear(std::memory_order_release);
-    }
-  }
-
   xSemaphoreGive(can_dump_mutex);
 }
 
@@ -259,29 +223,10 @@ void register_dump_can_route(AsyncWebServer& server) {
 
     AsyncClient* client = request->client();
 
-    // Allocate the ring buffer for this stream, or reuse the existing one if an
-    // earlier stream is still being buffered while it is replaced. Taken under
-    // the busy lock so we never race an in-flight CAN write belonging to the
-    // previous tenant. In task context a short blocking wait is fine.
     can_dump_ring_lock();
-    if (can_dump_ring == nullptr) {
-      can_dump_ring = static_cast<uint8_t*>(malloc(CAN_DUMP_RING_SIZE));
-    }
-    // Fresh stream starts with an empty ring.
     can_dump_ring_head.store(0, std::memory_order_release);
     can_dump_ring_tail.store(0, std::memory_order_release);
 
-    if (can_dump_ring == nullptr) {
-      // Out of memory - we cannot stand up a stream. Send a normal HTTP error
-      // response via the framework (the request was never "streamed", so the
-      // normal send path is still valid).
-      can_dump_ring_unlock();
-      request->send(503, "text/plain", "out of memory");
-      return;
-    }
-
-    // Install the new client while still holding the busy flag so the drain
-    // tick's free path cannot reclaim the ring between allocation and install.
     // We leave can_streaming_active gated OFF until the drain task has dropped
     // any stale bytes and re-opened the gate, so a fresh stream never inherits
     // lines from the previous tenant.

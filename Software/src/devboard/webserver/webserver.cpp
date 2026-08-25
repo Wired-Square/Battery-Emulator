@@ -39,9 +39,8 @@ bool webserver_auth = false;
 static constexpr int HTTP_STATUS_OK = 200;
 static constexpr int HTTP_STATUS_BAD_REQUEST = 400;
 static constexpr int HTTP_STATUS_INTERNAL_SERVER_ERROR = 500;
-// Sanity cap on a reassembled JSON POST body. The full settings save is ~2-3 KB
-// (~104 fields); 16 KB leaves generous headroom while bounding the per-request
-// heap allocation against a malformed or hostile Content-Length.
+static constexpr int HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
+// The full settings save is ~2-3 KB (~104 fields); do not shrink below that.
 static constexpr size_t MAX_JSON_POST_BODY_BYTES = 16384;
 static constexpr const char* CONTENT_TYPE_JSON = "application/json";
 static constexpr const char* ASSET_PATH_SHELL = "/index.html";
@@ -215,6 +214,9 @@ void def_route_with_auth(const char* uri, AsyncWebServer& serv, WebRequestMethod
   });
 }
 
+static uint8_t json_post_body[MAX_JSON_POST_BODY_BYTES];
+static AsyncWebServerRequest* json_post_owner = nullptr;
+
 // The server middleware chain runs only once the body is fully parsed, which is
 // after the body callback has already seen the payload, so these handlers repeat
 // the auth check themselves rather than rely on web_auth_middleware.
@@ -223,10 +225,6 @@ static void def_json_post_with_auth(const char* uri,
   server.on(
       uri, HTTP_POST, [](AsyncWebServerRequest*) {}, nullptr,
       [handler](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-        // AsyncTCP caps a chunk at MAX_PAYLOAD_SIZE, so the settings
-        // save arrives across several callbacks; reassemble into a per-request
-        // heap buffer before parsing. _tempObject is freed by the request
-        // destructor, so a mid-transfer abort cannot leak the buffer.
         if (index == 0) {
           if (webserver_auth_is_ready() && !request->authenticate(http_username.c_str(), http_password.c_str())) {
             return request->requestAuthentication(AsyncAuthType::AUTH_BASIC, WEB_AUTH_REALM);
@@ -234,32 +232,36 @@ static void def_json_post_with_auth(const char* uri,
           if (total == 0 || total > MAX_JSON_POST_BODY_BYTES) {
             return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad JSON");
           }
-          request->_tempObject = malloc(total);
-          if (request->_tempObject == nullptr) {
-            return request->send(HTTP_STATUS_INTERNAL_SERVER_ERROR, "text/plain", "Out of memory");
+          if (json_post_owner != nullptr) {
+            return request->send(HTTP_STATUS_SERVICE_UNAVAILABLE, "text/plain", "Busy");
           }
+          json_post_owner = request;
+          // Releases a body that never completes. Compares first: this fires on
+          // every teardown, including after a later POST has taken ownership.
+          request->onDisconnect([request]() {
+            if (json_post_owner == request) {
+              json_post_owner = nullptr;
+            }
+          });
         }
-        if (request->_tempObject == nullptr) {
+        if (json_post_owner != request) {
           return;  // First chunk was rejected; ignore trailing chunks of the same body.
         }
         if (index + len > total) {
-          free(request->_tempObject);
-          request->_tempObject = nullptr;
+          json_post_owner = nullptr;
           return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad JSON");
         }
-        memcpy((uint8_t*)request->_tempObject + index, data, len);
+        memcpy(json_post_body + index, data, len);
         if (index + len != total) {
           return;
         }
         JsonDocument doc;
-        if (deserializeJson(doc, (uint8_t*)request->_tempObject, total) != DeserializationError::Ok) {
-          free(request->_tempObject);
-          request->_tempObject = nullptr;
+        if (deserializeJson(doc, json_post_body, total) != DeserializationError::Ok) {
+          json_post_owner = nullptr;
           return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad JSON");
         }
         handler(request, doc);
-        free(request->_tempObject);
-        request->_tempObject = nullptr;
+        json_post_owner = nullptr;
       });
 }
 
