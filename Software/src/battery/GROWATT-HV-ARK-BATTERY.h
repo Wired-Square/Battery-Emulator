@@ -19,7 +19,6 @@ class GrowattHvArkBattery : public CanBattery {
  public:
   GrowattHvArkBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
   // Use the default constructor to create the first or single battery.
-  GrowattHvArkBattery() {}
 
   ~GrowattHvArkBattery() {}
 

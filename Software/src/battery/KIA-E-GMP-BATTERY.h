@@ -9,7 +9,6 @@ class KiaEGmpBattery : public CanBattery {
  public:
   bool mandatory_charge_taper() { return true; }
   KiaEGmpBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
-  KiaEGmpBattery() {}
   virtual void setup(void);
   virtual void handle_incoming_can_frame(CAN_frame rx_frame);
   virtual void update_values();

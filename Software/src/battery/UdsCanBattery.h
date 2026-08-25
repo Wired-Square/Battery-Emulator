@@ -58,7 +58,6 @@
 
 class UdsCanBattery : public CanBattery, public IsoTp {
  public:
-  UdsCanBattery(CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS) : CanBattery(speed) {}
   UdsCanBattery(const InterfaceDescriptor* interface, CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS)
       : CanBattery(interface, speed) {}
 

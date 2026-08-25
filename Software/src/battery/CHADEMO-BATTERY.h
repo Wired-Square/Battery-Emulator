@@ -10,7 +10,7 @@
 class ChademoBattery : public CanBattery {
  public:
   ChademoBattery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
-  ChademoBattery() {
+  ChademoBattery() : CanBattery(nullptr) {
     pin2 = esp32hal->CHADEMO_PIN_2();
     pin10 = esp32hal->CHADEMO_PIN_10();
     pin4 = esp32hal->CHADEMO_PIN_4();

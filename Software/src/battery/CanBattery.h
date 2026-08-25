@@ -25,7 +25,6 @@ class CanBattery : public Battery, Transmitter, CanReceiver {
  protected:
   const InterfaceDescriptor* can_interface;
 
-  CanBattery(CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS, CanSpeedMode mode = CanSpeedMode::Fixed);
   CanBattery(const InterfaceDescriptor* interface, CAN_Speed speed = CAN_Speed::CAN_SPEED_500KBPS,
              CanSpeedMode mode = CanSpeedMode::Fixed);
 

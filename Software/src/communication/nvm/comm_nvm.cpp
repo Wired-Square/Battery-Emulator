@@ -181,9 +181,9 @@ void init_stored_settings() {
     return desc;
   };
 
-  can_config.battery = readIf("BATTCOMM");
-  can_config.battery_double = readIf("BATT2COMM");
-  can_config.battery_triple = readIf("BATT3COMM");
+  can_config.battery[0] = readIf("BATTCOMM");
+  can_config.battery[1] = readIf("BATT2COMM");
+  can_config.battery[2] = readIf("BATT3COMM");
   can_config.inverter = readIf("INVCOMM");
   can_config.charger = readIf("CHGCOMM");
   can_config.shunt = readIf("SHUNTCOMM");

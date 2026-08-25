@@ -275,8 +275,6 @@ static void check_battery_packs() {
 // on the tick a battery first goes silent. Corrupted CAN aggregates across
 // slots for the same reason as the pack checks above.
 static void check_battery_liveness() {
-  const InterfaceDescriptor* slot_interface[kMaxBatterySlots] = {can_config.battery, can_config.battery_double,
-                                                                 can_config.battery_triple};
   static constexpr struct {
     EVENTS_ENUM_TYPE detected;
     EVENTS_ENUM_TYPE missing;
@@ -301,13 +299,13 @@ static void check_battery_liveness() {
     // Check that the BMS has been seen and is still sending CAN messages.
     // If we go 60s without messages we raise an error
     check_can_component_alive(status.CAN_battery_still_alive, battery_detected_slots[slot], kSlotEvents[slot].detected,
-                              kSlotEvents[slot].missing, can_event_interface_id(slot_interface[slot]));
+                              kSlotEvents[slot].missing, can_event_interface_id(can_config.battery[slot]));
 
     // Too many malformed CAN messages received!
     if (status.CAN_error_counter > MAX_CAN_FAILURES && status.CAN_error_counter >= corrupted_worst_count) {
       corrupted_offending = true;
       corrupted_worst_count = status.CAN_error_counter;
-      corrupted_worst_interface = slot_interface[slot];
+      corrupted_worst_interface = can_config.battery[slot];
     }
   }
 

@@ -420,8 +420,8 @@ TEST(SetupBatterySlotGateTest, DuplicateInterfaceFaultsTheBusAtResolve) {
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_BATTERY_TYPE saved_datalayer_battery2 = datalayer.battery.pack[1];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
-  auto* saved_iface = can_config.battery;
-  auto* saved_iface_double = can_config.battery_double;
+  auto* saved_iface = can_config.battery[0];
+  auto* saved_iface1 = can_config.battery[1];
 
   static SpeedProbeBus shared_bus;
   static InterfaceDescriptor shared_iface{InterfaceType::CanNative, nullptr, comm_interface::Highest, &shared_bus};
@@ -431,8 +431,8 @@ TEST(SetupBatterySlotGateTest, DuplicateInterfaceFaultsTheBusAtResolve) {
   user_selected_battery_types[0] = BatteryType::NissanLeaf;
   user_selected_battery_types[1] = user_selected_battery_types[0];
   user_selected_battery_types[2] = BatteryType::None;
-  can_config.battery = &shared_iface;
-  can_config.battery_double = &shared_iface;
+  can_config.battery[0] = &shared_iface;
+  can_config.battery[1] = &shared_iface;
 
   setup_battery();
 
@@ -448,8 +448,8 @@ TEST(SetupBatterySlotGateTest, DuplicateInterfaceFaultsTheBusAtResolve) {
   batteries[0] = saved_battery;
   batteries[1] = saved_battery2;
   batteries[2] = saved_battery3;
-  can_config.battery = saved_iface;
-  can_config.battery_double = saved_iface_double;
+  can_config.battery[0] = saved_iface;
+  can_config.battery[1] = saved_iface1;
   datalayer.battery.pack[0] = saved_datalayer_battery;
   datalayer.battery.pack[1] = saved_datalayer_battery2;
   datalayer.system.status = saved_status;
@@ -468,8 +468,8 @@ TEST(SetupBatterySlotGateTest, UnsupportedSecondSlotRaisesEvent) {
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_BATTERY_TYPE saved_datalayer_battery2 = datalayer.battery.pack[1];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
-  auto* saved_iface = can_config.battery;
-  auto* saved_iface_double = can_config.battery_double;
+  auto* saved_iface = can_config.battery[0];
+  auto* saved_iface1 = can_config.battery[1];
 
   static InterfaceDescriptor first_iface{InterfaceType::CanMcp2517fd, nullptr, comm_interface::Highest, nullptr};
   static InterfaceDescriptor second_iface{InterfaceType::CanMcp2517fd, nullptr, comm_interface::Highest, nullptr};
@@ -479,8 +479,8 @@ TEST(SetupBatterySlotGateTest, UnsupportedSecondSlotRaisesEvent) {
   user_selected_battery_types[0] = BatteryType::BmwIX;
   user_selected_battery_types[1] = user_selected_battery_types[0];
   user_selected_battery_types[2] = BatteryType::None;
-  can_config.battery = &first_iface;
-  can_config.battery_double = &second_iface;
+  can_config.battery[0] = &first_iface;
+  can_config.battery[1] = &second_iface;
 
   setup_battery();
 
@@ -494,8 +494,8 @@ TEST(SetupBatterySlotGateTest, UnsupportedSecondSlotRaisesEvent) {
   batteries[0] = saved_battery;
   batteries[1] = saved_battery2;
   batteries[2] = saved_battery3;
-  can_config.battery = saved_iface;
-  can_config.battery_double = saved_iface_double;
+  can_config.battery[0] = saved_iface;
+  can_config.battery[1] = saved_iface1;
   datalayer.battery.pack[0] = saved_datalayer_battery;
   datalayer.battery.pack[1] = saved_datalayer_battery2;
   datalayer.system.status = saved_status;
@@ -509,14 +509,14 @@ TEST(SetupBatterySlotGateTest, UnsupportedInterfaceRaisesEvent) {
   SavedSlotTypes saved_types;
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
-  auto* saved_iface = can_config.battery;
+  auto* saved_iface = can_config.battery[0];
 
   static InterfaceDescriptor classic_iface{InterfaceType::CanNative, nullptr, comm_interface::Highest, nullptr};
   batteries[0] = nullptr;
   user_selected_battery_types[0] = BatteryType::Meb;
   user_selected_battery_types[1] = BatteryType::None;
   user_selected_battery_types[2] = BatteryType::None;
-  can_config.battery = &classic_iface;
+  can_config.battery[0] = &classic_iface;
 
   setup_battery();
 
@@ -526,7 +526,7 @@ TEST(SetupBatterySlotGateTest, UnsupportedInterfaceRaisesEvent) {
   EXPECT_EQ(unsupported->data, 1);
 
   batteries[0] = saved_battery;
-  can_config.battery = saved_iface;
+  can_config.battery[0] = saved_iface;
   datalayer.battery.pack[0] = saved_datalayer_battery;
   datalayer.system.status = saved_status;
 }
@@ -539,14 +539,14 @@ TEST(SetupBatterySlotGateTest, SatisfiedInterfaceConstructs) {
   SavedSlotTypes saved_types;
   DATALAYER_BATTERY_TYPE saved_datalayer_battery = datalayer.battery.pack[0];
   DATALAYER_SYSTEM_STATUS_TYPE saved_status = datalayer.system.status;
-  auto* saved_iface = can_config.battery;
+  auto* saved_iface = can_config.battery[0];
 
   static InterfaceDescriptor fd_iface{InterfaceType::CanMcp2517fd, nullptr, comm_interface::Highest, nullptr};
   batteries[0] = nullptr;
   user_selected_battery_types[0] = BatteryType::Meb;
   user_selected_battery_types[1] = BatteryType::None;
   user_selected_battery_types[2] = BatteryType::None;
-  can_config.battery = &fd_iface;
+  can_config.battery[0] = &fd_iface;
 
   setup_battery();
 
@@ -555,7 +555,7 @@ TEST(SetupBatterySlotGateTest, SatisfiedInterfaceConstructs) {
 
   delete batteries[0];
   batteries[0] = saved_battery;
-  can_config.battery = saved_iface;
+  can_config.battery[0] = saved_iface;
   datalayer.battery.pack[0] = saved_datalayer_battery;
   datalayer.system.status = saved_status;
 }

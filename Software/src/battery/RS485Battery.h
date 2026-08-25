@@ -18,8 +18,6 @@ class RS485Battery : public Battery, Transmitter, Rs485Receiver {
 
   void transmit(unsigned long currentMillis) { transmit_rs485(currentMillis); }
 
-  RS485Battery() : RS485Battery(can_config.battery) {}
-
   RS485Battery(const InterfaceDescriptor* interface) : port_(resolve_rs485_port(interface)) {
     register_transmitter(this);
     if (port_ != nullptr) {

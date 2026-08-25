@@ -941,17 +941,21 @@ String capabilities_json() {
     }
   }
 
+  JsonArray battery_devices = doc["batteries"].to<JsonArray>();
+  for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+    if (!battery_slot_occupied(slot)) {
+      continue;
+    }
+    JsonObject device = battery_devices.add<JsonObject>();
+    device["slot"] = slot;
+    device["type"] = name_for_battery_type(battery_type_for_slot(slot));
+    const InterfaceDescriptor* interface = can_config.battery[slot];
+    if (interface != nullptr) {
+      device["interface"] = static_cast<size_t>(interface - list.data);
+    }
+  }
+
   JsonObject devices = doc["devices"].to<JsonObject>();
-  add_capabilities_device(devices, "battery", name_for_battery_type(battery_type_for_slot(0)), can_config.battery,
-                          list);
-  if (battery_slot_occupied(1)) {
-    add_capabilities_device(devices, "battery2", name_for_battery_type(battery_type_for_slot(1)),
-                            can_config.battery_double, list);
-  }
-  if (battery_slot_occupied(2)) {
-    add_capabilities_device(devices, "battery3", name_for_battery_type(battery_type_for_slot(2)),
-                            can_config.battery_triple, list);
-  }
   add_capabilities_device(devices, "inverter", name_for_inverter_type(user_selected_inverter_protocol),
                           can_config.inverter, list);
   add_capabilities_device(devices, "charger", name_for_charger_type(user_selected_charger_type), can_config.charger,
@@ -961,6 +965,17 @@ String capabilities_json() {
   String out;
   serializeJson(doc, out);
   return out;
+}
+
+static void add_battery_status(JsonObject entry, const DATALAYER_BATTERY_STATUS_TYPE& status) {
+  entry["soc"] = status.reported_soc / PPTT_PER_PERCENT;
+  entry["soc_real"] = status.real_soc / PPTT_PER_PERCENT;
+  entry["soh"] = status.soh_pptt / PPTT_PER_PERCENT;
+  entry["voltage"] = status.voltage_dV / DECI_PER_UNIT;
+  entry["current"] = status.reported_current_dA / DECI_PER_UNIT;
+  entry["power"] = status.active_power_W;
+  entry["cell_min_mV"] = status.cell_min_voltage_mV;
+  entry["cell_max_mV"] = status.cell_max_voltage_mV;
 }
 
 // The dashboard shows a severity signal, not the event list, which has its own
@@ -1022,19 +1037,21 @@ String state_json() {
     wifi["channel"] = WiFi.channel();
   }
 
-  const DATALAYER_BATTERY_STATUS_TYPE& battery_status = datalayer.battery.combined.status;
-  JsonObject battery = doc["battery"].to<JsonObject>();
-  if (datalayer.battery.pack[0].info.battery_name[0] != '\0') {
-    battery["name"] = datalayer.battery.pack[0].info.battery_name;
+  add_battery_status(doc["battery"].to<JsonObject>(), datalayer.battery.combined.status);
+
+  JsonArray packs = doc["batteries"].to<JsonArray>();
+  for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+    if (!battery_slot_occupied(slot)) {
+      continue;
+    }
+    const DATALAYER_BATTERY_TYPE& pack = datalayer.battery_slot(slot);
+    JsonObject entry = packs.add<JsonObject>();
+    entry["slot"] = slot;
+    if (pack.info.battery_name[0] != '\0') {
+      entry["name"] = pack.info.battery_name;
+    }
+    add_battery_status(entry, pack.status);
   }
-  battery["soc"] = battery_status.reported_soc / PPTT_PER_PERCENT;
-  battery["soc_real"] = battery_status.real_soc / PPTT_PER_PERCENT;
-  battery["soh"] = battery_status.soh_pptt / PPTT_PER_PERCENT;
-  battery["voltage"] = battery_status.voltage_dV / DECI_PER_UNIT;
-  battery["current"] = battery_status.reported_current_dA / DECI_PER_UNIT;
-  battery["power"] = battery_status.active_power_W;
-  battery["cell_min_mV"] = battery_status.cell_min_voltage_mV;
-  battery["cell_max_mV"] = battery_status.cell_max_voltage_mV;
 
   JsonObject inverter = doc["inverter"].to<JsonObject>();
   inverter["name"] = name_for_inverter_type(user_selected_inverter_protocol);

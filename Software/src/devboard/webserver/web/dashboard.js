@@ -169,13 +169,19 @@ export function render(state) {
       row('IP address', wifi.ap_ip),
     ]));
   }
-  cards.append(card('Battery', [
-    row('Protocol', b.name),
-    row('Real SOC', present(b.soc_real) ? `${b.soc_real.toFixed(1)} %` : null),
-    row('Health', present(b.soh) ? `${b.soh.toFixed(1)} %` : null),
-    row('Cell min', present(b.cell_min_mV) ? `${b.cell_min_mV} mV` : null),
-    row('Cell max', present(b.cell_max_mV) ? `${b.cell_max_mV} mV` : null),
-  ]));
+  (state.batteries ?? []).forEach((pack) => {
+    cards.append(card(`Battery ${pack.slot + 1}`, [
+      row('Protocol', pack.name),
+      row('SOC', present(pack.soc) ? `${pack.soc.toFixed(1)} %` : null),
+      row('Real SOC', present(pack.soc_real) ? `${pack.soc_real.toFixed(1)} %` : null),
+      row('Health', present(pack.soh) ? `${pack.soh.toFixed(1)} %` : null),
+      row('Voltage', present(pack.voltage) ? `${pack.voltage.toFixed(1)} V` : null),
+      row('Current', present(pack.current) ? `${pack.current.toFixed(1)} A` : null),
+      row('Power', present(pack.power) ? `${pack.power} W` : null),
+      row('Cell min', present(pack.cell_min_mV) ? `${pack.cell_min_mV} mV` : null),
+      row('Cell max', present(pack.cell_max_mV) ? `${pack.cell_max_mV} mV` : null),
+    ]));
+  });
   if (state.inverter) {
     cards.append(card('Inverter', [row('Protocol', state.inverter.name)]));
   }

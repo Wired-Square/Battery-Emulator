@@ -254,18 +254,13 @@ bool battery_type_allowed_in_slot(BatteryType type, uint8_t slot) {
 }
 
 BatterySlotContext battery_slot_context(uint8_t slot) {
-  const InterfaceDescriptor* iface = can_config.battery;
-  if (slot == 1) {
-    iface = can_config.battery_double;
-  } else if (slot >= 2) {
-    iface = can_config.battery_triple;
-  }
+  const uint8_t index = slot < kMaxBatterySlots ? slot : 0;
   return BatterySlotContext{
-      .slot = slot,
-      .datalayer = &datalayer.battery_slot(slot),
-      .contactor_flag = &datalayer.system.status.slot_allows_contactor_closing(slot),
-      .can_interface = iface,
-      .wakeup_pin = esp32hal->wakeup_pin(slot),
+      .slot = index,
+      .datalayer = &datalayer.battery_slot(index),
+      .contactor_flag = &datalayer.system.status.slot_allows_contactor_closing(index),
+      .can_interface = can_config.battery[index],
+      .wakeup_pin = esp32hal->wakeup_pin(index),
   };
 }
 

@@ -41,7 +41,7 @@ class TestUdsBattery : public UdsCanBattery {
     std::vector<uint8_t> data;
   };
 
-  TestUdsBattery() : UdsCanBattery() {}
+  TestUdsBattery() : UdsCanBattery(nullptr) {}
 
   // --- Battery interface --------------------------------------------------
   void setup() override { setup_uds(0x79B, 0x7BB); }  // Requests to 0x79B, replies from 0x7BB

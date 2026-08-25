@@ -2,6 +2,7 @@
 #define _COMM_CAN_H_
 
 #include "../../devboard/utils/types.h"
+#include "../../system_settings.h"
 #include "CanBus.h"
 #include "../../devboard/hal/interface_descriptor.h"
 
@@ -24,10 +25,8 @@ size_t format_can_frame(char* buffer, size_t len, const CAN_frame& frame, uint8_
 class CanReceiver;
 
 typedef struct {
-  const InterfaceDescriptor* battery;
+  const InterfaceDescriptor* battery[kMaxBatterySlots];
   const InterfaceDescriptor* inverter;
-  const InterfaceDescriptor* battery_double;
-  const InterfaceDescriptor* battery_triple;
   const InterfaceDescriptor* charger;
   const InterfaceDescriptor* shunt;
 } CAN_Configuration;
