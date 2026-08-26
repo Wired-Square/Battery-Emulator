@@ -34,6 +34,9 @@ void emit_field(JsonArray fields, const AdvancedField& f) {
     o["label"] = std::string(f.label.c_str());
     o["value"] = std::string(f.value.c_str());
     o["unit"] = std::string(f.unit.c_str());
+    if (f.severity != AdvancedSeverity::Normal) {
+      o["sev"] = "warn";
+    }
   }
 }
 

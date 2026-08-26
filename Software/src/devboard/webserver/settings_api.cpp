@@ -1,4 +1,5 @@
 #include "settings_api.h"
+#include "web_ui_selection.h"
 
 #include "../../battery/BATTERIES.h"
 #include "../../battery/Battery.h"
@@ -31,6 +32,7 @@ constexpr const char* kOptional = "optional";
 constexpr const char* kHardware = "hardware";
 constexpr const char* kConnectivity = "connectivity";
 constexpr const char* kDebug = "debug";
+constexpr const char* kInterface = "interface";
 
 constexpr double kDeciUnitsPerUnit = 10.0;
 constexpr uint32_t kMillisecondsPerSecond = 1000;
@@ -53,6 +55,8 @@ const SettingField kSettingFields[] = {
     {"WEBAUTH", "WEBAUTH", ST::Bool, kWebauth, SA::Boot, 0, nullptr},
     {"HTTPUSER", "HTTPUSER", ST::StringVal, kWebauth, SA::Boot, 0, "admin"},
     {"HTTPPASS", "HTTPPASS", ST::StringVal, kWebauth, SA::Boot, 0, ""},
+
+    {"WEBUI", "WEBUI", ST::StringVal, kInterface, SA::Live, 0, kDefaultUiShell, "webui"},
 
     {"SSID", "SSID", ST::StringVal, kNetwork, SA::Boot, 0, ""},
     {"PASSWORD", "PASSWORD", ST::StringVal, kNetwork, SA::Boot, 0, ""},
@@ -300,6 +304,74 @@ const char* widget_type_name(SettingType type) {
   }
   return "";
 }
+
+bool value_matches_option(SettingType type, JsonVariantConst value, JsonVariantConst option) {
+  if (type == ST::StringVal) {
+    return strcmp(value.as<const char*>(), option.as<const char*>()) == 0;
+  }
+  return value.as<uint32_t>() == option.as<uint32_t>();
+}
+
+void emit_all_options(JsonObject options) {
+  const BatteryType battery_none = BatteryType::None;
+  emit_enum_options(
+      options, "battery",
+      [](BatteryType t) { return board_supports_battery_type(t) ? name_for_battery_type(t) : nullptr; }, &battery_none);
+  JsonArray battery_options = options["battery"].as<JsonArray>();
+  for (JsonObject opt : battery_options) {
+    const BatteryType type = static_cast<BatteryType>(opt["v"].as<uint32_t>());
+    if (type != BatteryType::None) {
+      opt["s"] = battery_type_allowed_in_slot(type, 2) ? 3 : battery_type_allowed_in_slot(type, 1) ? 2 : 1;
+    }
+  }
+  emit_enum_options<battery_chemistry_enum>(options, "chemistry", name_for_chemistry);
+  const InverterProtocolType inverter_none = InverterProtocolType::None;
+  emit_enum_options(options, "inverter", name_for_inverter_type, &inverter_none);
+  const ChargerType charger_none = ChargerType::None;
+  emit_enum_options(options, "charger", name_for_charger_type, &charger_none);
+  const ShuntType shunt_none = ShuntType::None;
+  emit_enum_options(options, "shunt", name_for_shunt_type, &shunt_none);
+  const adc_attenuation_enum attenuation_none = adc_attenuation_enum::ADC_0db;
+  emit_enum_options(options, "attenuation", name_for_adc_attenuation, &attenuation_none);
+  const STOP_BUTTON_BEHAVIOR button_none = STOP_BUTTON_BEHAVIOR::NOT_CONNECTED;
+  emit_enum_options(options, "button", name_for_button_type, &button_none);
+
+  if (esp32hal != nullptr) {
+    GpioOptionCatalog catalog = esp32hal->gpio_options();
+    for (size_t g = 0; g < catalog.group_count; g++) {
+      emit_gpio_option_choices(options, catalog.groups[g]);
+    }
+  }
+
+  // Board-conditional (HW_LILYGO2CAN adds GRB variants), so kept server-side.
+  emit_map_options(options, "ledmode", led_modes);
+
+#ifdef BOARD_HAS_LOAD_SWITCH
+  // Enum order (Disabled first, unsorted), matching the legacy per-channel select.
+  JsonArray roles = options["loadswitchrole"].to<JsonArray>();
+  for (uint32_t r = 0; r < static_cast<uint32_t>(LoadSwitchRole::Highest); r++) {
+    const char* name = name_for_load_switch_role(static_cast<LoadSwitchRole>(r));
+    if (name == nullptr || name[0] == '\0') {
+      continue;
+    }
+    JsonObject opt = roles.add<JsonObject>();
+    opt["v"] = r;
+    opt["n"] = name;
+  }
+#endif
+
+  JsonArray shells = options["webui"].to<JsonArray>();
+  const UiShellTable table = default_ui_shell_table();
+  const size_t shell_total = ui_shell_count(table);
+  for (size_t i = 0; i < shell_total; i++) {
+    char name[kMaxUiShellNameLen + 1];
+    if (!ui_shell_name_at(table, i, name, sizeof(name))) {
+      continue;
+    }
+    shells.add<JsonObject>()["v"] = name;
+  }
+}
+
 }  // namespace
 
 String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_required) {
@@ -361,53 +433,7 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
     }
   }
 
-  JsonObject options = doc["options"].to<JsonObject>();
-  const BatteryType battery_none = BatteryType::None;
-  emit_enum_options(
-      options, "battery",
-      [](BatteryType t) { return board_supports_battery_type(t) ? name_for_battery_type(t) : nullptr; }, &battery_none);
-  JsonArray battery_options = options["battery"].as<JsonArray>();
-  for (JsonObject opt : battery_options) {
-    const BatteryType type = static_cast<BatteryType>(opt["v"].as<uint32_t>());
-    if (type != BatteryType::None) {
-      opt["s"] = battery_type_allowed_in_slot(type, 2) ? 3 : battery_type_allowed_in_slot(type, 1) ? 2 : 1;
-    }
-  }
-  emit_enum_options<battery_chemistry_enum>(options, "chemistry", name_for_chemistry);
-  const InverterProtocolType inverter_none = InverterProtocolType::None;
-  emit_enum_options(options, "inverter", name_for_inverter_type, &inverter_none);
-  const ChargerType charger_none = ChargerType::None;
-  emit_enum_options(options, "charger", name_for_charger_type, &charger_none);
-  const ShuntType shunt_none = ShuntType::None;
-  emit_enum_options(options, "shunt", name_for_shunt_type, &shunt_none);
-  const adc_attenuation_enum attenuation_none = adc_attenuation_enum::ADC_0db;
-  emit_enum_options(options, "attenuation", name_for_adc_attenuation, &attenuation_none);
-  const STOP_BUTTON_BEHAVIOR button_none = STOP_BUTTON_BEHAVIOR::NOT_CONNECTED;
-  emit_enum_options(options, "button", name_for_button_type, &button_none);
-
-  if (esp32hal != nullptr) {
-    GpioOptionCatalog catalog = esp32hal->gpio_options();
-    for (size_t g = 0; g < catalog.group_count; g++) {
-      emit_gpio_option_choices(options, catalog.groups[g]);
-    }
-  }
-
-  // Board-conditional (HW_LILYGO2CAN adds GRB variants), so kept server-side.
-  emit_map_options(options, "ledmode", led_modes);
-
-#ifdef BOARD_HAS_LOAD_SWITCH
-  // Enum order (Disabled first, unsorted), matching the legacy per-channel select.
-  JsonArray roles = options["loadswitchrole"].to<JsonArray>();
-  for (uint32_t r = 0; r < static_cast<uint32_t>(LoadSwitchRole::Highest); r++) {
-    const char* name = name_for_load_switch_role(static_cast<LoadSwitchRole>(r));
-    if (name == nullptr || name[0] == '\0') {
-      continue;
-    }
-    JsonObject opt = roles.add<JsonObject>();
-    opt["v"] = r;
-    opt["n"] = name;
-  }
-#endif
+  emit_all_options(doc["options"].to<JsonObject>());
 
   // Presentation (labels, visibility) lives client-side; schema carries only identity
   // and widget wiring.
@@ -605,6 +631,9 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
 
   // Validate every present field's type before writing anything, so a wrong-type
   // key rejects the whole values pass rather than partially applying it.
+  JsonDocument options_doc;
+  JsonObject all_options = options_doc.to<JsonObject>();
+  bool options_built = false;
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     JsonVariantConst value = values[field.json_key];
@@ -624,6 +653,25 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       if ((has_min && numeric < field.min_value) || (has_max && numeric > field.max_value)) {
         result.ok = false;
         result.error = String("Setting ") + field.json_key + " is out of range";
+        return result;
+      }
+    }
+    if (field.options_key != nullptr) {
+      if (!options_built) {
+        emit_all_options(all_options);
+        options_built = true;
+      }
+      JsonArrayConst choices = all_options[field.options_key].as<JsonArrayConst>();
+      bool found = false;
+      for (JsonObjectConst opt : choices) {
+        if (value_matches_option(field.type, value, opt["v"])) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        result.ok = false;
+        result.error = String("Setting ") + field.json_key + " is not an available option";
         return result;
       }
     }
@@ -690,12 +738,13 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   bool reboot_required = false;
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
+    const bool gates_reboot = field.applies == SA::Boot;
     JsonVariantConst value = values[field.json_key];
     if (value.isNull()) {
       // Explicit JSON null on a present password key clears the secret; an absent key — or
       // null on any non-password key — preserves the stored value (the bool-wipe invariant).
       if (is_password_key(field.nvs_key) && values.containsKey(field.json_key)) {
-        reboot_required |= store.getString(field.nvs_key, "").length() > 0;
+        reboot_required |= gates_reboot && (store.getString(field.nvs_key, "").length() > 0);
         store.saveString(field.nvs_key, "");
         if (std::strcmp(field.nvs_key, "PASSWORD") == 0) {
           password = store.getString("PASSWORD", "").c_str();
@@ -706,7 +755,7 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     switch (field.type) {
       case ST::Bool: {
         const bool new_value = value.as<bool>();
-        reboot_required |= store.getBool(field.nvs_key, field.default_int != 0) != new_value;
+        reboot_required |= gates_reboot && (store.getBool(field.nvs_key, field.default_int != 0) != new_value);
         store.saveBool(field.nvs_key, new_value);
         break;
       }
@@ -714,26 +763,28 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       case ST::EnumUint:
       case ST::InterfacePacked: {
         const uint32_t new_value = value.as<uint32_t>();
-        reboot_required |= store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int)) != new_value;
+        reboot_required |=
+            gates_reboot && (store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int)) != new_value);
         store.saveUInt(field.nvs_key, new_value);
         break;
       }
       case ST::Int: {
         const int32_t new_value = value.as<int32_t>();
-        reboot_required |= store.getInt(field.nvs_key, field.default_int) != new_value;
+        reboot_required |= gates_reboot && (store.getInt(field.nvs_key, field.default_int) != new_value);
         store.saveInt(field.nvs_key, new_value);
         break;
       }
       case ST::SecondsToMs: {
         const uint32_t new_value = value.as<uint32_t>() * kMillisecondsPerSecond;
-        reboot_required |= store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int) *
-                                                            kMillisecondsPerSecond) != new_value;
+        reboot_required |= gates_reboot && (store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int) *
+                                                                             kMillisecondsPerSecond) != new_value);
         store.saveUInt(field.nvs_key, new_value);
         break;
       }
       case ST::FloatX10: {
         const uint32_t new_value = static_cast<uint32_t>(std::lround(value.as<float>() * kDeciUnitsPerUnit));
-        reboot_required |= store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int)) != new_value;
+        reboot_required |=
+            gates_reboot && (store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int)) != new_value);
         store.saveUInt(field.nvs_key, new_value);
         break;
       }
@@ -744,7 +795,7 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
           break;  // blank keeps the stored secret — skip the write and the live-global refresh
         }
         const char* baseline = field.default_str != nullptr ? field.default_str : "";
-        reboot_required |= !(store.getString(field.nvs_key, baseline) == String(new_value));
+        reboot_required |= gates_reboot && (!(store.getString(field.nvs_key, baseline) == String(new_value)));
         store.saveString(field.nvs_key, new_value);
         // SSID/PASSWORD are boot-gated in NVS but the legacy handler also refreshed
         // the live WiFi globals; keep that so a reconnect sees the new credentials.

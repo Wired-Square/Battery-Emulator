@@ -331,3 +331,30 @@ TEST_F(AdvancedApi, DeclaredCommandsDispatchToTheAddressedSlot) {
   EXPECT_EQ(slot1.stop_calls, 1);
   EXPECT_EQ(slot0.stop_calls, 0);
 }
+
+TEST_F(AdvancedApi, OmitsSevWhenSeverityIsNormal) {
+  StubBattery stub;
+  AdvancedSection s;
+  s.fields.push_back(kv("Isolation", "OK"));
+  stub.advanced_.sections.push_back(s);
+  batteries[0] = &stub;
+
+  JsonDocument doc;
+  ASSERT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  JsonObject field = doc["batteries"][0]["sections"][0]["fields"][0];
+  EXPECT_STREQ(field["value"] | "", "OK");
+  EXPECT_FALSE(field["sev"].is<const char*>());
+}
+
+TEST_F(AdvancedApi, EmitsSevWhenSeverityIsWarning) {
+  StubBattery stub;
+  AdvancedSection s;
+  s.fields.push_back(kv("Pyro fuse", "Successfully Blown", "", AdvancedSeverity::Warning));
+  stub.advanced_.sections.push_back(s);
+  batteries[0] = &stub;
+
+  JsonDocument doc;
+  ASSERT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  JsonObject field = doc["batteries"][0]["sections"][0]["fields"][0];
+  EXPECT_STREQ(field["sev"] | "", "warn");
+}

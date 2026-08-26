@@ -2,9 +2,12 @@
 #define BATTERY_ADVANCED_STATUS_H
 
 #include <WString.h>
+#include <stdint.h>
 #include <vector>
 
 enum class AdvancedFieldKind { KeyValue, Table };
+
+enum class AdvancedSeverity : uint8_t { Normal, Warning };
 
 // A single rendered element. KeyValue = one labelled value (with optional unit).
 // Table = a grid: `columns` headers over `rows` of equal-length string cells.
@@ -22,6 +25,7 @@ struct AdvancedField {
   std::vector<std::vector<String>> rows;
   String catalogue;
   std::vector<String> row_keys;
+  AdvancedSeverity severity = AdvancedSeverity::Normal;
 };
 
 struct AdvancedSection {
@@ -34,12 +38,14 @@ struct BatteryAdvancedStatus {
 };
 
 // Convenience builder keeps driver conversions terse and uniform.
-inline AdvancedField kv(String label, String value, String unit = "") {
+inline AdvancedField kv(String label, String value, String unit = "",
+                        AdvancedSeverity severity = AdvancedSeverity::Normal) {
   AdvancedField f;
   f.kind = AdvancedFieldKind::KeyValue;
   f.label = label;
   f.value = value;
   f.unit = unit;
+  f.severity = severity;
   return f;
 }
 

@@ -70,6 +70,8 @@ add_executable(tests
     tests.cpp
     emul_preferences_tests.cpp
     settings_api_tests.cpp
+    web_ui_selection_tests.cpp
+    emul/web_shells.cpp
     webserver/logging_api_tests.cpp
     webserver/events_api_tests.cpp
     webserver/canreplay_api_tests.cpp
@@ -133,6 +135,7 @@ add_executable(tests
     ../Software/src/devboard/hal/gpio_options.cpp
     ../Software/src/devboard/webserver/settings_labels.cpp
     ../Software/src/devboard/webserver/settings_api.cpp
+    ../Software/src/devboard/webserver/web_ui_selection.cpp
     ../Software/src/devboard/webserver/logging_api.cpp
     ../Software/src/devboard/webserver/events_api.cpp
     ../Software/src/devboard/webserver/canreplay_api.cpp

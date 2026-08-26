@@ -4,6 +4,13 @@ const STALE_AFTER_MS = 5000;
 const REBOOT_GAP_SLACK_MS = 2000;
 const THEME_KEY = 'be-theme';
 
+export const skinName = document.documentElement.dataset.skin ?? 'modern';
+
+let capabilities = {};
+export function deviceCapabilities() {
+  return capabilities;
+}
+
 const routes = {
   '/': () => import('/dashboard.js'),
   '/settings': () => import('/settings.js'),
@@ -62,9 +69,27 @@ function currentTheme() {
     ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 }
 
-function initTheme() {
+function bindUiSwitch() {
+  for (const btn of document.querySelectorAll('[data-ui-switch]')) {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await postJson('/api/settings', { values: { WEBUI: btn.dataset.uiSwitch } });
+        location.href = '/';
+      } catch (err) {
+        console.error('ui switch failed', err);
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
+function bindChrome() {
+  bindUiSwitch();
+  const toggle = document.getElementById('theme-toggle');
+  if (!toggle) return;
   applyTheme(localStorage.getItem(THEME_KEY));
-  document.getElementById('theme-toggle').addEventListener('click', () => {
+  toggle.addEventListener('click', () => {
     const next = currentTheme() === 'dark' ? 'light' : 'dark';
     localStorage.setItem(THEME_KEY, next);
     applyTheme(next);
@@ -74,6 +99,7 @@ function initTheme() {
 function markHeartbeat(ok) {
   const el = document.getElementById('heartbeat');
   if (ok) lastOkAt = Date.now();
+  if (!el) return;
   const stale = Date.now() - lastOkAt > STALE_AFTER_MS;
   el.classList.toggle('live', !stale);
   el.classList.toggle('stale', stale);
@@ -130,7 +156,7 @@ function showRouteError() {
   const content = document.getElementById('content');
   content.replaceChildren();
   content.textContent = 'This view failed to load.';
-  for (const item of document.querySelectorAll('.rail-item[data-route]')) {
+  for (const item of document.querySelectorAll('[data-route]')) {
     item.removeAttribute('aria-current');
   }
 }
@@ -195,7 +221,7 @@ async function router(nav) {
   }
   if (!mounted) return;
 
-  for (const item of document.querySelectorAll('.rail-item[data-route]')) {
+  for (const item of document.querySelectorAll('[data-route]')) {
     if (item.dataset.route === hash) item.setAttribute('aria-current', 'page');
     else item.removeAttribute('aria-current');
   }
@@ -210,7 +236,10 @@ async function router(nav) {
 async function initIdentity() {
   try {
     const caps = await getJson('/capabilities');
-    document.getElementById('hw').textContent = caps.hardware ?? '';
+    capabilities = caps;
+    const hw = document.getElementById('hw');
+    if (!hw) return;
+    hw.textContent = caps.hardware ?? '';
     const fw = document.getElementById('fw');
     if (caps.firmware_url) {
       const link = document.createElement('a');
@@ -227,7 +256,7 @@ async function initIdentity() {
   }
 }
 
-initTheme();
+bindChrome();
 // Serialise navigations so overlapping transitions cannot interleave their
 // teardown/mount; the token is bumped synchronously so a superseded run is
 // skipped rather than mounted.

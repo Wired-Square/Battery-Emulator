@@ -1343,3 +1343,107 @@ TEST(BalancingApplyTest, AckRoundTripsAppliedValues) {
   EXPECT_FLOAT_EQ(ack["max_pack_v"].as<float>(), 394.0f);
   EXPECT_EQ(ack["float_power_w"].as<uint16_t>(), 1500);
 }
+
+TEST_F(SettingsApiTest, RejectsValueAbsentFromItsOptionList) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["BATTCHEM"] = 9999;
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  EXPECT_FALSE(result.ok);
+  EXPECT_NE(std::string(result.error.c_str()).find("BATTCHEM"), std::string::npos);
+}
+
+TEST_F(SettingsApiTest, AcceptsValuePresentInItsOptionList) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["BATTCHEM"] = 1;
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  EXPECT_TRUE(result.ok) << result.error.c_str();
+}
+
+TEST_F(SettingsApiTest, LeavesFieldsWithoutOptionsUnchecked) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["SOFAR_ID"] = 5;
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  EXPECT_TRUE(result.ok) << result.error.c_str();
+}
+
+TEST_F(SettingsApiTest, PublishesShellOptionsForWebUi) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  const JsonDocument doc = parse_values(build_settings_json(store));
+  JsonArrayConst shells = doc["options"]["webui"].as<JsonArrayConst>();
+  ASSERT_EQ(shells.size(), 2u);
+  EXPECT_STREQ(shells[0]["v"] | "", "legacy");
+  EXPECT_STREQ(shells[1]["v"] | "", "modern");
+  EXPECT_FALSE(shells[0]["n"].is<const char*>()) << "display text belongs to the client, not the payload";
+  EXPECT_FALSE(shells[1]["n"].is<const char*>()) << "display text belongs to the client, not the payload";
+}
+
+TEST_F(SettingsApiTest, WebUiDefaultsToLegacy) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  const JsonDocument doc = parse_values(build_settings_json(store));
+  EXPECT_STREQ(doc["values"]["WEBUI"] | "", "legacy");
+}
+
+TEST_F(SettingsApiTest, WebUiSchemaRowCarriesOptionsAndCategory) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  const JsonDocument doc = parse_values(build_settings_json(store));
+  bool seen = false;
+  for (JsonObjectConst entry : doc["schema"].as<JsonArrayConst>()) {
+    if (strcmp(entry["key"] | "", "WEBUI") != 0) {
+      continue;
+    }
+    seen = true;
+    EXPECT_STREQ(entry["category"] | "", "interface");
+    EXPECT_STREQ(entry["type"] | "", "string");
+    EXPECT_STREQ(entry["options"] | "", "webui");
+  }
+  EXPECT_TRUE(seen);
+}
+
+TEST_F(SettingsApiTest, RejectsUnknownShellName) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["WEBUI"] = "nosuchskin";
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  EXPECT_FALSE(result.ok);
+}
+
+TEST_F(SettingsApiTest, AcceptsShippedShellName) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["WEBUI"] = "modern";
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  EXPECT_TRUE(result.ok) << result.error.c_str();
+  EXPECT_EQ(store.getString("WEBUI", ""), String("modern"));
+}
+
+TEST_F(SettingsApiTest, LiveFieldDoesNotRequireReboot) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["WEBUI"] = "modern";
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  ASSERT_TRUE(result.ok) << result.error.c_str();
+  EXPECT_TRUE(result.changed);
+  EXPECT_FALSE(result.reboot_required);
+}
+
+TEST_F(SettingsApiTest, BootFieldStillRequiresReboot) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["SOFAR_ID"] = 7;
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  ASSERT_TRUE(result.ok) << result.error.c_str();
+  EXPECT_TRUE(result.reboot_required);
+}

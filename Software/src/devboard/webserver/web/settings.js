@@ -1,4 +1,4 @@
-import { getJson, postJson } from '/app.js';
+import { getJson, postJson, skinName } from '/app.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -16,6 +16,7 @@ const CATEGORIES = [
   ['hardware', 'Hardware'],
   ['connectivity', 'Connectivity'],
   ['debug', 'Debug'],
+  ['interface', 'Interface'],
 ];
 
 // Ordered by id, matching the server's emission (e.g. pack is 50/74/62/100, not by capacity).
@@ -73,6 +74,7 @@ const CLIENT_OPTIONS = {
 };
 
 const LABELS = {
+  WEBUI: 'Web interface style',
   WEBAUTH: 'Enable password protection',
   HTTPUSER: 'Username',
   HTTPPASS: 'Web interface password',
@@ -347,6 +349,13 @@ const prettify = (key) =>
 const labelFor = (field) => field.label ?? LABELS[field.key] ?? prettify(field.key);
 
 // Live controls apply on the device immediately, unlike the reboot-gated schema categories.
+const SETTINGS_SKINS = {
+  modern: { contiguous: false },
+  legacy: { contiguous: true },
+};
+
+const skin = SETTINGS_SKINS[skinName] ?? SETTINGS_SKINS.modern;
+
 const LIVE_CATEGORY = 'live';
 
 const DYNAMIC_CATEGORY = 'hardware';
@@ -484,7 +493,7 @@ function selectFrom(key, type, options) {
   const current = String(state[key]);
   (options ?? []).forEach((opt) => {
     const value = type === 'interface' ? opt.id : opt.v;
-    const o = el('option', null, type === 'interface' ? opt.name : opt.n);
+    const o = el('option', null, type === 'interface' ? opt.name : (opt.n ?? prettify(String(opt.v))));
     o.value = String(value);
     if (String(value) === current) o.selected = true;
     sel.append(o);
@@ -501,12 +510,12 @@ function control(field) {
     cb.checked = state[key] === true;
     return cb;
   }
-  if (type === 'enum') {
+  if (type === 'interface') return selectFrom(key, type, data.interfaces);
+  if (options) {
     const opts = data.options?.[options] ?? CLIENT_OPTIONS[options];
     if (!opts) return el('span', 'settings-error', `Missing options: ${options}`);
     return selectFrom(key, type, opts);
   }
-  if (type === 'interface') return selectFrom(key, type, data.interfaces);
 
   const input = el('input');
   input.name = key;
@@ -597,18 +606,18 @@ function onControlChange(field, ctrl) {
   refreshSaveBar();
 }
 
-function buildPanel() {
+function buildPanel(category) {
   const panel = el('div', 'settings-panel');
-  if (activeCategory === BATTERY_CATEGORY && dynamicState.batteries) panel.append(buildBatteriesSection());
+  if (category === BATTERY_CATEGORY && dynamicState.batteries) panel.append(buildBatteriesSection());
   (data.schema ?? [])
-    .filter((field) => field.category === activeCategory)
+    .filter((field) => field.category === category)
     .forEach((field) => {
       panel.append(fieldRow(field));
       if (field.key === 'HTTPPASS') {
         panel.append(fieldRow({ key: 'HTTPPASSCONFIRM', type: 'string' }));
       }
     });
-  if (activeCategory === DYNAMIC_CATEGORY) appendDynamicControls(panel);
+  if (category === DYNAMIC_CATEGORY) appendDynamicControls(panel);
   applyVisibility(panel);
   return panel;
 }
@@ -997,7 +1006,7 @@ async function onSave() {
   }
   const bad = firstInvalidField();
   if (bad) {
-    if (bad.category !== activeCategory) {
+    if (!skin.contiguous && bad.category !== activeCategory) {
       activeCategory = bad.category;
       renderShell();
     }
@@ -1097,9 +1106,24 @@ function buildDangerZone() {
   return zone;
 }
 
+function panelFor(category) {
+  return category === LIVE_CATEGORY ? buildLivePanel() : buildPanel(category);
+}
+
+function titledPanel(category, name) {
+  const panel = panelFor(category);
+  panel.prepend(el('h3', null, name));
+  return panel;
+}
+
 function renderShell() {
-  const panel = activeCategory === LIVE_CATEGORY ? buildLivePanel() : buildPanel();
-  root.replaceChildren(buildNav(), panel, buildSaveBar(), buildDangerZone());
+  if (skin.contiguous) {
+    const form = el('div', 'settings-form');
+    [...CATEGORIES, [LIVE_CATEGORY, 'Live controls']].forEach(([id, name]) => form.append(titledPanel(id, name)));
+    root.replaceChildren(form, buildSaveBar(), buildDangerZone());
+    return;
+  }
+  root.replaceChildren(buildNav(), panelFor(activeCategory), buildSaveBar(), buildDangerZone());
 }
 
 export async function mount(container) {

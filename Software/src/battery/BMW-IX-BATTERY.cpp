@@ -1255,9 +1255,11 @@ BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
   AdvancedSection safety_section;
   safety_section.title = "Safety Systems";
   String hvil_status;
+  AdvancedSeverity hvil_severity = AdvancedSeverity::Normal;
   switch (get_hvil_status()) {
     case 0:
       hvil_status = "Error (Loop Open)";
+      hvil_severity = AdvancedSeverity::Warning;
       break;
     case 1:
       hvil_status = "OK (Loop Closed)";
@@ -1265,7 +1267,7 @@ BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
     default:
       hvil_status = "Unknown";
   }
-  safety_section.fields.push_back(kv("HVIL Status", hvil_status));
+  safety_section.fields.push_back(kv("HVIL Status", hvil_status, "", hvil_severity));
 
   auto pyro_status_text = [](int status) {
     switch (status) {
@@ -1283,9 +1285,14 @@ BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
         return "Unknown";
     }
   };
-  safety_section.fields.push_back(kv("Pyro Status PSS1", String(pyro_status_text(get_pyro_status_pss1()))));
-  safety_section.fields.push_back(kv("Pyro Status PSS4", String(pyro_status_text(get_pyro_status_pss4()))));
-  safety_section.fields.push_back(kv("Pyro Status PSS6", String(pyro_status_text(get_pyro_status_pss6()))));
+  constexpr int kPyroStatusBlown = 1;
+  auto pyro_field = [&](const char* label, int status) {
+    return kv(label, String(pyro_status_text(status)), "",
+              status == kPyroStatusBlown ? AdvancedSeverity::Warning : AdvancedSeverity::Normal);
+  };
+  safety_section.fields.push_back(pyro_field("Pyro Status PSS1", get_pyro_status_pss1()));
+  safety_section.fields.push_back(pyro_field("Pyro Status PSS4", get_pyro_status_pss4()));
+  safety_section.fields.push_back(pyro_field("Pyro Status PSS6", get_pyro_status_pss6()));
   status.sections.push_back(safety_section);
 
   // Isolation Monitoring

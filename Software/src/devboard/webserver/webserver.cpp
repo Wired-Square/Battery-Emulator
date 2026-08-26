@@ -28,6 +28,7 @@
 #include "favicon.h"
 #include "../wifi/wifi.h"
 #include "static_assets.h"
+#include "web_ui_selection.h"
 #include "webserver_can_streaming.h"
 
 #include <string>
@@ -43,7 +44,7 @@ static constexpr int HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
 // The full settings save is ~2-3 KB (~104 fields); do not shrink below that.
 static constexpr size_t MAX_JSON_POST_BODY_BYTES = 16384;
 static constexpr const char* CONTENT_TYPE_JSON = "application/json";
-static constexpr const char* ASSET_PATH_SHELL = "/index.html";
+static constexpr int kWebApiVersion = 1;
 // datalayer integer scalings: pptt is percent x 100, deci-units are unit x 10
 static constexpr float PPTT_PER_PERCENT = 100.0f;
 static constexpr float DECI_PER_UNIT = 10.0f;
@@ -51,6 +52,15 @@ static constexpr float MS_PER_SECOND = 1000.0f;
 // BYD auto-calibrate drift threshold accepted range (out-of-range is ignored, matching the GET origin)
 static constexpr int BYD_AUTOCAL_DRIFT_MIN = 1;
 static constexpr int BYD_AUTOCAL_DRIFT_MAX = 20;
+
+static char web_ui_shell_name[kMaxUiShellNameLen + 1] = "";
+
+static void refresh_web_ui_shell(BatteryEmulatorSettingsStore& store) {
+  const String stored = store.getString("WEBUI", kDefaultUiShell);
+  const size_t len = stored.length() < kMaxUiShellNameLen ? stored.length() : kMaxUiShellNameLen;
+  memcpy(web_ui_shell_name, stored.c_str(), len);
+  web_ui_shell_name[len] = '\0';
+}
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -323,6 +333,11 @@ static void fill_charger_ack(JsonObject ack) {
 }
 
 void init_webserver() {
+  {
+    BatteryEmulatorSettingsStore store(true);
+    refresh_web_ui_shell(store);
+  }
+
   if (webserver_auth_is_ready()) {
     web_auth_middleware.setUsername(http_username.c_str());
     web_auth_middleware.setPassword(http_password.c_str());
@@ -362,7 +377,14 @@ void init_webserver() {
   def_route_with_auth("/", server, HTTP_GET, [](AsyncWebServerRequest* request) {
     // Clear OTA active flag as a safeguard in case onOTAEnd() wasn't called
     ota_active = false;
-    serve_web_asset_or_fail(request, ASSET_PATH_SHELL);
+    const AsyncWebParameter* requested = request->getParam("ui");
+    const char* asset =
+        resolve_ui_shell_asset(default_ui_shell_table(),
+                               requested != nullptr ? requested->value().c_str() : nullptr, web_ui_shell_name);
+    if (asset == nullptr) {
+      return request->send(HTTP_STATUS_INTERNAL_SERVER_ERROR, "text/plain", "Missing asset");
+    }
+    serve_web_asset_or_fail(request, asset);
   });
 
   // "/" is registered separately above for its OTA-flag clear.
@@ -473,6 +495,7 @@ void init_webserver() {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", result.error);
     }
     settingsUpdated |= result.changed;
+    refresh_web_ui_shell(settings);
     String json = build_settings_json(settings, result.reboot_required);
     if (json.isEmpty()) {
       return request->send(HTTP_STATUS_INTERNAL_SERVER_ERROR, "text/plain", "Settings payload overflow");
@@ -920,6 +943,7 @@ String capabilities_json() {
   JsonDocument doc;
   doc["hardware"] = esp32hal->name();
   doc["firmware"] = String(version_number);
+  doc["api"] = kWebApiVersion;
 #if defined(GITHUB_ORG) && defined(GITHUB_REPO)
 #if defined(GIT_TAG)
   doc["firmware_url"] = "https://github.com/" GITHUB_ORG "/" GITHUB_REPO "/releases/tag/" GIT_TAG;
@@ -969,7 +993,8 @@ String capabilities_json() {
   return out;
 }
 
-static void add_battery_status(JsonObject entry, const DATALAYER_BATTERY_STATUS_TYPE& status) {
+static void add_battery_status(JsonObject entry, const DATALAYER_BATTERY_TYPE& pack) {
+  const DATALAYER_BATTERY_STATUS_TYPE& status = pack.status;
   entry["soc"] = status.reported_soc / PPTT_PER_PERCENT;
   entry["soc_real"] = status.real_soc / PPTT_PER_PERCENT;
   entry["soh"] = status.soh_pptt / PPTT_PER_PERCENT;
@@ -978,6 +1003,14 @@ static void add_battery_status(JsonObject entry, const DATALAYER_BATTERY_STATUS_
   entry["power"] = status.active_power_W;
   entry["cell_min_mV"] = status.cell_min_voltage_mV;
   entry["cell_max_mV"] = status.cell_max_voltage_mV;
+  entry["remaining_wh"] = status.remaining_capacity_Wh;
+  entry["max_charge_w"] = status.max_charge_power_W;
+  entry["max_discharge_w"] = status.max_discharge_power_W;
+  entry["max_charge_a"] = status.max_charge_current_dA / DECI_PER_UNIT;
+  entry["max_discharge_a"] = status.max_discharge_current_dA / DECI_PER_UNIT;
+  entry["temp_min_c"] = status.temperature_min_dC / DECI_PER_UNIT;
+  entry["temp_max_c"] = status.temperature_max_dC / DECI_PER_UNIT;
+  entry["total_wh"] = pack.info.total_capacity_Wh;
 }
 
 // The dashboard shows a severity signal, not the event list, which has its own
@@ -1011,6 +1044,7 @@ String state_json() {
 
   JsonObject sys = doc["system"].to<JsonObject>();
   sys["status"] = String(get_emulator_pause_status().c_str());
+  sys["emulator_status"] = get_emulator_status_string(get_emulator_status());
   sys["uptime"] = format_ms_string(millis64());
   // Numeric seconds for the SPA to detect a reboot (resets to 0) and reload.
   sys["uptime_s"] = static_cast<uint32_t>(millis64() / static_cast<uint64_t>(MS_PER_SECOND));
@@ -1039,7 +1073,7 @@ String state_json() {
     wifi["channel"] = WiFi.channel();
   }
 
-  add_battery_status(doc["battery"].to<JsonObject>(), datalayer.battery.combined.status);
+  add_battery_status(doc["battery"].to<JsonObject>(), datalayer.battery.combined);
 
   JsonArray packs = doc["batteries"].to<JsonArray>();
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
@@ -1052,7 +1086,7 @@ String state_json() {
     if (pack.info.battery_name[0] != '\0') {
       entry["name"] = pack.info.battery_name;
     }
-    add_battery_status(entry, pack.status);
+    add_battery_status(entry, pack);
   }
 
   JsonObject inverter = doc["inverter"].to<JsonObject>();

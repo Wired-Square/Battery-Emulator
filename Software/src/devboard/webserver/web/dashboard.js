@@ -1,6 +1,8 @@
-import { postJson, repaint } from '/app.js';
+import { postJson, repaint, skinName, deviceCapabilities } from '/app.js';
 
 const EMPTY = '—';
+const WH_PER_KWH = 1000;
+const W_PER_KW = 1000;
 
 const CONFIRM_PAUSE =
   'Are you sure you want to pause charging and discharging? This will set the maximum charge and discharge '
@@ -10,6 +12,13 @@ const CONFIRM_CLOSE_CONTACTORS = 'This action will attempt to close contactors a
 const CONFIRM_REBOOT =
   'Are you sure you want to reboot the emulator? NOTE: If emulator is handling contactors, they will open '
   + 'during reboot!';
+
+const SKINS = {
+  modern: { vitals: true, model: (state) => modelModern(state) },
+  legacy: { vitals: false, model: (state) => modelLegacy(state) },
+};
+
+const skin = SKINS[skinName] ?? SKINS.modern;
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -37,7 +46,7 @@ function row(label, value) {
 
 function card(title, rows) {
   const c = el('div', 'card');
-  c.append(el('h2', null, title));
+  if (title !== undefined) c.append(el('h2', null, title));
   rows.forEach((r) => c.append(r));
   return c;
 }
@@ -137,73 +146,165 @@ export function mount(container) {
   root = container;
 }
 
-export function render(state) {
-  if (!root) return;
-  const vitals = el('div', 'vitals');
+const ROW = {
+  identity: () => {
+    const caps = deviceCapabilities();
+    return [{ label: 'Software', value: caps.firmware }, { label: 'Hardware', value: caps.hardware }];
+  },
+  system: (sys) => [
+    { label: 'Uptime', value: sys.uptime },
+    { label: 'Free heap', value: present(sys.free_heap) ? `${sys.free_heap} B` : null },
+  ],
+  wifi: (wifi) => [
+    { label: 'SSID', value: wifi.ssid },
+    { label: 'Status', value: wifi.connected ? 'Connected' : 'Not connected' },
+    { label: 'IP address', value: wifi.ip },
+    { label: 'Hostname', value: wifi.hostname },
+    { label: 'MAC address', value: wifi.mac },
+    { label: 'Signal', value: present(wifi.rssi) ? `${wifi.rssi} dBm (ch ${wifi.channel})` : null },
+  ],
+  accessPoint: (wifi) => (wifi.ap_active
+    ? [{ label: 'Access point SSID', value: wifi.ap_ssid }, { label: 'Access point IP', value: wifi.ap_ip }]
+    : []),
+  power: (sys) => [
+    { label: 'Power status', value: sys.status },
+    { label: 'Contactors', value: sys.equipment_stop === true ? 'Open (equipment stop)' : 'Closed' },
+  ],
+  packProtocol: (pack) => ({ label: `Battery ${pack.slot + 1} protocol`, value: pack.name }),
+  packSummary: (pack) => [
+    { label: 'SOC', value: pct(pack.soc) },
+    { label: 'Real SOC', value: pct(pack.soc_real) },
+    { label: 'Health', value: pct(pack.soh) },
+    { label: 'Voltage', value: unit(pack.voltage, 'V', 1) },
+    { label: 'Current', value: unit(pack.current, 'A', 1) },
+    { label: 'Power', value: present(pack.power) ? `${pack.power} W` : null },
+    { label: 'Cell min', value: present(pack.cell_min_mV) ? `${pack.cell_min_mV} mV` : null },
+    { label: 'Cell max', value: present(pack.cell_max_mV) ? `${pack.cell_max_mV} mV` : null },
+  ],
+  packDetail: (pack) => [
+    { label: 'Total capacity', value: kwh(pack.total_wh) },
+    { label: 'Remaining capacity', value: kwh(pack.remaining_wh) },
+    { label: 'Max discharge power', value: kw(pack.max_discharge_w) },
+    { label: 'Max charge power', value: kw(pack.max_charge_w) },
+    { label: 'Max discharge current', value: unit(pack.max_discharge_a, 'A', 1) },
+    { label: 'Max charge current', value: unit(pack.max_charge_a, 'A', 1) },
+    { label: 'Cell delta', value: cellDelta(pack) },
+    { label: 'Temperature min/max', value: tempRange(pack) },
+  ],
+  charger: (chg) => [
+    { label: 'Type', value: chg.name },
+    { label: 'Status', value: chg.alive ? 'Connected' : 'Not responding' },
+    { label: 'HV output', value: pair(chg.hv_v, 'V', chg.hv_a, 'A') },
+    { label: 'AC input', value: pair(chg.ac_v, 'V', chg.ac_a, 'A') },
+    { label: 'LV output', value: pair(chg.lv_v, 'V', chg.lv_a, 'A') },
+    { label: 'HV charging', value: chg.hv_enabled ? 'Enabled' : 'Disabled' },
+    { label: 'Aux 12V', value: chg.aux12v_enabled ? 'Enabled' : 'Disabled' },
+  ],
+  events: (ev) => [
+    { label: 'Active', value: ev.active },
+    { label: 'Latest', value: ev.latest },
+  ],
+};
+
+const pct = (v) => (present(v) ? `${v.toFixed(1)} %` : null);
+const unit = (v, u, dp) => (present(v) ? `${v.toFixed(dp)} ${u}` : null);
+const kwh = (wh) => (present(wh) ? `${(wh / WH_PER_KWH).toFixed(1)} kWh` : null);
+const kw = (w) => (present(w) ? `${(w / W_PER_KW).toFixed(1)} kW` : null);
+const pair = (a, ua, b, ub) => (present(a) ? `${a.toFixed(1)} ${ua} · ${b.toFixed(1)} ${ub}` : null);
+const cellDelta = (pack) => (present(pack.cell_max_mV) && present(pack.cell_min_mV)
+  ? `${pack.cell_max_mV - pack.cell_min_mV} mV` : null);
+const tempRange = (pack) => (present(pack.temp_min_c) && present(pack.temp_max_c)
+  ? `${pack.temp_min_c.toFixed(1)} °C / ${pack.temp_max_c.toFixed(1)} °C` : null);
+
+function modelModern(state) {
+  const sys = state.system ?? {};
+  const wifi = state.wifi ?? {};
+  const blocks = [
+    { id: 'actions', section: 'actions', kind: 'component', build: () => actionsCard(sys) },
+    { id: 'system', section: 'system', title: 'System',
+      kind: 'rows', rows: [{ label: 'Status', value: sys.status }, ...ROW.system(sys)] },
+    { id: 'wifi', section: 'wifi', title: 'Wi-Fi network', kind: 'rows', rows: ROW.wifi(wifi) },
+  ];
+  if (wifi.ap_active) {
+    blocks.push({ id: 'wifiap', section: 'wifiap', title: 'Wi-Fi access point', kind: 'rows',
+      rows: [{ label: 'SSID', value: wifi.ap_ssid }, { label: 'IP address', value: wifi.ap_ip }] });
+  }
+  (state.batteries ?? []).forEach((pack) => {
+    blocks.push({ id: `battery${pack.slot}`, section: 'battery', title: `Battery ${pack.slot + 1}`,
+      kind: 'rows', status: sys.emulator_status,
+      rows: [{ label: 'Protocol', value: pack.name }, ...ROW.packSummary(pack), ...ROW.packDetail(pack)] });
+  });
+  if (state.inverter) {
+    blocks.push({ id: 'inverter', section: 'inverter', title: 'Inverter', kind: 'rows',
+      rows: [{ label: 'Protocol', value: state.inverter.name }] });
+  }
+  if (state.charger) {
+    blocks.push({ id: 'charger', section: 'charger', title: 'Charger', kind: 'rows',
+      rows: ROW.charger(state.charger) });
+  }
+  if (state.events) {
+    blocks.push({ id: 'events', section: 'events', title: 'Events', kind: 'rows', rows: ROW.events(state.events) });
+  }
+  if (state.load_switch) {
+    blocks.push({ id: 'loadswitch', section: 'loadswitch', kind: 'component',
+      build: () => loadSwitchCard(state.load_switch) });
+  }
+  return blocks;
+}
+
+function modelLegacy(state) {
+  const sys = state.system ?? {};
+  const wifi = state.wifi ?? {};
+  const packs = state.batteries ?? [];
+  const blocks = [
+    { id: 'identity', section: 'system', kind: 'rows',
+      rows: [...ROW.identity(), ...ROW.system(sys), ...ROW.wifi(wifi), ...ROW.accessPoint(wifi)] },
+    { id: 'protocols', section: 'inverter', kind: 'rows',
+      rows: [{ label: 'Inverter protocol', value: state.inverter?.name },
+             ...packs.map((pack) => ROW.packProtocol(pack))] },
+  ];
+  packs.forEach((pack) => {
+    blocks.push({ id: `battery${pack.slot}`, section: 'battery', kind: 'rows', status: sys.emulator_status,
+      rows: [...ROW.packSummary(pack), ...ROW.packDetail(pack)] });
+  });
+  blocks.push({ id: 'power', section: 'power', kind: 'rows', rows: ROW.power(sys) });
+  if (state.charger) {
+    blocks.push({ id: 'charger', section: 'charger', kind: 'rows', rows: ROW.charger(state.charger) });
+  }
+  if (state.events) {
+    blocks.push({ id: 'events', section: 'events', kind: 'rows', rows: ROW.events(state.events) });
+  }
+  if (state.load_switch) {
+    blocks.push({ id: 'loadswitch', section: 'loadswitch', kind: 'component',
+      build: () => loadSwitchCard(state.load_switch) });
+  }
+  blocks.push({ id: 'actions', section: 'actions', kind: 'component', build: () => actionsCard(sys) });
+  return blocks;
+}
+
+function vitalsRow(state) {
   const b = state.battery ?? {};
+  const vitals = el('div', 'vitals');
   vitals.append(tile('SOC', b.soc?.toFixed(1), '%'),
                 tile('Voltage', b.voltage?.toFixed(1), 'V'),
                 tile('Current', b.current?.toFixed(1), 'A'),
                 tile('Power', b.power, 'W'));
+  return vitals;
+}
 
+function paint(blocks, active, state) {
   const cards = el('div', 'cards');
-  // First card: reaching the emergency stop must never mean scrolling past vitals.
-  cards.append(actionsCard(state.system ?? {}));
-  cards.append(card('System', [
-    row('Status', state.system?.status),
-    row('Uptime', state.system?.uptime),
-    row('Free heap', present(state.system?.free_heap) ? `${state.system.free_heap} B` : null),
-  ]));
-  const wifi = state.wifi ?? {};
-  cards.append(card('Wi-Fi network', [
-    row('SSID', wifi.ssid),
-    row('Status', wifi.connected ? 'Connected' : 'Not connected'),
-    row('IP address', wifi.ip),
-    row('Hostname', wifi.hostname),
-    row('MAC address', wifi.mac),
-    row('Signal', present(wifi.rssi) ? `${wifi.rssi} dBm (ch ${wifi.channel})` : null),
-  ]));
-  if (wifi.ap_active) {
-    cards.append(card('Wi-Fi access point', [
-      row('SSID', wifi.ap_ssid),
-      row('IP address', wifi.ap_ip),
-    ]));
-  }
-  (state.batteries ?? []).forEach((pack) => {
-    cards.append(card(`Battery ${pack.slot + 1}`, [
-      row('Protocol', pack.name),
-      row('SOC', present(pack.soc) ? `${pack.soc.toFixed(1)} %` : null),
-      row('Real SOC', present(pack.soc_real) ? `${pack.soc_real.toFixed(1)} %` : null),
-      row('Health', present(pack.soh) ? `${pack.soh.toFixed(1)} %` : null),
-      row('Voltage', present(pack.voltage) ? `${pack.voltage.toFixed(1)} V` : null),
-      row('Current', present(pack.current) ? `${pack.current.toFixed(1)} A` : null),
-      row('Power', present(pack.power) ? `${pack.power} W` : null),
-      row('Cell min', present(pack.cell_min_mV) ? `${pack.cell_min_mV} mV` : null),
-      row('Cell max', present(pack.cell_max_mV) ? `${pack.cell_max_mV} mV` : null),
-    ]));
+  blocks.forEach((b) => {
+    const node = b.kind === 'component' ? b.build() : card(b.title, b.rows.map((r) => row(r.label, r.value)));
+    node.dataset.section = b.section;
+    if (b.status) node.dataset.status = b.status;
+    cards.append(node);
   });
-  if (state.inverter) {
-    cards.append(card('Inverter', [row('Protocol', state.inverter.name)]));
-  }
-  if (state.charger) {
-    const chg = state.charger;
-    cards.append(card('Charger', [
-      row('Type', chg.name),
-      row('Status', chg.alive ? 'Connected' : 'Not responding'),
-      row('HV output', present(chg.hv_v) ? `${chg.hv_v.toFixed(1)} V · ${chg.hv_a.toFixed(1)} A` : null),
-      row('AC input', present(chg.ac_v) ? `${chg.ac_v.toFixed(1)} V · ${chg.ac_a.toFixed(1)} A` : null),
-      row('LV output', present(chg.lv_v) ? `${chg.lv_v.toFixed(1)} V · ${chg.lv_a.toFixed(1)} A` : null),
-      row('HV charging', chg.hv_enabled ? 'Enabled' : 'Disabled'),
-      row('Aux 12V', chg.aux12v_enabled ? 'Enabled' : 'Disabled'),
-    ]));
-  }
-  if (state.events) {
-    cards.append(card('Events', [
-      row('Active', state.events.active),
-      row('Latest', state.events.latest),
-    ]));
-  }
-  if (state.load_switch) cards.append(loadSwitchCard(state.load_switch));
+  if (active.vitals) root.replaceChildren(vitalsRow(state), cards);
+  else root.replaceChildren(cards);
+}
 
-  root.replaceChildren(vitals, cards);
+export function render(state) {
+  if (!root) return;
+  paint(skin.model(state), skin, state);
 }

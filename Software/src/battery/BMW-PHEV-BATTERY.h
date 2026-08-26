@@ -28,6 +28,10 @@ class BmwPhevBattery : public CanBattery {
     BatteryAdvancedStatus status;
     auto& phev = datalayer_extended.bmwphev;
 
+    constexpr uint8_t kStatusErrorActive = 2;
+    constexpr uint8_t kWeldOneContactor = 1;
+    constexpr uint8_t kWeldTwoContactors = 2;
+
     // Shared across most 0/1/2/3 status fields: "not evaluated / OK / error active / invalid signal".
     auto status_ok_error = [](uint8_t v) -> String {
       switch (v) {
@@ -42,6 +46,10 @@ class BmwPhevBattery : public CanBattery {
         default:
           return "Unknown";
       }
+    };
+    auto ok_error_field = [&](const char* label, uint8_t v) {
+      return kv(label, status_ok_error(v), "",
+                v == kStatusErrorActive ? AdvancedSeverity::Warning : AdvancedSeverity::Normal);
     };
     // Shared across the three "request open contactors" fields.
     auto status_active = [](uint8_t v) -> String {
@@ -128,7 +136,9 @@ class BmwPhevBattery : public CanBattery {
       default:
         weld = "Unknown";
     }
-    contactors.fields.push_back(kv("Contactor Weld Status", weld));
+    const bool welded = phev.ST_WELD == kWeldOneContactor || phev.ST_WELD == kWeldTwoContactors;
+    contactors.fields.push_back(
+        kv("Contactor Weld Status", weld, "", welded ? AdvancedSeverity::Warning : AdvancedSeverity::Normal));
 
     contactors.fields.push_back(kv("Request Open Contactors", status_active(phev.battery_request_open_contactors)));
     contactors.fields.push_back(
@@ -139,15 +149,15 @@ class BmwPhevBattery : public CanBattery {
 
     AdvancedSection safety;
     safety.title = "Safety Systems";
-    safety.fields.push_back(kv("Interlock", status_ok_error(phev.ST_interlock)));
-    safety.fields.push_back(kv("Emergency Status", status_ok_error(phev.ST_EMG)));
+    safety.fields.push_back(ok_error_field("Interlock", phev.ST_interlock));
+    safety.fields.push_back(ok_error_field("Emergency Status", phev.ST_EMG));
     status.sections.push_back(safety);
 
     AdvancedSection isolation;
     isolation.title = "Isolation Monitoring";
-    isolation.fields.push_back(kv("Overall Isolation Status", status_ok_error(phev.ST_isolation)));
-    isolation.fields.push_back(kv("Internal Isolation", status_ok_error(phev.ST_iso_int)));
-    isolation.fields.push_back(kv("External Isolation", status_ok_error(phev.ST_iso_ext)));
+    isolation.fields.push_back(ok_error_field("Overall Isolation Status", phev.ST_isolation));
+    isolation.fields.push_back(ok_error_field("Internal Isolation", phev.ST_iso_int));
+    isolation.fields.push_back(ok_error_field("External Isolation", phev.ST_iso_ext));
     isolation.fields.push_back(kv("Isolation Resistance", String(phev.iso_safety_kohm), "kΩ"));
     isolation.fields.push_back(kv("Isolation Quality", String(phev.iso_safety_kohm_quality)));
     isolation.fields.push_back(kv("Internal Resistance",
@@ -163,7 +173,7 @@ class BmwPhevBattery : public CanBattery {
 
     AdvancedSection thermal;
     thermal.title = "Thermal Management";
-    thermal.fields.push_back(kv("Cooling Valve Status", status_ok_error(phev.ST_valve_cooling)));
+    thermal.fields.push_back(ok_error_field("Cooling Valve Status", phev.ST_valve_cooling));
 
     String cold_shutoff;
     switch (phev.ST_cold_shutoff_valve) {

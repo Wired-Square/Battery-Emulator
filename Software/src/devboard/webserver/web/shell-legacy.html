@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en-AU" data-skin="legacy">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battery Emulator</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="shell">
+  <div class="main">
+    <h2 class="page-heading">
+      <a href="https://dalathegreat.github.io/Battery-Emulator-Wiki/" target="_blank" rel="noopener">Battery Emulator</a>
+    </h2>
+    <main class="content" id="content"></main>
+    <nav class="navbuttons" aria-label="Sections">
+      <a class="btn" href="#/" data-route="/">Dashboard</a>
+      <a class="btn" href="#/settings" data-route="/settings">Settings</a>
+      <a class="btn" href="#/cellmonitor" data-route="/cellmonitor">Cells</a>
+      <a class="btn" href="#/canlog" data-route="/canlog">CAN log</a>
+      <a class="btn" href="#/canreplay" data-route="/canreplay">CAN replay</a>
+      <a class="btn" href="#/advanced" data-route="/advanced">Advanced</a>
+      <a class="btn" href="#/events" data-route="/events">Events</a>
+      <a class="btn" id="nav-log" href="#/log" data-route="/log" hidden>Debug log</a>
+      <a class="btn" href="#/firmware" data-route="/firmware">Firmware</a>
+      <button class="btn" type="button" data-ui-switch="modern">Modern UI</button>
+    </nav>
+  </div>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

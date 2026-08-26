@@ -139,6 +139,7 @@ function fieldNode(field) {
     return table;
   }
   const row = el('div', 'field');
+  if (field.sev) row.dataset.severity = field.sev;
   row.append(el('label', null, field.label));
   row.append(el('span', null, field.unit ? `${field.value} ${field.unit}` : field.value));
   return row;
