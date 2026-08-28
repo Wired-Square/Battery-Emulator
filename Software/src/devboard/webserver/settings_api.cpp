@@ -5,6 +5,7 @@
 #include "../../battery/Battery.h"
 #include "../../battery/Shunt.h"
 #include "../../charger/CanCharger.h"
+#include "../../communication/equipmentstopbutton/comm_equipmentstopbutton.h"
 #include "../../communication/nvm/comm_nvm.h"
 #include "../../datalayer/datalayer.h"
 #include "../../inverter/InverterProtocol.h"
@@ -12,10 +13,12 @@
 #include "../hal/hal.h"
 #include "../utils/types.h"
 #include "../wifi/wifi.h"
-#include "settings_labels.h"
 
 #include <cmath>
 #include <cstring>
+#include <map>
+#include <type_traits>
+#include <vector>
 
 // Edit-card fields, internal keys (IFSCHEMA/EQUIPMENT_STOP) and the form-only
 // HTTPPASSCONFIRM are deliberately absent: they are not /saveSettings scalars.
@@ -23,6 +26,45 @@
 namespace {
 using ST = SettingType;
 using SA = SettingApplies;
+
+template <typename E>
+constexpr auto to_underlying(E e) noexcept {
+  return static_cast<std::underlying_type_t<E>>(e);
+}
+
+template <typename EnumType>
+std::vector<EnumType> enum_values() {
+  static_assert(std::is_enum_v<EnumType>, "Template argument must be an enum type.");
+
+  constexpr auto count = to_underlying(EnumType::Highest);
+  std::vector<EnumType> values;
+  for (int i = 1; i < count; ++i) {
+    values.push_back(static_cast<EnumType>(i));
+  }
+  return values;
+}
+
+#ifdef HW_LILYGO2CAN
+const std::map<int, String> led_modes = {{0, "Classic"},     {1, "Energy Flow"},     {2, "Heartbeat"},
+                                         {3, "GRB Classic"}, {4, "GRB Energy Flow"}, {5, "GRB Heartbeat"}};
+#else
+const std::map<int, String> led_modes = {{0, "Classic"}, {1, "Energy Flow"}, {2, "Heartbeat"}};
+#endif
+
+const std::map<int, String> bms_reset_intervals = {{24, "24h"}, {48, "48h"}};
+
+const char* name_for_button_type(STOP_BUTTON_BEHAVIOR behavior) {
+  switch (behavior) {
+    case STOP_BUTTON_BEHAVIOR::LATCHING_SWITCH:
+      return "Latching";
+    case STOP_BUTTON_BEHAVIOR::MOMENTARY_SWITCH:
+      return "Momentary";
+    case STOP_BUTTON_BEHAVIOR::NOT_CONNECTED:
+      return "Not connected";
+    default:
+      return nullptr;
+  }
+}
 
 constexpr const char* kNetwork = "network";
 constexpr const char* kWebauth = "webauth";
@@ -52,133 +94,139 @@ constexpr BatterySlotKeys kBatterySlotKeys[kMaxBatterySlots] = {
 }  // namespace
 
 const SettingField kSettingFields[] = {
-    {"WEBAUTH", "WEBAUTH", ST::Bool, kWebauth, SA::Boot, 0, nullptr},
-    {"HTTPUSER", "HTTPUSER", ST::StringVal, kWebauth, SA::Boot, 0, "admin"},
-    {"HTTPPASS", "HTTPPASS", ST::StringVal, kWebauth, SA::Boot, 0, ""},
+    {"WEBAUTH", ST::Bool, kWebauth, SA::Boot, 0, nullptr},
+    {"HTTPUSER", ST::StringVal, kWebauth, SA::Boot, 0, "admin"},
+    {"HTTPPASS", ST::StringVal, kWebauth, SA::Boot, 0, ""},
 
-    {"WEBUI", "WEBUI", ST::StringVal, kInterface, SA::Live, 0, kDefaultUiShell, "webui"},
+    {"WEBUI", ST::StringVal, kInterface, SA::Live, 0, kDefaultUiShell, "webui"},
 
-    {"SSID", "SSID", ST::StringVal, kNetwork, SA::Boot, 0, ""},
-    {"PASSWORD", "PASSWORD", ST::StringVal, kNetwork, SA::Boot, 0, ""},
+    {"SSID", ST::StringVal, kNetwork, SA::Boot, 0, ""},
+    {"PASSWORD", ST::StringVal, kNetwork, SA::Boot, 0, ""},
 
-    {"BATTCHEM", "BATTCHEM", ST::EnumUint, kBattery, SA::Boot, 1, nullptr, "chemistry"},
-    {"BATTPVMAX", "BATTPVMAX", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
-    {"BATTPVMIN", "BATTPVMIN", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
-    {"BATTCVMAX", "BATTCVMAX", ST::Uint, kBattery, SA::Boot, 0, nullptr},
-    {"BATTCVMIN", "BATTCVMIN", ST::Uint, kBattery, SA::Boot, 0, nullptr},
-    {"PYLONBAUD", "PYLONBAUD", ST::Uint, kBattery, SA::Boot, 500, nullptr},
-    {"INTERLOCKREQ", "INTERLOCKREQ", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-    {"SOCESTIMATED", "SOCESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-    {"DALYPWRPCT", "DALYPWRPCT", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
-    {"DALYPWRDV", "DALYPWRDV", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
-    {"DALYDVSTART", "DALYDVSTART", ST::Uint, kBattery, SA::Boot, 20, nullptr, nullptr, 1, 200},
-    {"DALYPWRDEG", "DALYPWRDEG", ST::Uint, kBattery, SA::Boot, 60, nullptr, nullptr, 1, 10000},
-    {"DALYPWR0C", "DALYPWR0C", ST::Uint, kBattery, SA::Boot, 800, nullptr, nullptr, 0, 100000},
-    {"DIGITALHVIL", "DIGITALHVIL", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-    {"GTWRHD", "GTWRHD", ST::Bool, kBattery, SA::Boot, kTeslaGtwRightHandDriveDefault, nullptr},
-    {"GTWCOUNTRY", "GTWCOUNTRY", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwCountryDefault, nullptr, "country"},
-    {"GTWMAPREG", "GTWMAPREG", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwMapRegionDefault, nullptr, "mapregion"},
-    {"GTWCHASSIS", "GTWCHASSIS", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwChassisTypeDefault, nullptr, "chassis"},
-    {"GTWPACK", "GTWPACK", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwPackEnergyDefault, nullptr, "pack"},
-    {"CHGESTIMATED", "CHGESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-    {"CHGPOWER", "CHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
-    {"DCHGPOWER", "DCHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
-    {"RAMPDOWNSOC", "RAMPDOWNSOC", ST::Uint, kBattery, SA::Boot, 9000, nullptr, nullptr, 7000, 9000},
-    {"SOFAR_ID", "SOFAR_ID", ST::Uint, kBattery, SA::Boot, 0, nullptr, nullptr, 0, 99},
+    {"BATTCHEM", ST::EnumUint, kBattery, SA::Boot, 1, nullptr, "chemistry"},
+    {"BATTPVMAX", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
+    {"BATTPVMIN", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
+    {"BATTCVMAX", ST::Uint, kBattery, SA::Boot, 0, nullptr},
+    {"BATTCVMIN", ST::Uint, kBattery, SA::Boot, 0, nullptr},
+    {"PYLONBAUD", ST::Uint, kBattery, SA::Boot, 500, nullptr},
+    {"INTERLOCKREQ", ST::Bool, kBattery, SA::Boot, 0, nullptr},
+    {"SOCESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
+    {"DALYPWRPCT", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
+    {"DALYPWRDV", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
+    {"DALYDVSTART", ST::Uint, kBattery, SA::Boot, 20, nullptr, nullptr, 1, 200},
+    {"DALYPWRDEG", ST::Uint, kBattery, SA::Boot, 60, nullptr, nullptr, 1, 10000},
+    {"DALYPWR0C", ST::Uint, kBattery, SA::Boot, 800, nullptr, nullptr, 0, 100000},
+    {"DIGITALHVIL", ST::Bool, kBattery, SA::Boot, 0, nullptr},
+    {"GTWRHD", ST::Bool, kBattery, SA::Boot, kTeslaGtwRightHandDriveDefault, nullptr},
+    {"GTWCOUNTRY", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwCountryDefault, nullptr, "country"},
+    {"GTWMAPREG", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwMapRegionDefault, nullptr, "mapregion"},
+    {"GTWCHASSIS", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwChassisTypeDefault, nullptr, "chassis"},
+    {"GTWPACK", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwPackEnergyDefault, nullptr, "pack"},
+    {"CHGESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
+    {"CHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
+    {"DCHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
+    {"RAMPDOWNSOC", ST::Uint, kBattery, SA::Boot, 9000, nullptr, nullptr, 7000, 9000},
+    {"SOFAR_ID", ST::Uint, kBattery, SA::Boot, 0, nullptr, nullptr, 0, 99},
 
-    {"inverter", "INVTYPE", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "inverter"},
-    {"INVCOMM", "INVCOMM", ST::InterfacePacked, kInverter, SA::Boot, 0, nullptr},
-    {"LOWPASSFILTER", "LOWPASSFILTER", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"CHGTAPERSOC", "CHGTAPERSOC", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    {"INVTYPE", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "inverter"},
+    {"INVCOMM", ST::InterfacePacked, kInverter, SA::Boot, 0, nullptr},
+    {"INVOFFGRID", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    {"LOWPASSFILTER", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    {"CHGTAPERSOC", ST::Bool, kInverter, SA::Boot, 0, nullptr},
     // Stored as start SOC in whole percent; comm_nvm derives the pptt band from it.
-    {"CHGTAPERSTART", "CHGTAPERSTART", ST::Uint, kInverter, SA::Boot, 95, nullptr, nullptr, 50, 99},
-    {"CHGTAPERFLOOR", "CHGTAPERFLOOR", ST::Uint, kInverter, SA::Boot, 0, nullptr, nullptr, 0, 2000},
-    {"SLOWCANINV", "SLOWCANINV", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"PYLONSEND", "PYLONSEND", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"PYLONOFFSET", "PYLONOFFSET", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"PYLONORDER", "PYLONORDER", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"PYLONBRAND", "PYLONBRAND", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "pylonbrand"},
-    {"DEYEBYD", "DEYEBYD", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"PRIMOGEN24", "PRIMOGEN24", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"INVCELLS", "INVCELLS", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVMODULES", "INVMODULES", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVCELLSPER", "INVCELLSPER", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVVLEVEL", "INVVLEVEL", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVCAPACITY", "INVCAPACITY", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVBTYPE", "INVBTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVSUNTYPE", "INVSUNTYPE", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "sungrow"},
-    {"INVICNT", "INVICNT", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "contactor"},
-    {"FOXESSTYPE", "FOXESSTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"FOXESSSUBTYPE", "FOXESSSUBTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"FOXESSMODULES", "FOXESSMODULES", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"CHGTAPERSTART", ST::Uint, kInverter, SA::Boot, 95, nullptr, nullptr, 50, 99},
+    {"CHGTAPERFLOOR", ST::Uint, kInverter, SA::Boot, 0, nullptr, nullptr, 0, 2000},
+    {"SLOWCANINV", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    {"PYLONSEND", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"PYLONOFFSET", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    {"PYLONORDER", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    {"PYLONBRAND", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "pylonbrand"},
+    {"DEYEBYD", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    {"PRIMOGEN24", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    {"INVCELLS", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"INVMODULES", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"INVCELLSPER", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"INVVLEVEL", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"INVCAPACITY", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"INVBTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"INVSUNTYPE", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "sungrow"},
+    {"INVICNT", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "contactor"},
+    {"FOXESSTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"FOXESSSUBTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+    {"FOXESSMODULES", ST::Uint, kInverter, SA::Boot, 0, nullptr},
 
     // CTOFFSET is a string to keep its sign; CTATTEN uses the boot default 3, not the
     // form's 0, so an unsaved device's full-set POST leaves the attenuation unchanged.
-    {"charger", "CHGTYPE", ST::EnumUint, kOptional, SA::Boot, 0, nullptr, "charger"},
-    {"CHGCOMM", "CHGCOMM", ST::InterfacePacked, kOptional, SA::Boot, 0, nullptr},
-    {"shunttype", "SHUNTTYPE", ST::EnumUint, kOptional, SA::Boot, 0, nullptr, "shunt"},
-    {"SHUNTCOMM", "SHUNTCOMM", ST::InterfacePacked, kOptional, SA::Boot, 0, nullptr},
-    {"CTOFFSET", "CTOFFSET", ST::FloatString, kOptional, SA::Boot, 0, "-1.0"},
-    {"CTVNOM", "CTVNOM", ST::Uint, kOptional, SA::Boot, 40, nullptr, nullptr, 0, 500},
-    {"CTANOM", "CTANOM", ST::Uint, kOptional, SA::Boot, 100, nullptr, nullptr, 0, 200},
-    {"CTATTEN", "CTATTEN", ST::EnumUint, kOptional, SA::Boot, 3, nullptr, "attenuation"},
-    {"CTINVERT", "CTINVERT", ST::Bool, kOptional, SA::Boot, 0, nullptr},
+    {"CHGTYPE", ST::EnumUint, kOptional, SA::Boot, 0, nullptr, "charger"},
+    {"CHGCOMM", ST::InterfacePacked, kOptional, SA::Boot, 0, nullptr},
+    {"SHUNTTYPE", ST::EnumUint, kOptional, SA::Boot, 0, nullptr, "shunt"},
+    {"SHUNTCOMM", ST::InterfacePacked, kOptional, SA::Boot, 0, nullptr},
+    {"CTOFFSET", ST::FloatString, kOptional, SA::Boot, 0, "-1.0"},
+    {"CTVNOM", ST::Uint, kOptional, SA::Boot, 40, nullptr, nullptr, 0, 500},
+    {"CTANOM", ST::Uint, kOptional, SA::Boot, 100, nullptr, nullptr, 0, 200},
+    {"CTATTEN", ST::EnumUint, kOptional, SA::Boot, 3, nullptr, "attenuation"},
+    {"CTINVERT", ST::Bool, kOptional, SA::Boot, 0, nullptr},
 
     // Board-gated rows sit inside the same #ifdef that gates them in comm_nvm.cpp.
-    {"CANFDASCAN", "CANFDASCAN", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"CANFDASCAN", ST::Bool, kHardware, SA::Boot, 0, nullptr},
 #if defined(HW_LILYGO2CAN) || defined(HW_STARK)
-    {"CANFD2ASCAN", "CANFD2ASCAN", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"CANFD2ASCAN", ST::Bool, kHardware, SA::Boot, 0, nullptr},
 #endif
-    {"EQSTOP", "EQSTOP", ST::EnumUint, kHardware, SA::Boot, 0, nullptr, "button"},
-    {"PRECHGMS", "PRECHGMS", ST::Uint, kHardware, SA::Boot, 100, nullptr, nullptr, 1, 65000},
-    {"NCCONTACTOR", "NCCONTACTOR", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"PWMCNTCTRL", "PWMCNTCTRL", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"PWMFREQ", "PWMFREQ", ST::Uint, kHardware, SA::Boot, 20000, nullptr, nullptr, 1, 65000},
-    {"PWMHOLD", "PWMHOLD", ST::Uint, kHardware, SA::Boot, 250, nullptr, nullptr, 1, 1023},
-    {"PERBMSRESET", "PERBMSRESET", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"EXTPRECHARGE", "EXTPRECHARGE", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"MAXPRETIME", "MAXPRETIME", ST::Uint, kHardware, SA::Boot, 15000, nullptr},
-    {"MAXPREFREQ", "MAXPREFREQ", ST::Uint, kHardware, SA::Boot, 34000, nullptr},
-    {"NOINVDISC", "NOINVDISC", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"LEDMODE", "LEDMODE", ST::EnumUint, kHardware, SA::Boot, 0, nullptr, "ledmode"},
+    {"EQSTOP", ST::EnumUint, kHardware, SA::Boot, 0, nullptr, "button"},
+    {"PRECHGMS", ST::Uint, kHardware, SA::Boot, 100, nullptr, nullptr, 1, 65000},
+    {"NCCONTACTOR", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"PWMCNTCTRL", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"PWMFREQ", ST::Uint, kHardware, SA::Boot, 20000, nullptr, nullptr, 1, 65000},
+    {"PWMHOLD", ST::Uint, kHardware, SA::Boot, 250, nullptr, nullptr, 1, 1023},
+    {"PERBMSRESET", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"PERBMSRESETH", ST::EnumUint, kHardware, SA::Boot, 24, nullptr, "bmsresetinterval"},
+    {"PERBMSDEFSOC", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"PERBMSSKIPBAL", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"EXTPRECHARGE", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"MAXPRETIME", ST::Uint, kHardware, SA::Boot, 15000, nullptr},
+    {"MAXPREFREQ", ST::Uint, kHardware, SA::Boot, 34000, nullptr},
+    {"NOINVDISC", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    {"LEDMODE", ST::EnumUint, kHardware, SA::Boot, 0, nullptr, "ledmode"},
 
-    {"WIFIAPENABLED", "WIFIAPENABLED", ST::Bool, kConnectivity, SA::Boot, 1, nullptr},
-    {"APPASSWORD", "APPASSWORD", ST::StringVal, kConnectivity, SA::Boot, 0, "123456789"},
-    {"WIFICHANNEL", "WIFICHANNEL", ST::Uint, kConnectivity, SA::Boot, 0, nullptr, nullptr, 0, 14},
-    {"HOSTNAME", "HOSTNAME", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"STATICIP", "STATICIP", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"LOCALIP", "LOCALIP", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"GATEWAY", "GATEWAY", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"SUBNET", "SUBNET", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"DNS", "DNS", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"ESPNOWENABLED", "ESPNOWENABLED", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"ESPNOWMACS", "ESPNOWMACS", ST::StringVal, kConnectivity, SA::Boot, 0, "", nullptr, kNoMin, 180},
-    {"MQTTENABLED", "MQTTENABLED", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"MQTTSERVER", "MQTTSERVER", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"MQTTPORT", "MQTTPORT", ST::Uint, kConnectivity, SA::Boot, 1883, nullptr, nullptr, 1, 65535},
-    {"MQTTUSER", "MQTTUSER", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"MQTTPASSWORD", "MQTTPASSWORD", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"MQTTTIMEOUT", "MQTTTIMEOUT", ST::Uint, kConnectivity, SA::Boot, 2000, nullptr, nullptr, 1, 60000},
-    {"MQTTPUBLISHMS", "MQTTPUBLISHMS", ST::SecondsToMs, kConnectivity, SA::Boot, 5, nullptr, nullptr, 1, 300},
-    {"MQTTCELLV", "MQTTCELLV", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"MQTTHEAP", "MQTTHEAP", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"REMBMSRESET", "REMBMSRESET", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"HADISC", "HADISC", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"HADISCFWU", "HADISCFWU", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"HADISCTOPIC", "HADISCTOPIC", ST::StringVal, kConnectivity, SA::Boot, 0, "homeassistant"},
+    {"WIFIAPENABLED", ST::Bool, kConnectivity, SA::Boot, 1, nullptr},
+    {"APPASSWORD", ST::StringVal, kConnectivity, SA::Boot, 0, "123456789"},
+    {"WIFICHANNEL", ST::Uint, kConnectivity, SA::Boot, 0, nullptr, nullptr, 0, 14},
+    {"HOSTNAME", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
+    {"STATICIP", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
+    {"LOCALIP", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
+    {"GATEWAY", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
+    {"SUBNET", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
+    {"DNS", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
+    {"ESPNOWENABLED", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
+    {"ESPNOWMACS", ST::StringVal, kConnectivity, SA::Boot, 0, "", nullptr, kNoMin, 180},
+    {"MQTTENABLED", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
+    {"MQTTSERVER", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
+    {"MQTTPORT", ST::Uint, kConnectivity, SA::Boot, 1883, nullptr, nullptr, 1, 65535},
+    {"MQTTUSER", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
+    {"MQTTPASSWORD", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
+    {"MQTTTIMEOUT", ST::Uint, kConnectivity, SA::Boot, 2000, nullptr, nullptr, 1, 60000},
+    {"MQTTPUBLISHMS", ST::SecondsToMs, kConnectivity, SA::Boot, 5, nullptr, nullptr, 1, 300},
+    {"MQTTCELLV", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
+    {"MQTTHEAP", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
+    {"REMBMSRESET", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
+    {"HADISC", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
+    {"HADISCFWU", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
+    {"HADISCTOPIC", ST::StringVal, kConnectivity, SA::Boot, 0, "homeassistant"},
 
-    {"PERFPROFILE", "PERFPROFILE", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"CANLOGUSB", "CANLOGUSB", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"USBENABLED", "USBENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"WEBENABLED", "WEBENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"CANLOGSD", "CANLOGSD", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"SDLOGENABLED", "SDLOGENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    {"PERFPROFILE", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    {"MEASURECPUTEMP", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    {"CPUTEMPOFFSET", ST::Int, kDebug, SA::Boot, 0, nullptr},
+    {"CANLOGUSB", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    {"USBENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    {"WEBENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    {"CANLOGSD", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    {"SDLOGENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
 #ifndef SMALL_FLASH_DEVICE
     // Gate matches the comm_nvm reads and the syslog client.
-    {"SYSLOGEN", "SYSLOGEN", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"SYSLOGIP", "SYSLOGIP", ST::StringVal, kDebug, SA::Boot, 0, ""},
-    {"SYSLOGPORT", "SYSLOGPORT", ST::Uint, kDebug, SA::Boot, 514, nullptr, nullptr, 1, 65535},
-    {"SYSLOGFAC", "SYSLOGFAC", ST::Uint, kDebug, SA::Boot, 1, nullptr, nullptr, 0, 23},
+    {"SYSLOGEN", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    {"SYSLOGIP", ST::StringVal, kDebug, SA::Boot, 0, ""},
+    {"SYSLOGPORT", ST::Uint, kDebug, SA::Boot, 514, nullptr, nullptr, 1, 65535},
+    {"SYSLOGFAC", ST::Uint, kDebug, SA::Boot, 1, nullptr, nullptr, 0, 23},
 #endif
 };
 
@@ -358,6 +406,7 @@ void emit_all_options(JsonObject options) {
 
   // Board-conditional (HW_LILYGO2CAN adds GRB variants), so kept server-side.
   emit_map_options(options, "ledmode", led_modes);
+  emit_map_options(options, "bmsresetinterval", bms_reset_intervals);
 
 #ifdef BOARD_HAS_LOAD_SWITCH
   // Enum order (Disabled first, unsorted), matching the legacy per-channel select.
@@ -386,27 +435,27 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
     const SettingField& field = kSettingFields[i];
     switch (field.type) {
       case ST::Bool:
-        values[field.json_key] = store.getBool(field.nvs_key, field.default_int != 0);
+        values[field.nvs_key] = store.getBool(field.nvs_key, field.default_int != 0);
         break;
       case ST::Uint:
       case ST::EnumUint:
-        values[field.json_key] = store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int));
+        values[field.nvs_key] = store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int));
         break;
       case ST::Int:
-        values[field.json_key] = store.getInt(field.nvs_key, field.default_int);
+        values[field.nvs_key] = store.getInt(field.nvs_key, field.default_int);
         break;
       case ST::StringVal:
       case ST::FloatString:
         set_json_string(
-            values, field.json_key,
+            values, field.nvs_key,
             is_password_key(field.nvs_key) ? String("") : store.getString(field.nvs_key, field.default_str));
         break;
       case ST::FloatX10:
-        values[field.json_key] =
+        values[field.nvs_key] =
             store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int)) / kDeciUnitsPerUnit;
         break;
       case ST::SecondsToMs:
-        values[field.json_key] =
+        values[field.nvs_key] =
             store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int) * kMillisecondsPerSecond) /
             kMillisecondsPerSecond;
         break;
@@ -420,7 +469,7 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
             stored = default_interface_config(list);
           }
         }
-        values[field.json_key] = stored;
+        values[field.nvs_key] = stored;
         break;
       }
     }
@@ -445,7 +494,7 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     JsonObject entry = schema.add<JsonObject>();
-    entry["key"] = field.json_key;
+    entry["key"] = field.nvs_key;
     entry["category"] = field.category;
     entry["type"] = widget_type_name(field.type);
     const char* options = field.options_key;
@@ -642,15 +691,15 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   bool options_built = false;
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
-    JsonVariantConst value = values[field.json_key];
+    JsonVariantConst value = values[field.nvs_key];
     if (value.isNull()) {
       continue;
     }
     if (!value_matches_type(field.type, value)) {
       result.ok = false;
-      result.error = String("Invalid type for setting ") + field.json_key;
+      result.error = String("Invalid type for setting ") + field.nvs_key;
       result.error_key = "error.setting_invalid_type";
-      result.error_arg = field.json_key;
+      result.error_arg = field.nvs_key;
       return result;
     }
     // as<double>() is safe: bounds sit only on numeric rows, already type-checked above.
@@ -660,9 +709,9 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       const double numeric = value.as<double>();
       if ((has_min && numeric < field.min_value) || (has_max && numeric > field.max_value)) {
         result.ok = false;
-        result.error = String("Setting ") + field.json_key + " is out of range";
+        result.error = String("Setting ") + field.nvs_key + " is out of range";
         result.error_key = "error.setting_out_of_range";
-        result.error_arg = field.json_key;
+        result.error_arg = field.nvs_key;
         return result;
       }
     }
@@ -681,9 +730,9 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       }
       if (!found) {
         result.ok = false;
-        result.error = String("Setting ") + field.json_key + " is not an available option";
+        result.error = String("Setting ") + field.nvs_key + " is not an available option";
         result.error_key = "error.setting_not_an_option";
-        result.error_arg = field.json_key;
+        result.error_arg = field.nvs_key;
         return result;
       }
     }
@@ -760,11 +809,11 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     const bool gates_reboot = field.applies == SA::Boot;
-    JsonVariantConst value = values[field.json_key];
+    JsonVariantConst value = values[field.nvs_key];
     if (value.isNull()) {
       // Explicit JSON null on a present password key clears the secret; an absent key — or
       // null on any non-password key — preserves the stored value (the bool-wipe invariant).
-      if (is_password_key(field.nvs_key) && values.containsKey(field.json_key)) {
+      if (is_password_key(field.nvs_key) && values.containsKey(field.nvs_key)) {
         reboot_required |= gates_reboot && (store.getString(field.nvs_key, "").length() > 0);
         store.saveString(field.nvs_key, "");
         if (std::strcmp(field.nvs_key, "PASSWORD") == 0) {

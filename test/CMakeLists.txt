@@ -133,7 +133,6 @@ add_executable(tests
     ../Software/src/devboard/safety/safety.cpp
     ../Software/src/devboard/hal/hal.cpp
     ../Software/src/devboard/hal/gpio_options.cpp
-    ../Software/src/devboard/webserver/settings_labels.cpp
     ../Software/src/devboard/webserver/settings_api.cpp
     ../Software/src/devboard/webserver/web_ui_selection.cpp
     ../Software/src/devboard/webserver/logging_api.cpp

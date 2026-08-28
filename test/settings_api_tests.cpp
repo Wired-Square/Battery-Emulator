@@ -82,7 +82,7 @@ TEST_F(SettingsApiTest, FloatStringCarriesNegativeSign) {
   EXPECT_STREQ(doc["values"]["CTOFFSET"].as<const char*>(), "-2.5");
 }
 
-TEST_F(SettingsApiTest, AliasesUseJsonKeyNotNvsKey) {
+TEST_F(SettingsApiTest, WireKeyIsTheNvsKey) {
   {
     BatteryEmulatorSettingsStore store;
     store.saveUInt("INVTYPE", 3);
@@ -92,9 +92,14 @@ TEST_F(SettingsApiTest, AliasesUseJsonKeyNotNvsKey) {
   const JsonDocument doc = parse_values(build_settings_json(reader));
   JsonObjectConst values = doc["values"];
 
-  EXPECT_FALSE(values["inverter"].isNull());
-  EXPECT_EQ(values["inverter"].as<uint32_t>(), 3u);
-  EXPECT_TRUE(values["INVTYPE"].isNull());
+  EXPECT_FALSE(values["INVTYPE"].isNull());
+  EXPECT_EQ(values["INVTYPE"].as<uint32_t>(), 3u);
+
+  for (size_t i = 0; i < kSettingFieldCount; i++) {
+    const SettingField& field = kSettingFields[i];
+    EXPECT_FALSE(values[field.nvs_key].isNull())
+        << field.nvs_key << " is missing, so some field still renames itself on the wire";
+  }
 }
 
 TEST_F(SettingsApiTest, EmitsDefaultsForAbsentKeys) {
@@ -322,14 +327,14 @@ TEST_F(SettingsApiTest, ServerEmittedDropdownsAreNonEmpty) {
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     if (field.type == SettingType::EnumUint) {
-      EXPECT_NE(field.options_key, nullptr) << field.json_key;
+      EXPECT_NE(field.options_key, nullptr) << field.nvs_key;
     }
     if (field.type == SettingType::InterfacePacked) {
-      EXPECT_GT(interfaces.size(), 0u) << field.json_key;
+      EXPECT_GT(interfaces.size(), 0u) << field.nvs_key;
     } else if (field.options_key != nullptr) {
       JsonArrayConst list = options[field.options_key];
       if (!list.isNull()) {
-        EXPECT_GT(list.size(), 0u) << field.json_key << " -> options." << field.options_key;
+        EXPECT_GT(list.size(), 0u) << field.nvs_key << " -> options." << field.options_key;
       }
     }
   }
@@ -350,7 +355,7 @@ TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     JsonObjectConst entry = schema[i];
-    EXPECT_STREQ(entry["key"].as<const char*>(), field.json_key);
+    EXPECT_STREQ(entry["key"].as<const char*>(), field.nvs_key);
     EXPECT_STREQ(entry["category"].as<const char*>(), field.category);
 
     const char* expected_type = nullptr;
@@ -383,14 +388,14 @@ TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
         expected_type = "interface";
         break;
     }
-    EXPECT_STREQ(entry["type"].as<const char*>(), expected_type) << field.json_key;
+    EXPECT_STREQ(entry["type"].as<const char*>(), expected_type) << field.nvs_key;
 
     if (field.options_key != nullptr) {
-      EXPECT_STREQ(entry["options"].as<const char*>(), field.options_key) << field.json_key;
+      EXPECT_STREQ(entry["options"].as<const char*>(), field.options_key) << field.nvs_key;
     } else if (field.type == SettingType::InterfacePacked) {
-      EXPECT_STREQ(entry["options"].as<const char*>(), "interfaces") << field.json_key;
+      EXPECT_STREQ(entry["options"].as<const char*>(), "interfaces") << field.nvs_key;
     } else {
-      EXPECT_TRUE(entry["options"].isNull()) << field.json_key;
+      EXPECT_TRUE(entry["options"].isNull()) << field.nvs_key;
     }
   }
 
@@ -463,10 +468,10 @@ TEST_F(SettingsApiTest, EmptyPrimaryWithStoredExtraBatteryIsRejected) {
   EXPECT_EQ(store.getUInt("BATTTYPE", 999), (uint32_t)BatteryType::NissanLeaf);
 }
 
-TEST_F(SettingsApiTest, AliasWritesNvsKeyNotJsonKey) {
+TEST_F(SettingsApiTest, ApplyAcceptsTheNvsKey) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
-  body["values"]["inverter"] = 3;
+  body["values"]["INVTYPE"] = 3;
   const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
 
   EXPECT_TRUE(r.ok) << r.error.c_str();

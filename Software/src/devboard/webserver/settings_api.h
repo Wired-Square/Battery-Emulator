@@ -32,7 +32,6 @@ constexpr int32_t kNoMin = INT32_MIN;
 constexpr int32_t kNoMax = INT32_MAX;
 
 struct SettingField {
-  const char* json_key;
   const char* nvs_key;  // <= 15 chars (NVS key-length limit)
   SettingType type;
   const char* category;
