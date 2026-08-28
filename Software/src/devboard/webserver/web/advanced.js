@@ -120,11 +120,16 @@ function describedTable(field, table, body) {
   return group;
 }
 
+function advText(text) {
+  const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  return t(`adv.${slug}`, text);
+}
+
 function fieldNode(field) {
   if (field.kind === 'table') {
     const table = el('table', 'data-table');
     const headRow = el('tr');
-    field.columns.forEach((c) => headRow.append(el('th', null, c)));
+    field.columns.forEach((c) => headRow.append(el('th', null, advText(c))));
     const thead = el('thead');
     thead.append(headRow);
     table.append(thead);
@@ -140,13 +145,13 @@ function fieldNode(field) {
   }
   const row = el('div', 'field');
   if (field.sev) row.dataset.severity = field.sev;
-  row.append(el('label', null, field.label));
+  row.append(el('label', null, advText(field.label)));
   row.append(el('span', null, field.unit ? `${field.value} ${field.unit}` : field.value));
   return row;
 }
 
 async function send(cmd, body, btn) {
-  if (cmd.prompt && !window.confirm(tf('ui.confirm_command', 'Are you sure you want to {}', cmd.prompt))) return;
+  if (cmd.prompt && !window.confirm(tf('ui.confirm_command', 'Are you sure you want to {}', advText(cmd.prompt)))) return;
   try {
     await postJson('/api/advanced/command', body);
   } catch {
@@ -160,7 +165,7 @@ async function send(cmd, body, btn) {
 }
 
 function commandButton(cmd, batteryIndex) {
-  const btn = el('button', 'btn', cmd.title);
+  const btn = el('button', 'btn', advText(cmd.title));
   btn.type = 'button';
   btn.addEventListener('click', () => send(cmd, { id: cmd.id, battery: batteryIndex }, btn));
   return btn;
@@ -178,9 +183,9 @@ function commandValueInput(cmd, batteryIndex) {
   input.min = lo;
   input.max = hi;
   input.step = 1 / scale;
-  input.setAttribute('aria-label', `${cmd.title} (${cmd.value.unit})`);
+  input.setAttribute('aria-label', `${advText(cmd.title)} (${cmd.value.unit})`);
 
-  const btn = el('button', 'btn', cmd.title);
+  const btn = el('button', 'btn', advText(cmd.title));
   btn.type = 'button';
 
   const submit = () => {
@@ -212,7 +217,7 @@ function batterySection(battery, multi) {
     return card;
   }
   battery.sections.forEach((section) => {
-    if (section.title) card.append(el('h4', null, section.title));
+    if (section.title) card.append(el('h4', null, advText(section.title)));
     section.fields.forEach((f) => card.append(fieldNode(f)));
   });
   if (battery.commands.length) {

@@ -19,7 +19,8 @@ enum class DtcCodeStyle { kRawHex, kStandard, kShortFailureType };
 // Not-read / failed / empty render as a status line; present codes render as a
 // DTC+Status+Description table. `batt` supplies the description catalogue via
 // get_dtc_json_filename(); the client resolves it and fills the descriptions.
-AdvancedSection dtc_advanced_section(Battery& batt, DATALAYER_BATTERY_DTC_TYPE& dtc, DtcCodeStyle code_style);
+void write_dtc_section(AdvancedStatusWriter& out, Battery& batt, DATALAYER_BATTERY_DTC_TYPE& dtc,
+                       DtcCodeStyle code_style);
 
 // Dispatch a command to the battery at battery_index (0..2). `value` is null when
 // the request carried no number. Returns false if id unknown, battery absent, the

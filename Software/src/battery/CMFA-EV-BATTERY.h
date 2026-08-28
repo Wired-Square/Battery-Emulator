@@ -23,28 +23,27 @@ class CmfaEvBattery : public UdsCanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  void append_uds_info_fields(std::vector<AdvancedField>& fields) override {
-    fields.push_back(kv("SOC U", String(soc_u), "percent"));
-    fields.push_back(kv("SOC Z", String(soc_z), "percent"));
-    fields.push_back(kv("SOH Average", String(soh_average), "pptt"));
-    fields.push_back(kv("12V voltage", String(lead_acid_voltage), "mV"));
-    fields.push_back(kv("Highest cell number", String(highest_cell_voltage_number)));
-    fields.push_back(kv("Lowest cell number", String(lowest_cell_voltage_number)));
-    fields.push_back(kv("Sum of cellvoltages", String(average_voltage_of_cells)));
-    fields.push_back(kv("Max regen power", String(max_regen_power)));
-    fields.push_back(kv("Max discharge power", String(max_discharge_power)));
-    fields.push_back(kv("Max charge power", String(maximum_charge_power)));
-    fields.push_back(kv("SOH available power", String(SOH_available_power)));
-    fields.push_back(kv("SOH generated power", String(SOH_generated_power)));
-    fields.push_back(kv("Average temperature", String(average_temperature), "dC"));
-    fields.push_back(kv("Maximum temperature", String(maximum_temperature), "dC"));
-    fields.push_back(kv("Minimum temperature", String(minimum_temperature), "dC"));
-    fields.push_back(kv("Cumulative energy discharged",
-                          String(cumulative_energy_when_discharging), "Wh"));
-    fields.push_back(
-        kv("Cumulative energy charged", String(cumulative_energy_when_charging), "Wh"));
-    fields.push_back(
-        kv("Cumulative energy regen", String(cumulative_energy_in_regen), "Wh"));
+  void append_uds_info_fields(AdvancedStatusWriter& out) override {
+    out.section("");
+    out.kv(TL("SOC U"), String(soc_u), "percent");
+    out.kv(TL("SOC Z"), String(soc_z), "percent");
+    out.kv(TL("SOH Average"), String(soh_average), "pptt");
+    out.kv(TL("12V voltage"), String(lead_acid_voltage), "mV");
+    out.kv(TL("Highest cell number"), String(highest_cell_voltage_number));
+    out.kv(TL("Lowest cell number"), String(lowest_cell_voltage_number));
+    out.kv(TL("Sum of cellvoltages"), String(average_voltage_of_cells));
+    out.kv(TL("Max regen power"), String(max_regen_power));
+    out.kv(TL("Max discharge power"), String(max_discharge_power));
+    out.kv(TL("Max charge power"), String(maximum_charge_power));
+    out.kv(TL("SOH available power"), String(SOH_available_power));
+    out.kv(TL("SOH generated power"), String(SOH_generated_power));
+    out.kv(TL("Average temperature"), String(average_temperature), "dC");
+    out.kv(TL("Maximum temperature"), String(maximum_temperature), "dC");
+    out.kv(TL("Minimum temperature"), String(minimum_temperature), "dC");
+    out.kv(TL("Cumulative energy discharged"),
+                          String(cumulative_energy_when_discharging), "Wh");
+    out.kv(TL("Cumulative energy charged"), String(cumulative_energy_when_charging), "Wh");
+    out.kv(TL("Cumulative energy regen"), String(cumulative_energy_in_regen), "Wh");
   }
 
  protected:

@@ -16,7 +16,7 @@ class MgGen1Battery : public UdsCanBattery {
   virtual void got_battery_type(uint32_t type);
   void reset_BMS();
   virtual void on_uds_sequence_step(uint16_t state, uint8_t sid, const uint8_t* data, uint16_t len) override;
-  virtual void append_uds_info_fields(std::vector<AdvancedField>& fields) override;
+  virtual void append_uds_info_fields(AdvancedStatusWriter& out) override;
 
   static constexpr const char* Name = "MG Gen1 (HS/ZS/MG5/MarvelR)";
 

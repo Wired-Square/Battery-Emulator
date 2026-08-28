@@ -68,7 +68,7 @@ class BmwI3Battery : public CanBattery {
     }
   }
 
-  BatteryAdvancedStatus get_advanced_status() override;
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
  private:
   bool is_balancing_active() { return UserRequestBalancing != NONE; }

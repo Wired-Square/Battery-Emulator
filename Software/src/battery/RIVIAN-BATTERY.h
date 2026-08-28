@@ -13,25 +13,22 @@ class RivianBattery : public CanBattery {
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section("");
 
-    s.fields.push_back(kv("Voltage, pre contactors", String(datalayer_extended.rivian.pre_contactor_voltage), "dV"));
-    s.fields.push_back(kv("Voltage, main contactors", String(datalayer_extended.rivian.main_contactor_voltage), "dV"));
-    s.fields.push_back(kv("Voltage, reference", String(datalayer_extended.rivian.voltage_reference), "dV"));
-    s.fields.push_back(
-        kv("Voltage, DCFC contactors", String(datalayer_extended.rivian.DCFC_contactor_voltage), "dV"));
+    out.kv(TL("Voltage, pre contactors"), String(datalayer_extended.rivian.pre_contactor_voltage), "dV");
+    out.kv(TL("Voltage, main contactors"), String(datalayer_extended.rivian.main_contactor_voltage), "dV");
+    out.kv(TL("Voltage, reference"), String(datalayer_extended.rivian.voltage_reference), "dV");
+    out.kv("Voltage, DCFC contactors", String(datalayer_extended.rivian.DCFC_contactor_voltage), "dV");
 
-    s.fields.push_back(kv("SOC, max", String(datalayer_extended.rivian.battery_SOC_max), "pptt"));
-    s.fields.push_back(kv("SOC, min", String(datalayer_extended.rivian.battery_SOC_min), "pptt"));
+    out.kv(TL("SOC, max"), String(datalayer_extended.rivian.battery_SOC_max), "pptt");
+    out.kv(TL("SOC, min"), String(datalayer_extended.rivian.battery_SOC_min), "pptt");
 
     if (datalayer_extended.rivian.NACS_charger_detected) {
-      s.fields.push_back(kv("NACS charger detected", "yes"));
+      out.kv(TL("NACS charger detected"), "yes");
     }
 
-    s.fields.push_back(
-        kv("Isolation measurement ongoing", datalayer_extended.rivian.IsolationMeasurementOngoing ? "Yes" : "No"));
+    out.kv(TL("Isolation measurement ongoing"), datalayer_extended.rivian.IsolationMeasurementOngoing ? "Yes" : "No");
 
     String isolation_status;
     if (datalayer_extended.rivian.isolation_fault_status == 0) {
@@ -51,7 +48,7 @@ class RivianBattery : public CanBattery {
     } else if (datalayer_extended.rivian.isolation_fault_status == 7) {
       isolation_status = "Iso Circuit Check timeout";
     }
-    s.fields.push_back(kv("Isolation Status", isolation_status));
+    out.kv(TL("Isolation Status"), isolation_status);
 
     String interlock_status;
     if (datalayer_extended.rivian.HVIL == 0) {
@@ -63,7 +60,7 @@ class RivianBattery : public CanBattery {
     } else if (datalayer_extended.rivian.HVIL == 3) {
       interlock_status = "OK";
     }
-    s.fields.push_back(kv("Interlock status", interlock_status));
+    out.kv(TL("Interlock status"), interlock_status);
 
     String bms_state;
     if (datalayer_extended.rivian.BMS_state == 0) {
@@ -75,7 +72,7 @@ class RivianBattery : public CanBattery {
     } else if (datalayer_extended.rivian.BMS_state == 3) {
       bms_state = "Go";
     }
-    s.fields.push_back(kv("BMS State", bms_state));
+    out.kv(TL("BMS State"), bms_state);
 
     String contactor_state;
     if (datalayer_extended.rivian.contactor_state == 0) {
@@ -91,97 +88,92 @@ class RivianBattery : public CanBattery {
     } else if (datalayer_extended.rivian.contactor_state == 5) {
       contactor_state = "FAILURE";
     }
-    s.fields.push_back(kv("Contactor State", contactor_state));
+    out.kv(TL("Contactor State"), contactor_state);
 
-    status.sections.push_back(s);
 
-    AdvancedSection errors;
-    errors.title = "Active errors and faults";
+    out.section(TL("Active errors and faults"));
 
     if (datalayer_extended.rivian.error_relay_open) {
-      errors.fields.push_back(kv("Error Relay Open", "yes"));
+      out.kv(TL("Error Relay Open"), "yes");
     }
     if (datalayer_extended.rivian.error_flags_from_BMS & 0x01) {
-      errors.fields.push_back(kv("Error Isolation Single", "yes"));
+      out.kv(TL("Error Isolation Single"), "yes");
     }
     if ((datalayer_extended.rivian.error_flags_from_BMS & 0x02) >> 1) {
-      errors.fields.push_back(kv("Error Isolation Double", "yes"));
+      out.kv(TL("Error Isolation Double"), "yes");
     }
     if ((datalayer_extended.rivian.error_flags_from_BMS & 0x04) >> 2) {
-      errors.fields.push_back(kv("Error Emergency Off CRASH", "yes"));
+      out.kv(TL("Error Emergency Off CRASH"), "yes");
     }
     if ((datalayer_extended.rivian.error_flags_from_BMS & 0x08) >> 3) {
-      errors.fields.push_back(kv("Error Emergency Off Pilot", "yes"));
+      out.kv(TL("Error Emergency Off Pilot"), "yes");
     }
     if ((datalayer_extended.rivian.error_flags_from_BMS & 0x10) >> 4) {
-      errors.fields.push_back(kv("Error Emergency Off Request", "yes"));
+      out.kv(TL("Error Emergency Off Request"), "yes");
     }
     if ((datalayer_extended.rivian.error_flags_from_BMS & 0x20) >> 5) {
-      errors.fields.push_back(kv("Error Emergency Off", "yes"));
+      out.kv(TL("Error Emergency Off"), "yes");
     }
     if ((datalayer_extended.rivian.error_flags_from_BMS & 0x40) >> 6) {
-      errors.fields.push_back(kv("Error Contactors Welded", "yes"));
+      out.kv(TL("Error Contactors Welded"), "yes");
     }
     if ((datalayer_extended.rivian.error_flags_from_BMS & 0x80) >> 7) {
-      errors.fields.push_back(kv("Error Limited Power", "yes"));
+      out.kv(TL("Error Limited Power"), "yes");
     }
 
     //HMI errors / status codes, bundle them also under errors
 
     if ((datalayer_extended.rivian.HMI_part1 & 0x10) >> 4) {
-      errors.fields.push_back(kv("Vehicle Battery Issue", "yes"));
+      out.kv(TL("Vehicle Battery Issue"), "yes");
     }
     if ((datalayer_extended.rivian.HMI_part1 & 0x20) >> 5) {
-      errors.fields.push_back(kv("Critical Battery Issue", "yes"));
+      out.kv(TL("Critical Battery Issue"), "yes");
     }
     if ((datalayer_extended.rivian.HMI_part1 & 0x40) >> 6) {
-      errors.fields.push_back(kv("AC performance limited", "yes"));
+      out.kv(TL("AC performance limited"), "yes");
     }
     if ((datalayer_extended.rivian.HMI_part1 & 0x80) >> 7) {
-      errors.fields.push_back(kv("DC performance limited", "yes"));
+      out.kv(TL("DC performance limited"), "yes");
     }
     if (datalayer_extended.rivian.HMI_part2 & 0x01) {
-      errors.fields.push_back(kv("DC charging disabled", "yes"));
+      out.kv(TL("DC charging disabled"), "yes");
     }
     if ((datalayer_extended.rivian.HMI_part2 & 0x02) >> 1) {
-      errors.fields.push_back(kv("Electric hazard", "yes"));
+      out.kv(TL("Electric hazard"), "yes");
     }
     if ((datalayer_extended.rivian.HMI_part2 & 0x04) >> 2) {
-      errors.fields.push_back(kv("Fire risk", "yes"));
+      out.kv(TL("Fire risk"), "yes");
     }
     if ((datalayer_extended.rivian.HMI_part2 & 0x08) >> 3) {
-      errors.fields.push_back(kv("Vehicle system fault", "yes"));
+      out.kv(TL("Vehicle system fault"), "yes");
     }
     if ((datalayer_extended.rivian.HMI_part2 & 0x10) >> 4) {
-      errors.fields.push_back(kv("Battery electric malfunction", "yes"));
+      out.kv(TL("Battery electric malfunction"), "yes");
     }
 
     //Misc
     if (datalayer_extended.rivian.system_safe_state > 1) {
-      errors.fields.push_back(kv("System safe state A active", "yes"));
+      out.kv(TL("System safe state A active"), "yes");
     }
     if (datalayer_extended.rivian.puncture_fault) {
-      errors.fields.push_back(kv("Puncture fault detected", "yes"));
+      out.kv(TL("Puncture fault detected"), "yes");
     }
     if (datalayer_extended.rivian.liquid_fault) {
-      errors.fields.push_back(kv("Liquid fault detected", "yes"));
+      out.kv(TL("Liquid fault detected"), "yes");
     }
     if (datalayer_extended.rivian.contactor_DCFC_welded) {
-      errors.fields.push_back(kv("DCFC contactor welded", "yes"));
+      out.kv("DCFC contactor welded", "yes");
     }
 
     if (datalayer_extended.rivian.slewrate_potential_violation) {
-      errors.fields.push_back(kv("Slewrate potential violation", "yes"));
+      out.kv(TL("Slewrate potential violation"), "yes");
     }
     if (datalayer_extended.rivian.minimum_power_potential_violation) {
-      errors.fields.push_back(kv("Min power potential violation", "yes"));
+      out.kv(TL("Min power potential violation"), "yes");
     }
     if (datalayer_extended.rivian.operation_limit_violation_warning) {
-      errors.fields.push_back(kv("Operation limit violation warning", "yes"));
+      out.kv(TL("Operation limit violation warning"), "yes");
     }
-
-    status.sections.push_back(errors);
-    return status;
   }
 
  private:

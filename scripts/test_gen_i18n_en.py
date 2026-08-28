@@ -120,6 +120,27 @@ class RepositoryPackTests(unittest.TestCase):
         on_disk = json.loads((REPO / g.OUT_FILE).read_text(encoding=g.SOURCE_ENCODING))
         self.assertEqual(on_disk, self.strings, "run scripts/gen_i18n_en.py and commit " + g.OUT_FILE)
 
+    def test_every_marked_driver_label_reaches_the_pack(self):
+        marked = set()
+        sources = [p for p in sorted((REPO / g.DRIVER_DIR).rglob("*")) if p.suffix in (".h", ".cpp")]
+        sources.append(REPO / g.ADVANCED_API)
+        for path in sources:
+            marked |= set(g.TL_CALL.findall(path.read_text(encoding=g.SOURCE_ENCODING)))
+        self.assertTrue(marked, "no TL() labels found; did the marker change?")
+        missing = {t for t in marked
+                   if g.ADVANCED_KEY_PREFIX + g.advanced_slug(
+                       "".join(g.unquote_c(p) for p in g.C_STRING.findall(t))) not in self.strings}
+        self.assertEqual(missing, set(), "TL() labels the advanced page cannot translate")
+
+    def test_client_slug_matches_the_generator(self):
+        source = (REPO / "Software/src/devboard/webserver/web/advanced.js").read_text(encoding=g.SOURCE_ENCODING)
+        client = re.search(r"function advText\(text\) \{(.*?)\n\}", source, re.S)
+        self.assertIsNotNone(client, "advText() moved; the slug rules can now drift apart")
+        body = client.group(1)
+        for pattern in (g.SLUG_STRIP.pattern, g.SLUG_RUNS.pattern):
+            self.assertIn(pattern, body,
+                          "advanced.js slugs labels differently from advanced_slug(), so keys will miss")
+
     def test_every_event_type_has_a_message(self):
         header = (REPO / "Software/src/devboard/utils/events.h").read_text(encoding=g.SOURCE_ENCODING)
         declared = set()

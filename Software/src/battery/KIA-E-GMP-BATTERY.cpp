@@ -477,17 +477,14 @@ void KiaEGmpBattery::setup(void) {  // Performs one time setup at startup
   datalayer_battery->info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
 }
 
-BatteryAdvancedStatus KiaEGmpBattery::get_advanced_status() {
-  BatteryAdvancedStatus status;
-  AdvancedSection s;
-  s.fields.push_back(kv("Cells", String(datalayer_battery->info.number_of_cells), "S"));
-  s.fields.push_back(kv("12V voltage", String(get_battery_12V() / 10.0f, 1)));
-  s.fields.push_back(kv("Waterleakage", String(get_waterleakageSensor())));
-  s.fields.push_back(kv("Temperature, water inlet", String(get_temperature_water_inlet())));
-  s.fields.push_back(kv("Temperature, power relay", String(get_powerRelayTemperature() * 2)));
-  s.fields.push_back(kv("Batterymanagement mode", String(get_batteryManagementMode())));
-  s.fields.push_back(kv("BMS ignition", String(get_BMS_ign())));
-  s.fields.push_back(kv("Battery relay", String(get_batRelay())));
-  status.sections.push_back(s);
-  return status;
+void KiaEGmpBattery::write_advanced_status(AdvancedStatusWriter& out) {
+  out.section("");
+  out.kv(TL("Cells"), String(datalayer_battery->info.number_of_cells), "S");
+  out.kv(TL("12V voltage"), String(get_battery_12V() / 10.0f, 1));
+  out.kv(TL("Waterleakage"), String(get_waterleakageSensor()));
+  out.kv(TL("Temperature, water inlet"), String(get_temperature_water_inlet()));
+  out.kv(TL("Temperature, power relay"), String(get_powerRelayTemperature() * 2));
+  out.kv(TL("Batterymanagement mode"), String(get_batteryManagementMode()));
+  out.kv(TL("BMS ignition"), String(get_BMS_ign()));
+  out.kv(TL("Battery relay"), String(get_batRelay()));
 }

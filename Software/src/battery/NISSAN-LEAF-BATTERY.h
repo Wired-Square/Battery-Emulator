@@ -39,9 +39,8 @@ class NissanLeafBattery : public CanBattery {
 
   const char* get_dtc_json_filename() override { return "nissan_leaf_dtc.json"; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section("");
 
     String leaf_gen;
     switch (datalayer_extended.nissanleaf.LEAF_gen) {
@@ -57,65 +56,62 @@ class NissanLeafBattery : public CanBattery {
       default:
         leaf_gen = "Unknown";
     }
-    s.fields.push_back(kv("LEAF generation", leaf_gen));
+    out.kv(TL("LEAF generation"), leaf_gen);
 
     char readableSerialNumber[16];  // One extra space for null terminator
     memcpy(readableSerialNumber, datalayer_extended.nissanleaf.BatterySerialNumber,
            sizeof(datalayer_extended.nissanleaf.BatterySerialNumber));
     readableSerialNumber[15] = '\0';  // Null terminate the string
-    s.fields.push_back(kv("Serial number", String(readableSerialNumber)));
+    out.kv(TL("Serial number"), String(readableSerialNumber));
 
     char readablePartNumber[8];  // One extra space for null terminator
     memcpy(readablePartNumber, datalayer_extended.nissanleaf.BatteryPartNumber,
            sizeof(datalayer_extended.nissanleaf.BatteryPartNumber));
     readablePartNumber[7] = '\0';  // Null terminate the string
-    s.fields.push_back(kv("Part number", String(readablePartNumber)));
+    out.kv(TL("Part number"), String(readablePartNumber));
 
-    s.fields.push_back(kv("GIDS", String(datalayer_extended.nissanleaf.GIDS)));
-    s.fields.push_back(kv("Hx", datalayer_extended.nissanleaf.battery_HX_pptt
+    out.kv("GIDS", String(datalayer_extended.nissanleaf.GIDS));
+    out.kv(TL("Hx"), datalayer_extended.nissanleaf.battery_HX_pptt
                                     ? String(datalayer_extended.nissanleaf.battery_HX_pptt / 100.0f, 2)
                                     : String("Unknown"),
-                          datalayer_extended.nissanleaf.battery_HX_pptt ? "%" : ""));
+                          datalayer_extended.nissanleaf.battery_HX_pptt ? "%" : "");
     //A used pack always has AC charges on it, so a zero L1/L2 count means the group was not read yet.
-    s.fields.push_back(kv("QC charge count", datalayer_extended.nissanleaf.ChargeCountL1L2
+    out.kv(TL("QC charge count"), datalayer_extended.nissanleaf.ChargeCountL1L2
                                                  ? String(datalayer_extended.nissanleaf.ChargeCountQC)
-                                                 : String("Unknown")));
-    s.fields.push_back(kv("AC charge count", datalayer_extended.nissanleaf.ChargeCountL1L2
+                                                 : String("Unknown"));
+    out.kv(TL("AC charge count"), datalayer_extended.nissanleaf.ChargeCountL1L2
                                                  ? String(datalayer_extended.nissanleaf.ChargeCountL1L2)
-                                                 : String("Unknown")));
-    s.fields.push_back(kv("Regen kW", String(datalayer_extended.nissanleaf.ChargePowerLimit)));
-    s.fields.push_back(kv("Charge kW", String(datalayer_extended.nissanleaf.MaxPowerForCharger)));
-    s.fields.push_back(kv("Temperature 1", String(datalayer_extended.nissanleaf.temperature1 / 10.0), "°C"));
-    s.fields.push_back(kv("Temperature 2", String(datalayer_extended.nissanleaf.temperature2 / 10.0), "°C"));
+                                                 : String("Unknown"));
+    out.kv(TL("Regen kW"), String(datalayer_extended.nissanleaf.ChargePowerLimit));
+    out.kv(TL("Charge kW"), String(datalayer_extended.nissanleaf.MaxPowerForCharger));
+    out.kv(TL("Temperature 1"), String(datalayer_extended.nissanleaf.temperature1 / 10.0), "°C");
+    out.kv(TL("Temperature 2"), String(datalayer_extended.nissanleaf.temperature2 / 10.0), "°C");
     if (datalayer_extended.nissanleaf.LEAF_gen == 0) {
-      s.fields.push_back(kv("Temperature 3", String(datalayer_extended.nissanleaf.temperature3 / 10.0), "°C"));
+      out.kv(TL("Temperature 3"), String(datalayer_extended.nissanleaf.temperature3 / 10.0), "°C");
     }
-    s.fields.push_back(kv("Temperature 4", String(datalayer_extended.nissanleaf.temperature4 / 10.0), "°C"));
-    s.fields.push_back(kv("Insulation", String(datalayer_extended.nissanleaf.Insulation), "kΩ"));
-    s.fields.push_back(kv("Fully charged", String(datalayer_extended.nissanleaf.Full)));
-    s.fields.push_back(kv("Battery empty", String(datalayer_extended.nissanleaf.Empty)));
-    s.fields.push_back(kv("Failsafe status", String(datalayer_extended.nissanleaf.FailsafeStatus)));
-    s.fields.push_back(kv("Interlock", String(datalayer_extended.nissanleaf.Interlock)));
-    s.fields.push_back(kv("Main relay ON", String(datalayer_extended.nissanleaf.MainRelayOn)));
-    s.fields.push_back(kv("Relay cut request", String(datalayer_extended.nissanleaf.RelayCutRequest)));
-    s.fields.push_back(kv("Heater present", String(datalayer_extended.nissanleaf.HeatExist)));
-    s.fields.push_back(kv("Heating requested", String(datalayer_extended.nissanleaf.HeaterSendRequest)));
-    s.fields.push_back(kv("Heating started", String(datalayer_extended.nissanleaf.HeatingStart)));
-    s.fields.push_back(kv("Heating stopped", String(datalayer_extended.nissanleaf.HeatingStop)));
-    s.fields.push_back(kv("CryptoChallenge", datalayer_extended.nissanleaf.CryptoChallenge != 0xFFFFFFFF
+    out.kv(TL("Temperature 4"), String(datalayer_extended.nissanleaf.temperature4 / 10.0), "°C");
+    out.kv(TL("Insulation"), String(datalayer_extended.nissanleaf.Insulation), "kΩ");
+    out.kv(TL("Fully charged"), String(datalayer_extended.nissanleaf.Full));
+    out.kv(TL("Battery empty"), String(datalayer_extended.nissanleaf.Empty));
+    out.kv(TL("Failsafe status"), String(datalayer_extended.nissanleaf.FailsafeStatus));
+    out.kv(TL("Interlock"), String(datalayer_extended.nissanleaf.Interlock));
+    out.kv(TL("Main relay ON"), String(datalayer_extended.nissanleaf.MainRelayOn));
+    out.kv(TL("Relay cut request"), String(datalayer_extended.nissanleaf.RelayCutRequest));
+    out.kv(TL("Heater present"), String(datalayer_extended.nissanleaf.HeatExist));
+    out.kv(TL("Heating requested"), String(datalayer_extended.nissanleaf.HeaterSendRequest));
+    out.kv(TL("Heating started"), String(datalayer_extended.nissanleaf.HeatingStart));
+    out.kv(TL("Heating stopped"), String(datalayer_extended.nissanleaf.HeatingStop));
+    out.kv("CryptoChallenge", datalayer_extended.nissanleaf.CryptoChallenge != 0xFFFFFFFF
                                                  ? String(datalayer_extended.nissanleaf.CryptoChallenge)
-                                                 : String("Not run")));
-    s.fields.push_back(
-        kv("SolvedChallenge",
+                                                 : String("Not run"));
+    out.kv("SolvedChallenge",
            (datalayer_extended.nissanleaf.SolvedChallengeMSB || datalayer_extended.nissanleaf.SolvedChallengeLSB)
                ? String(datalayer_extended.nissanleaf.SolvedChallengeMSB) + "-" +
                      String(datalayer_extended.nissanleaf.SolvedChallengeLSB)
-               : String("Not run")));
-    s.fields.push_back(kv("Challenge failed", String(datalayer_extended.nissanleaf.challengeFailed)));
+               : String("Not run"));
+    out.kv(TL("Challenge failed"), String(datalayer_extended.nissanleaf.challengeFailed));
 
-    status.sections.push_back(s);
-    status.sections.push_back(dtc_advanced_section(*this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType));
-    return status;
+    write_dtc_section(out, *this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType);
   }
 
  private:

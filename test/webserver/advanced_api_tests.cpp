@@ -6,6 +6,7 @@
 #include "../../Software/src/datalayer/datalayer_extended.h"
 #include "../../Software/src/devboard/hal/hal.h"
 #include "../../Software/src/devboard/webserver/advanced_api.h"
+#include "../advanced_status_recorder.h"
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 class AdvancedApi : public testing::Test {
@@ -43,8 +44,10 @@ class StubBattery : public Battery {
   const char* get_dtc_json_filename() override { return dtc_json_filename; }
   const char* dtc_json_filename = "";
 
-  BatteryAdvancedStatus get_advanced_status() override { return advanced_; }
-  BatteryAdvancedStatus advanced_;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    if (advanced_) advanced_(out);
+  }
+  std::function<void(AdvancedStatusWriter&)> advanced_;
 };
 
 // esp32hal is process-global, so restore it or later tests inherit this HAL.
@@ -80,9 +83,17 @@ TEST_F(AdvancedApi, EmptyWhenNoBattery) {
 }
 
 namespace {
+// Captures what a driver writes, so a section can be asserted on without going
+// through the JSON encoding.
+RecordingWriter record_dtc(Battery& batt, DATALAYER_BATTERY_DTC_TYPE& dtc, DtcCodeStyle style) {
+  RecordingWriter w;
+  write_dtc_section(w, batt, dtc, style);
+  return w;
+}
+
 // The table is the last field; the fields before it are status lines.
-const AdvancedField& dtc_table(const AdvancedSection& s) {
-  EXPECT_EQ(s.fields.back().kind, AdvancedFieldKind::Table);
+const RecordingWriter::Field& dtc_table(const RecordingWriter::Section& s) {
+  EXPECT_TRUE(s.fields.back().is_table);
   return s.fields.back();
 }
 }  // namespace
@@ -91,10 +102,11 @@ TEST_F(AdvancedApi, DtcNotReadShowsStatus) {
   StubBattery stub;
   DATALAYER_BATTERY_DTC_TYPE dtc{};
   dtc.dtc_last_read_millis = 0;
-  AdvancedSection s = dtc_advanced_section(stub, dtc, DtcCodeStyle::kRawHex);
+  RecordingWriter w = record_dtc(stub, dtc, DtcCodeStyle::kRawHex);
+  const RecordingWriter::Section& s = w.sections.at(0);
   EXPECT_EQ(s.title, "Diagnostic Trouble Codes");
   ASSERT_EQ(s.fields.size(), 1u);
-  EXPECT_EQ(s.fields[0].kind, AdvancedFieldKind::KeyValue);
+  EXPECT_FALSE(s.fields[0].is_table);
 }
 
 TEST_F(AdvancedApi, DtcCodesProduceTable) {
@@ -106,8 +118,9 @@ TEST_F(AdvancedApi, DtcCodesProduceTable) {
   dtc.dtc_status[0] = 0x01;
   dtc.dtc_codes[1] = 0x123456;
   dtc.dtc_status[1] = 0x08;
-  AdvancedSection s = dtc_advanced_section(stub, dtc, DtcCodeStyle::kRawHex);
-  const AdvancedField& table = dtc_table(s);
+  RecordingWriter w = record_dtc(stub, dtc, DtcCodeStyle::kRawHex);
+  const RecordingWriter::Section& s = w.sections.at(0);
+  const RecordingWriter::Field& table = dtc_table(s);
   ASSERT_EQ(table.columns.size(), 3u);
   EXPECT_EQ(table.columns[2], "Description");
   ASSERT_EQ(table.rows.size(), 2u);
@@ -123,8 +136,9 @@ TEST_F(AdvancedApi, DtcRawHexMatchKeyIsDecimal) {
   dtc.dtc_last_read_millis = 1000;
   dtc.dtc_count = 1;
   dtc.dtc_codes[0] = 0x9B4E12;
-  AdvancedSection s = dtc_advanced_section(stub, dtc, DtcCodeStyle::kRawHex);
-  const AdvancedField& table = dtc_table(s);
+  RecordingWriter w = record_dtc(stub, dtc, DtcCodeStyle::kRawHex);
+  const RecordingWriter::Section& s = w.sections.at(0);
+  const RecordingWriter::Field& table = dtc_table(s);
   ASSERT_EQ(table.row_keys.size(), 1u);
   EXPECT_EQ(table.rows[0][0], "9B4E12");
   EXPECT_EQ(table.row_keys[0], "10178066");
@@ -138,8 +152,9 @@ TEST_F(AdvancedApi, DtcShortFormMatchKeyDropsFailureType) {
   dtc.dtc_count = 2;
   dtc.dtc_codes[0] = 0x33D72F;
   dtc.dtc_codes[1] = 0x33D700;
-  AdvancedSection s = dtc_advanced_section(stub, dtc, DtcCodeStyle::kShortFailureType);
-  const AdvancedField& table = dtc_table(s);
+  RecordingWriter w = record_dtc(stub, dtc, DtcCodeStyle::kShortFailureType);
+  const RecordingWriter::Section& s = w.sections.at(0);
+  const RecordingWriter::Field& table = dtc_table(s);
   EXPECT_EQ(table.rows[0][0], "P33D7-2F");
   EXPECT_EQ(table.row_keys[0], "P33D7");
   EXPECT_EQ(table.rows[1][0], "P33D7");
@@ -152,8 +167,9 @@ TEST_F(AdvancedApi, DtcStandardMatchKeyIsTheDisplayedCode) {
   dtc.dtc_last_read_millis = 1000;
   dtc.dtc_count = 1;
   dtc.dtc_codes[0] = 0x0C9500;
-  AdvancedSection s = dtc_advanced_section(stub, dtc, DtcCodeStyle::kStandard);
-  const AdvancedField& table = dtc_table(s);
+  RecordingWriter w = record_dtc(stub, dtc, DtcCodeStyle::kStandard);
+  const RecordingWriter::Section& s = w.sections.at(0);
+  const RecordingWriter::Field& table = dtc_table(s);
   EXPECT_EQ(table.rows[0][0], "P0C9500");
   EXPECT_EQ(table.row_keys[0], "P0C9500");
 }
@@ -165,10 +181,12 @@ TEST_F(AdvancedApi, DtcCatalogueComesFromTheBatteryAndReachesTheJson) {
   dtc.dtc_last_read_millis = 1000;
   dtc.dtc_count = 1;
   dtc.dtc_codes[0] = 0x0C9500;
-  AdvancedSection s = dtc_advanced_section(stub, dtc, DtcCodeStyle::kStandard);
-  EXPECT_EQ(dtc_table(s).catalogue, "mg_dtc.json");
+  RecordingWriter w = record_dtc(stub, dtc, DtcCodeStyle::kStandard);
+  EXPECT_EQ(dtc_table(w.sections.at(0)).catalogue, "mg_dtc.json");
 
-  stub.advanced_.sections.push_back(s);
+  stub.advanced_ = [&](AdvancedStatusWriter& out) {
+    write_dtc_section(out, stub, dtc, DtcCodeStyle::kStandard);
+  };
   batteries[0] = &stub;
   JsonDocument doc;
   ASSERT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
@@ -184,10 +202,11 @@ TEST_F(AdvancedApi, DtcTruncationIsReportedExactlyOnce) {
   dtc.dtc_last_read_millis = 1000;
   dtc.dtc_count = 2;
   dtc.dtc_reported_count = 149;
-  AdvancedSection s = dtc_advanced_section(stub, dtc, DtcCodeStyle::kRawHex);
+  RecordingWriter w = record_dtc(stub, dtc, DtcCodeStyle::kRawHex);
+  const RecordingWriter::Section& s = w.sections.at(0);
   int mentions = 0;
   for (const auto& f : s.fields) {
-    if (std::string(f.value.c_str()).find("149 reported") != std::string::npos) mentions++;
+    if (f.value.find("149 reported") != std::string::npos) mentions++;
   }
   EXPECT_EQ(mentions, 1);
 }
@@ -334,9 +353,10 @@ TEST_F(AdvancedApi, DeclaredCommandsDispatchToTheAddressedSlot) {
 
 TEST_F(AdvancedApi, OmitsSevWhenSeverityIsNormal) {
   StubBattery stub;
-  AdvancedSection s;
-  s.fields.push_back(kv("Isolation", "OK"));
-  stub.advanced_.sections.push_back(s);
+  stub.advanced_ = [](AdvancedStatusWriter& out) {
+    out.section();
+    out.kv("Isolation", "OK");
+  };
   batteries[0] = &stub;
 
   JsonDocument doc;
@@ -348,9 +368,10 @@ TEST_F(AdvancedApi, OmitsSevWhenSeverityIsNormal) {
 
 TEST_F(AdvancedApi, EmitsSevWhenSeverityIsWarning) {
   StubBattery stub;
-  AdvancedSection s;
-  s.fields.push_back(kv("Pyro fuse", "Successfully Blown", "", AdvancedSeverity::Warning));
-  stub.advanced_.sections.push_back(s);
+  stub.advanced_ = [](AdvancedStatusWriter& out) {
+    out.section();
+    out.kv("Pyro fuse", "Successfully Blown", "", AdvancedSeverity::Warning);
+  };
   batteries[0] = &stub;
 
   JsonDocument doc;

@@ -11,6 +11,7 @@
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 #include "Arduino.h"
+#include "../advanced_status_recorder.h"
 
 namespace {
 
@@ -391,11 +392,12 @@ TEST(NissanLeafDtcTests, ShouldDrainReplyLargerThanStorage) {
   // is truncated. 599 bytes less the 3 byte header is 149 codes.
   EXPECT_EQ(datalayer.battery.pack[0].dtc.dtc_reported_count, 149);
 
-  AdvancedSection section =
-      dtc_advanced_section(*battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+  RecordingWriter recorder;
+  write_dtc_section(recorder, *battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+  const RecordingWriter::Section& section = recorder.sections.at(0);
   bool found_truncation = false;
   for (const auto& f : section.fields) {
-    if (std::string(f.value.c_str()).find("32 codes shown of 149 reported") != std::string::npos) {
+    if (f.value.find("32 codes shown of 149 reported") != std::string::npos) {
       found_truncation = true;
     }
   }
@@ -415,8 +417,9 @@ TEST(NissanLeafDtcTests, ShouldNotClaimTruncationWhenEverythingFits) {
   ASSERT_EQ(datalayer.battery.pack[0].dtc.dtc_count, 1);
   EXPECT_EQ(datalayer.battery.pack[0].dtc.dtc_reported_count, 1);
 
-  AdvancedSection section =
-      dtc_advanced_section(*battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+  RecordingWriter recorder;
+  write_dtc_section(recorder, *battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+  const RecordingWriter::Section& section = recorder.sections.at(0);
   for (const auto& f : section.fields) {
     EXPECT_EQ(std::string(f.value.c_str()).find("reported"), std::string::npos);
   }
@@ -440,10 +443,11 @@ TEST(NissanLeafDtcTests, ShouldRenderShortNissanCodeAsLookupKey) {
   datalayer.battery.pack[0].dtc.dtc_status[1] = 0x09;
   datalayer.battery.pack[0].dtc.dtc_last_read_millis = 50000;
 
-  AdvancedSection section =
-      dtc_advanced_section(*battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
-  const AdvancedField& table = section.fields.back();
-  ASSERT_EQ(table.kind, AdvancedFieldKind::Table);
+  RecordingWriter recorder;
+  write_dtc_section(recorder, *battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+  const RecordingWriter::Section& section = recorder.sections.at(0);
+  const RecordingWriter::Field& table = section.fields.back();
+  ASSERT_TRUE(table.is_table);
   ASSERT_EQ(table.rows.size(), 2u);
   EXPECT_EQ(table.rows[0][0], "P33D7");
   EXPECT_EQ(table.rows[1][0], "U1000-2F");
@@ -462,8 +466,9 @@ TEST(NissanLeafDtcTests, ShouldRenderReadStateWhenNoTableIsShown) {
   reset_dtc_state();  // Never read
   auto battery = new NissanLeafBattery(battery_slot_context(0));
   {
-    AdvancedSection section =
-        dtc_advanced_section(*battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+    RecordingWriter recorder;
+  write_dtc_section(recorder, *battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+  const RecordingWriter::Section& section = recorder.sections.at(0);
     ASSERT_EQ(section.fields.size(), 1u);
     EXPECT_NE(std::string(section.fields[0].value.c_str()).find("Not read yet"), std::string::npos);
   }
@@ -472,8 +477,9 @@ TEST(NissanLeafDtcTests, ShouldRenderReadStateWhenNoTableIsShown) {
   datalayer.battery.pack[0].dtc.dtc_last_read_millis = 50000;
   datalayer.battery.pack[0].dtc.dtc_read_failed = true;
   {
-    AdvancedSection section =
-        dtc_advanced_section(*battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+    RecordingWriter recorder;
+  write_dtc_section(recorder, *battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+  const RecordingWriter::Section& section = recorder.sections.at(0);
     ASSERT_EQ(section.fields.size(), 1u);
     EXPECT_NE(std::string(section.fields[0].value.c_str()).find("failed"), std::string::npos);
   }
@@ -481,8 +487,9 @@ TEST(NissanLeafDtcTests, ShouldRenderReadStateWhenNoTableIsShown) {
   reset_dtc_state();
   datalayer.battery.pack[0].dtc.dtc_last_read_millis = 50000;
   {
-    AdvancedSection section =
-        dtc_advanced_section(*battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+    RecordingWriter recorder;
+  write_dtc_section(recorder, *battery, datalayer.battery.pack[0].dtc, DtcCodeStyle::kShortFailureType);
+  const RecordingWriter::Section& section = recorder.sections.at(0);
     ASSERT_EQ(section.fields.size(), 1u);
     EXPECT_NE(std::string(section.fields[0].value.c_str()).find("No DTCs present"), std::string::npos);
   }

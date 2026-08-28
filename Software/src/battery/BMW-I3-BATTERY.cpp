@@ -701,22 +701,21 @@ static const char* safeArrayAccess(const char* const arr[], size_t arrSize, int 
   return "Unknown";
 }
 
-BatteryAdvancedStatus BmwI3Battery::get_advanced_status() {
-  BatteryAdvancedStatus status;
-  AdvancedSection s;
+void BmwI3Battery::write_advanced_status(AdvancedStatusWriter& out) {
+  out.section("");
 
-  s.fields.push_back(kv("SOC raw", String(SOC_raw())));
-  s.fields.push_back(kv("SOC dash", String(SOC_dash())));
-  s.fields.push_back(kv("SOC OBD2", String(SOC_OBD2())));
+  out.kv(TL("SOC raw"), String(SOC_raw()));
+  out.kv(TL("SOC dash"), String(SOC_dash()));
+  out.kv(TL("SOC OBD2"), String(SOC_OBD2()));
 
   static const char* statusText[16] = {
       "Not evaluated", "OK", "Error!", "Invalid signal", "", "", "", "", "", "", "", "", "", "", "", ""};
-  s.fields.push_back(kv("Interlock", safeArrayAccess(statusText, 16, ST_interlock())));
-  s.fields.push_back(kv("Isolation external", safeArrayAccess(statusText, 16, ST_iso_ext())));
-  s.fields.push_back(kv("Isolation internal", safeArrayAccess(statusText, 16, ST_iso_int())));
-  s.fields.push_back(kv("Isolation", safeArrayAccess(statusText, 16, ST_isolation())));
-  s.fields.push_back(kv("Cooling valve", safeArrayAccess(statusText, 16, ST_valve_cooling())));
-  s.fields.push_back(kv("Emergency", safeArrayAccess(statusText, 16, ST_EMG())));
+  out.kv(TL("Interlock"), safeArrayAccess(statusText, 16, ST_interlock()));
+  out.kv(TL("Isolation external"), safeArrayAccess(statusText, 16, ST_iso_ext()));
+  out.kv(TL("Isolation internal"), safeArrayAccess(statusText, 16, ST_iso_int()));
+  out.kv(TL("Isolation"), safeArrayAccess(statusText, 16, ST_isolation()));
+  out.kv(TL("Cooling valve"), safeArrayAccess(statusText, 16, ST_valve_cooling()));
+  out.kv(TL("Emergency"), safeArrayAccess(statusText, 16, ST_EMG()));
 
   static const char* prechargeText[16] = {"Not evaluated",
                                           "Not active, closing not blocked",
@@ -734,7 +733,7 @@ BatteryAdvancedStatus BmwI3Battery::get_advanced_status() {
                                           "",
                                           "",
                                           ""};
-  s.fields.push_back(kv("Precharge", safeArrayAccess(prechargeText, 16, ST_precharge())));  //Still unclear of enum
+  out.kv(TL("Precharge"), safeArrayAccess(prechargeText, 16, ST_precharge()));  //Still unclear of enum
 
   static const char* DCSWText[16] = {"Contactors open",
                                      "Precharge ongoing",
@@ -752,7 +751,7 @@ BatteryAdvancedStatus BmwI3Battery::get_advanced_status() {
                                      "",
                                      "",
                                      ""};
-  s.fields.push_back(kv("Contactor status", safeArrayAccess(DCSWText, 16, ST_DCSW())));
+  out.kv(TL("Contactor status"), safeArrayAccess(DCSWText, 16, ST_DCSW()));
 
   static const char* contText[16] = {"Contactors OK",
                                      "One contactor welded!",
@@ -770,7 +769,7 @@ BatteryAdvancedStatus BmwI3Battery::get_advanced_status() {
                                      "",
                                      "",
                                      ""};
-  s.fields.push_back(kv("Contactor weld", safeArrayAccess(contText, 16, ST_WELD())));
+  out.kv(TL("Contactor weld"), safeArrayAccess(contText, 16, ST_WELD()));
 
   static const char* valveText[16] = {"OK",
                                       "Short circuit to GND",
@@ -788,7 +787,7 @@ BatteryAdvancedStatus BmwI3Battery::get_advanced_status() {
                                       "Stuck",
                                       "",
                                       "Invalid Signal"};
-  s.fields.push_back(kv("Cold shutoff valve", safeArrayAccess(valveText, 16, ST_cold_shutoff_valve())));
+  out.kv(TL("Cold shutoff valve"), safeArrayAccess(valveText, 16, ST_cold_shutoff_valve()));
 
   static const char* balancingText[16] = {"Not requested",
                                           "Requested",
@@ -806,10 +805,7 @@ BatteryAdvancedStatus BmwI3Battery::get_advanced_status() {
                                           "13",
                                           "14",
                                           "15"};
-  s.fields.push_back(kv("Balancing status", safeArrayAccess(balancingText, 16, ST_balancing_status())));
+  out.kv(TL("Balancing status"), safeArrayAccess(balancingText, 16, ST_balancing_status()));
 
-  s.fields.push_back(kv("Charge abort request", get_abort_charging_string()));
-
-  status.sections.push_back(s);
-  return status;
+  out.kv(TL("Charge abort request"), get_abort_charging_string());
 }

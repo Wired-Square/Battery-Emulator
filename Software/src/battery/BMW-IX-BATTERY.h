@@ -27,7 +27,7 @@ class BmwIXBattery : public CanBattery {
   virtual void transmit_can(unsigned long currentMillis);
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
   const char* get_dtc_json_filename() override { return "bmw_ix_dtc.json"; }
-  BatteryAdvancedStatus get_advanced_status() override;
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
   // Getter methods for get_advanced_status()
   int get_battery_voltage_after_contactor() const;

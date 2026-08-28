@@ -24,8 +24,7 @@ class BmwPhevBattery : public CanBattery {
 
   const char* get_dtc_json_filename() override { return "bmw_phev_dtc.json"; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
     auto& phev = datalayer_extended.bmwphev;
 
     constexpr uint8_t kStatusErrorActive = 2;
@@ -48,8 +47,8 @@ class BmwPhevBattery : public CanBattery {
       }
     };
     auto ok_error_field = [&](const char* label, uint8_t v) {
-      return kv(label, status_ok_error(v), "",
-                v == kStatusErrorActive ? AdvancedSeverity::Warning : AdvancedSeverity::Normal);
+      out.kv(label, status_ok_error(v), "",
+             v == kStatusErrorActive ? AdvancedSeverity::Warning : AdvancedSeverity::Normal);
     };
     // Shared across the three "request open contactors" fields.
     auto status_active = [](uint8_t v) -> String {
@@ -67,19 +66,16 @@ class BmwPhevBattery : public CanBattery {
       }
     };
 
-    AdvancedSection power;
-    power.title = "Power & Voltage";
-    power.fields.push_back(kv("Battery Voltage (After Contactor)", String(phev.battery_voltage_after_contactor), "dV"));
-    power.fields.push_back(kv("Max Design Voltage", String(datalayer_battery->info.max_design_voltage_dV), "dV"));
-    power.fields.push_back(kv("Min Design Voltage", String(datalayer_battery->info.min_design_voltage_dV), "dV"));
-    power.fields.push_back(kv("Allowed Charge Power", String(datalayer_battery->status.max_charge_power_W), "W"));
-    power.fields.push_back(kv("Allowed Discharge Power", String(datalayer_battery->status.max_discharge_power_W), "W"));
-    power.fields.push_back(kv("BMS Allowed Charge Amps", String(phev.allowable_charge_amps), "A"));
-    power.fields.push_back(kv("BMS Allowed Discharge Amps", String(phev.allowable_discharge_amps), "A"));
-    status.sections.push_back(power);
+    out.section(TL("Power & Voltage"));
+    out.kv(TL("Battery Voltage (After Contactor)"), String(phev.battery_voltage_after_contactor), "dV");
+    out.kv(TL("Max Design Voltage"), String(datalayer_battery->info.max_design_voltage_dV), "dV");
+    out.kv(TL("Min Design Voltage"), String(datalayer_battery->info.min_design_voltage_dV), "dV");
+    out.kv(TL("Allowed Charge Power"), String(datalayer_battery->status.max_charge_power_W), "W");
+    out.kv(TL("Allowed Discharge Power"), String(datalayer_battery->status.max_discharge_power_W), "W");
+    out.kv(TL("BMS Allowed Charge Amps"), String(phev.allowable_charge_amps), "A");
+    out.kv(TL("BMS Allowed Discharge Amps"), String(phev.allowable_discharge_amps), "A");
 
-    AdvancedSection contactors;
-    contactors.title = "Contactor Status";
+    out.section(TL("Contactor Status"));
 
     String dcsw;
     switch (phev.ST_DCSW) {
@@ -98,7 +94,7 @@ class BmwPhevBattery : public CanBattery {
       default:
         dcsw = "Unknown";
     }
-    contactors.fields.push_back(kv("Contactor Status", dcsw));
+    out.kv(TL("Contactor Status"), dcsw);
 
     String precharge;
     switch (phev.ST_precharge) {
@@ -117,7 +113,7 @@ class BmwPhevBattery : public CanBattery {
       default:
         precharge = "Unknown";
     }
-    contactors.fields.push_back(kv("Precharge Status", precharge));
+    out.kv(TL("Precharge Status"), precharge);
 
     String weld;
     switch (phev.ST_WELD) {
@@ -137,43 +133,34 @@ class BmwPhevBattery : public CanBattery {
         weld = "Unknown";
     }
     const bool welded = phev.ST_WELD == kWeldOneContactor || phev.ST_WELD == kWeldTwoContactors;
-    contactors.fields.push_back(
-        kv("Contactor Weld Status", weld, "", welded ? AdvancedSeverity::Warning : AdvancedSeverity::Normal));
+    out.kv(TL("Contactor Weld Status"), weld, "", welded ? AdvancedSeverity::Warning : AdvancedSeverity::Normal);
 
-    contactors.fields.push_back(kv("Request Open Contactors", status_active(phev.battery_request_open_contactors)));
-    contactors.fields.push_back(
-        kv("Request Open Contactors (Fast)", status_active(phev.battery_request_open_contactors_fast)));
-    contactors.fields.push_back(
-        kv("Request Open Contactors (Instantly)", status_active(phev.battery_request_open_contactors_instantly)));
-    status.sections.push_back(contactors);
+    out.kv(TL("Request Open Contactors"), status_active(phev.battery_request_open_contactors));
+    out.kv(TL("Request Open Contactors (Fast)"), status_active(phev.battery_request_open_contactors_fast));
+    out.kv(TL("Request Open Contactors (Instantly)"), status_active(phev.battery_request_open_contactors_instantly));
 
-    AdvancedSection safety;
-    safety.title = "Safety Systems";
-    safety.fields.push_back(ok_error_field("Interlock", phev.ST_interlock));
-    safety.fields.push_back(ok_error_field("Emergency Status", phev.ST_EMG));
-    status.sections.push_back(safety);
+    out.section(TL("Safety Systems"));
+    ok_error_field("Interlock", phev.ST_interlock);
+    ok_error_field("Emergency Status", phev.ST_EMG);
 
-    AdvancedSection isolation;
-    isolation.title = "Isolation Monitoring";
-    isolation.fields.push_back(ok_error_field("Overall Isolation Status", phev.ST_isolation));
-    isolation.fields.push_back(ok_error_field("Internal Isolation", phev.ST_iso_int));
-    isolation.fields.push_back(ok_error_field("External Isolation", phev.ST_iso_ext));
-    isolation.fields.push_back(kv("Isolation Resistance", String(phev.iso_safety_kohm), "kΩ"));
-    isolation.fields.push_back(kv("Isolation Quality", String(phev.iso_safety_kohm_quality)));
-    isolation.fields.push_back(kv("Internal Resistance",
+    out.section(TL("Isolation Monitoring"));
+    ok_error_field("Overall Isolation Status", phev.ST_isolation);
+    ok_error_field("Internal Isolation", phev.ST_iso_int);
+    ok_error_field("External Isolation", phev.ST_iso_ext);
+    out.kv(TL("Isolation Resistance"), String(phev.iso_safety_kohm), "kΩ");
+    out.kv(TL("Isolation Quality"), String(phev.iso_safety_kohm_quality));
+    out.kv(TL("Internal Resistance"),
                                   String(phev.iso_safety_int_kohm) + " kΩ " +
-                                      (phev.iso_safety_int_plausible ? "(Plausible)" : "(Not Plausible)")));
-    isolation.fields.push_back(kv("External Resistance",
+                                      (phev.iso_safety_int_plausible ? "(Plausible)" : "(Not Plausible)"));
+    out.kv(TL("External Resistance"),
                                   String(phev.iso_safety_ext_kohm) + " kΩ " +
-                                      (phev.iso_safety_ext_plausible ? "(Plausible)" : "(Not Plausible)")));
-    isolation.fields.push_back(kv("Trigger Resistance",
+                                      (phev.iso_safety_ext_plausible ? "(Plausible)" : "(Not Plausible)"));
+    out.kv(TL("Trigger Resistance"),
                                   String(phev.iso_safety_trg_kohm) + " kΩ " +
-                                      (phev.iso_safety_trg_plausible ? "(Plausible)" : "(Not Plausible)")));
-    status.sections.push_back(isolation);
+                                      (phev.iso_safety_trg_plausible ? "(Plausible)" : "(Not Plausible)"));
 
-    AdvancedSection thermal;
-    thermal.title = "Thermal Management";
-    thermal.fields.push_back(ok_error_field("Cooling Valve Status", phev.ST_valve_cooling));
+    out.section(TL("Thermal Management"));
+    ok_error_field("Cooling Valve Status", phev.ST_valve_cooling);
 
     String cold_shutoff;
     switch (phev.ST_cold_shutoff_valve) {
@@ -199,24 +186,19 @@ class BmwPhevBattery : public CanBattery {
       default:
         cold_shutoff = "Invalid Signal";
     }
-    thermal.fields.push_back(kv("Cold Shutoff Valve", cold_shutoff));
-    status.sections.push_back(thermal);
+    out.kv(TL("Cold Shutoff Valve"), cold_shutoff);
 
-    AdvancedSection cells;
-    cells.title = "Cell Information";
-    cells.fields.push_back(kv("Detected Cell Count", String(datalayer_battery->info.number_of_cells)));
-    cells.fields.push_back(kv("Max Cell Design Voltage", String(datalayer_battery->info.max_cell_voltage_mV), "mV"));
-    cells.fields.push_back(kv("Min Cell Design Voltage", String(datalayer_battery->info.min_cell_voltage_mV), "mV"));
-    cells.fields.push_back(kv("Min Cell Voltage Data Age", String(phev.min_cell_voltage_data_age), "ms"));
-    cells.fields.push_back(kv("Max Cell Voltage Data Age", String(phev.max_cell_voltage_data_age), "ms"));
-    status.sections.push_back(cells);
+    out.section(TL("Cell Information"));
+    out.kv(TL("Detected Cell Count"), String(datalayer_battery->info.number_of_cells));
+    out.kv(TL("Max Cell Design Voltage"), String(datalayer_battery->info.max_cell_voltage_mV), "mV");
+    out.kv(TL("Min Cell Design Voltage"), String(datalayer_battery->info.min_cell_voltage_mV), "mV");
+    out.kv(TL("Min Cell Voltage Data Age"), String(phev.min_cell_voltage_data_age), "ms");
+    out.kv(TL("Max Cell Voltage Data Age"), String(phev.max_cell_voltage_data_age), "ms");
 
-    AdvancedSection balancing;
-    balancing.title = "Balancing Status";
-    balancing.fields.push_back(
-        kv("Note", "Balancing can only run while the contactors are OPEN and after the cells have settled at "
+    out.section(TL("Balancing Status"));
+    out.kv(TL("Note"), "Balancing can only run while the contactors are OPEN and after the cells have settled at "
                    "rest for ~10 min (see \"Inactive - Cells Not at Rest (Wait 10 min)\" below). It is blocked "
-                   "while the contactors are closed."));
+                   "while the contactors are closed.");
 
     String balancing_status;
     switch (phev.balancing_status) {
@@ -235,20 +217,16 @@ class BmwPhevBattery : public CanBattery {
       default:
         balancing_status = "Unknown";
     }
-    balancing.fields.push_back(kv("Balancing", balancing_status));
-    balancing.fields.push_back(
-        kv("Balancing Request", datalayer_battery->settings.user_requests_balancing ? "True" : "False"));
-    status.sections.push_back(balancing);
+    out.kv(TL("Balancing"), balancing_status);
+    out.kv(TL("Balancing Request"), datalayer_battery->settings.user_requests_balancing ? "True" : "False");
 
-    AdvancedSection diagnostics;
-    diagnostics.title = "Diagnostics";
-    diagnostics.fields.push_back(kv("Charging Condition Delta", String(phev.battery_charging_condition_delta)));
-    status.sections.push_back(diagnostics);
+    out.section(TL("Diagnostics"));
+    out.kv(TL("Charging Condition Delta"), String(phev.battery_charging_condition_delta));
 
     // DTC data is split across two extended structs: bmwphev owns dtc_count/dtc_read_failed,
     // while the codes/status/last-read timestamp are stored in the shared bmwix struct to save
     // space (see the field comments in datalayer_extended.h). Assemble a local
-    // DATALAYER_BATTERY_DTC_TYPE so the shared dtc_advanced_section(*this, ) builder can be reused.
+    // DATALAYER_BATTERY_DTC_TYPE so the shared write_dtc_section() builder can be reused.
     DATALAYER_BATTERY_DTC_TYPE dtc{};
     dtc.dtc_count = phev.dtc_count;
     dtc.dtc_read_failed = phev.dtc_read_failed;
@@ -257,9 +235,7 @@ class BmwPhevBattery : public CanBattery {
       dtc.dtc_codes[i] = datalayer_extended.bmwix.dtc_codes[i];
       dtc.dtc_status[i] = datalayer_extended.bmwix.dtc_status[i];
     }
-    status.sections.push_back(dtc_advanced_section(*this, dtc, DtcCodeStyle::kRawHex));
-
-    return status;
+    write_dtc_section(out, *this, dtc, DtcCodeStyle::kRawHex);
   }
 
  private:

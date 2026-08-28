@@ -19,23 +19,19 @@ class VolvoSpaBattery : public CanBattery {
 
   const char* get_dtc_json_filename() override { return "volvo_SPA_dtc.json"; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section("");
 
-    s.fields.push_back(kv("BECM supply voltage", String(datalayer_extended.VolvoPolestar.BECMsupplyVoltage), "mV"));
+    out.kv(TL("BECM supply voltage"), String(datalayer_extended.VolvoPolestar.BECMsupplyVoltage), "mV");
 
-    s.fields.push_back(kv("Dynamic max voltage", String(datalayer_extended.VolvoPolestar.BECMUDynMaxLim), "V"));
-    s.fields.push_back(kv("Dynamic min voltage", String(datalayer_extended.VolvoPolestar.BECMUDynMinLim), "V"));
+    out.kv(TL("Dynamic max voltage"), String(datalayer_extended.VolvoPolestar.BECMUDynMaxLim), "V");
+    out.kv(TL("Dynamic min voltage"), String(datalayer_extended.VolvoPolestar.BECMUDynMinLim), "V");
 
-    s.fields.push_back(
-        kv("Discharge power limit 1", String(datalayer_extended.VolvoPolestar.HvBattPwrLimDcha1), "kW"));
-    s.fields.push_back(
-        kv("Discharge soft power limit", String(datalayer_extended.VolvoPolestar.HvBattPwrLimDchaSoft), "kW"));
-    s.fields.push_back(kv("Discharge power limit slow aging",
-                          String(datalayer_extended.VolvoPolestar.HvBattPwrLimDchaSlowAgi), "kW"));
-    s.fields.push_back(
-        kv("Charge power limit slow aging", String(datalayer_extended.VolvoPolestar.HvBattPwrLimChrgSlowAgi), "kW"));
+    out.kv(TL("Discharge power limit 1"), String(datalayer_extended.VolvoPolestar.HvBattPwrLimDcha1), "kW");
+    out.kv(TL("Discharge soft power limit"), String(datalayer_extended.VolvoPolestar.HvBattPwrLimDchaSoft), "kW");
+    out.kv(TL("Discharge power limit slow aging"),
+                          String(datalayer_extended.VolvoPolestar.HvBattPwrLimDchaSlowAgi), "kW");
+    out.kv(TL("Charge power limit slow aging"), String(datalayer_extended.VolvoPolestar.HvBattPwrLimChrgSlowAgi), "kW");
 
     String hvil_a;
     switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x01) {
@@ -45,7 +41,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         hvil_a = "Not valid";
     }
-    s.fields.push_back(kv("HVIL Circuit A status", hvil_a));
+    out.kv(TL("HVIL Circuit A status"), hvil_a);
 
     String hvil_b;
     switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x02) {
@@ -55,7 +51,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         hvil_b = "Closed";
     }
-    s.fields.push_back(kv("HVIL Circuit B status", hvil_b));
+    out.kv(TL("HVIL Circuit B status"), hvil_b);
 
     String hvil_c;
     switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x04) {
@@ -65,7 +61,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         hvil_c = "Closed";
     }
-    s.fields.push_back(kv("HVIL Circuit C status", hvil_c));
+    out.kv(TL("HVIL Circuit C status"), hvil_c);
 
     String precharge_contactor;
     switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x08) {
@@ -75,7 +71,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         precharge_contactor = "Closed";
     }
-    s.fields.push_back(kv("Precharge contactor status", precharge_contactor));
+    out.kv(TL("Precharge contactor status"), precharge_contactor);
 
     String positive_contactor;
     switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x10) {
@@ -85,7 +81,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         positive_contactor = "Closed";
     }
-    s.fields.push_back(kv("Positive Contactor status", positive_contactor));
+    out.kv(TL("Positive Contactor status"), positive_contactor);
 
     String negative_contactor;
     switch (datalayer_extended.VolvoPolestar.HVILstatusBits & 0x20) {
@@ -95,7 +91,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         negative_contactor = "Closed";
     }
-    s.fields.push_back(kv("Negative Contactor status", negative_contactor));
+    out.kv(TL("Negative Contactor status"), negative_contactor);
 
     String hv_sys_relay_status;
     switch (datalayer_extended.VolvoPolestar.HVSysRlySts) {
@@ -114,7 +110,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         hv_sys_relay_status = "Not valid";
     }
-    s.fields.push_back(kv("HV system relay status", hv_sys_relay_status));
+    out.kv(TL("HV system relay status"), hv_sys_relay_status);
 
     String hv_sys_dc_relay_status1;
     switch (datalayer_extended.VolvoPolestar.HVSysDCRlySts1) {
@@ -133,7 +129,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         hv_sys_dc_relay_status1 = "Not valid";
     }
-    s.fields.push_back(kv("HV system relay status 1", hv_sys_dc_relay_status1));
+    out.kv(TL("HV system relay status 1"), hv_sys_dc_relay_status1);
 
     String hv_sys_dc_relay_status2;
     switch (datalayer_extended.VolvoPolestar.HVSysDCRlySts2) {
@@ -152,7 +148,7 @@ class VolvoSpaBattery : public CanBattery {
       default:
         hv_sys_dc_relay_status2 = "Not valid";
     }
-    s.fields.push_back(kv("HV system relay status 2", hv_sys_dc_relay_status2));
+    out.kv(TL("HV system relay status 2"), hv_sys_dc_relay_status2);
 
     String hv_sys_iso_monitor_status;
     switch (datalayer_extended.VolvoPolestar.HVSysIsoRMonrSts) {
@@ -171,11 +167,9 @@ class VolvoSpaBattery : public CanBattery {
       default:
         hv_sys_iso_monitor_status = "Not valid";
     }
-    s.fields.push_back(kv("HV system isolation resistance monitoring status", hv_sys_iso_monitor_status));
+    out.kv(TL("HV system isolation resistance monitoring status"), hv_sys_iso_monitor_status);
 
-    status.sections.push_back(s);
-    status.sections.push_back(dtc_advanced_section(*this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType));
-    return status;
+    write_dtc_section(out, *this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType);
   }
 
  private:

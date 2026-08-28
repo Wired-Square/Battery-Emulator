@@ -15,24 +15,22 @@ class VolvoSpaHybridBattery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section("");
 
-    s.fields.push_back(kv("BECM reported SOC", String(datalayer_extended.VolvoHybrid.soc_bms)));
-    s.fields.push_back(kv("Calculated SOC", String(datalayer_extended.VolvoHybrid.soc_calc)));
-    s.fields.push_back(kv("Rescaled SOC", String(datalayer_extended.VolvoHybrid.soc_rescaled / 10)));
-    s.fields.push_back(kv("BECM reported SOH", String(datalayer_extended.VolvoHybrid.soh_bms)));
-    s.fields.push_back(kv("BECM supply voltage", String(datalayer_extended.VolvoHybrid.BECMsupplyVoltage), "mV"));
+    out.kv(TL("BECM reported SOC"), String(datalayer_extended.VolvoHybrid.soc_bms));
+    out.kv(TL("Calculated SOC"), String(datalayer_extended.VolvoHybrid.soc_calc));
+    out.kv(TL("Rescaled SOC"), String(datalayer_extended.VolvoHybrid.soc_rescaled / 10));
+    out.kv(TL("BECM reported SOH"), String(datalayer_extended.VolvoHybrid.soh_bms));
+    out.kv(TL("BECM supply voltage"), String(datalayer_extended.VolvoHybrid.BECMsupplyVoltage), "mV");
 
-    s.fields.push_back(kv("HV voltage", String(datalayer_extended.VolvoHybrid.BECMBatteryVoltage), "V"));
-    s.fields.push_back(kv("HV current", String(datalayer_extended.VolvoHybrid.BECMBatteryCurrent), "A"));
-    s.fields.push_back(kv("Dynamic max voltage", String(datalayer_extended.VolvoHybrid.BECMUDynMaxLim), "V"));
-    s.fields.push_back(kv("Dynamic min voltage", String(datalayer_extended.VolvoHybrid.BECMUDynMinLim), "V"));
+    out.kv(TL("HV voltage"), String(datalayer_extended.VolvoHybrid.BECMBatteryVoltage), "V");
+    out.kv(TL("HV current"), String(datalayer_extended.VolvoHybrid.BECMBatteryCurrent), "A");
+    out.kv(TL("Dynamic max voltage"), String(datalayer_extended.VolvoHybrid.BECMUDynMaxLim), "V");
+    out.kv(TL("Dynamic min voltage"), String(datalayer_extended.VolvoHybrid.BECMUDynMinLim), "V");
 
-    s.fields.push_back(kv("Discharge power limit 1", String(datalayer_extended.VolvoHybrid.HvBattPwrLimDcha1), "kW"));
-    s.fields.push_back(
-        kv("Discharge soft power limit", String(datalayer_extended.VolvoHybrid.HvBattPwrLimDchaSoft), "kW"));
+    out.kv(TL("Discharge power limit 1"), String(datalayer_extended.VolvoHybrid.HvBattPwrLimDcha1), "kW");
+    out.kv(TL("Discharge soft power limit"), String(datalayer_extended.VolvoHybrid.HvBattPwrLimDchaSoft), "kW");
 
     String hv_sys_relay_status;
     switch (datalayer_extended.VolvoHybrid.HVSysRlySts) {
@@ -51,7 +49,7 @@ class VolvoSpaHybridBattery : public CanBattery {
       default:
         hv_sys_relay_status = "Not valid";
     }
-    s.fields.push_back(kv("HV system relay status", hv_sys_relay_status));
+    out.kv(TL("HV system relay status"), hv_sys_relay_status);
 
     String hv_sys_dc_relay_status1;
     switch (datalayer_extended.VolvoHybrid.HVSysDCRlySts1) {
@@ -70,7 +68,7 @@ class VolvoSpaHybridBattery : public CanBattery {
       default:
         hv_sys_dc_relay_status1 = "Not valid";
     }
-    s.fields.push_back(kv("HV system relay status 1", hv_sys_dc_relay_status1));
+    out.kv(TL("HV system relay status 1"), hv_sys_dc_relay_status1);
 
     String hv_sys_dc_relay_status2;
     switch (datalayer_extended.VolvoHybrid.HVSysDCRlySts2) {
@@ -89,7 +87,7 @@ class VolvoSpaHybridBattery : public CanBattery {
       default:
         hv_sys_dc_relay_status2 = "Not valid";
     }
-    s.fields.push_back(kv("HV system relay status 2", hv_sys_dc_relay_status2));
+    out.kv(TL("HV system relay status 2"), hv_sys_dc_relay_status2);
 
     String hv_sys_iso_monitor_status;
     switch (datalayer_extended.VolvoHybrid.HVSysIsoRMonrSts) {
@@ -108,10 +106,7 @@ class VolvoSpaHybridBattery : public CanBattery {
       default:
         hv_sys_iso_monitor_status = "Not valid";
     }
-    s.fields.push_back(kv("HV system isolation resistance monitoring status", hv_sys_iso_monitor_status));
-
-    status.sections.push_back(s);
-    return status;
+    out.kv(TL("HV system isolation resistance monitoring status"), hv_sys_iso_monitor_status);
   }
 
  private:

@@ -16,7 +16,7 @@ class KiaEGmpBattery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  BatteryAdvancedStatus get_advanced_status() override;
+  void write_advanced_status(AdvancedStatusWriter& out) override;
   int get_battery_12V() const;
   int get_waterleakageSensor() const;
   int get_temperature_water_inlet() const;

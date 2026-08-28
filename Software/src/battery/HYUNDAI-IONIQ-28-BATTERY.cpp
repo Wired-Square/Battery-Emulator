@@ -429,13 +429,10 @@ uint16_t HyundaiIoniq28Battery::get_isolation_resistance() const {
   return isolation_resistance;
 }
 
-BatteryAdvancedStatus HyundaiIoniq28Battery::get_advanced_status() {
-  BatteryAdvancedStatus status;
-  AdvancedSection s;
-  s.fields.push_back(kv("12V voltage", String(get_lead_acid_voltage() / 10.0f, 1)));
-  s.fields.push_back(kv("Temperature, power relay", String(get_power_relay_temperature())));
-  s.fields.push_back(kv("Batterymanagement mode", String(get_battery_management_mode())));
-  s.fields.push_back(kv("Isolation resistance", String(get_isolation_resistance()), "kOhm"));
-  status.sections.push_back(s);
-  return status;
+void HyundaiIoniq28Battery::write_advanced_status(AdvancedStatusWriter& out) {
+  out.section("");
+  out.kv(TL("12V voltage"), String(get_lead_acid_voltage() / 10.0f, 1));
+  out.kv(TL("Temperature, power relay"), String(get_power_relay_temperature()));
+  out.kv(TL("Batterymanagement mode"), String(get_battery_management_mode()));
+  out.kv(TL("Isolation resistance"), String(get_isolation_resistance()), "kOhm");
 }

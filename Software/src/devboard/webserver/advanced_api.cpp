@@ -12,46 +12,78 @@
 
 namespace {
 
-void emit_field(JsonArray fields, const AdvancedField& f) {
-  JsonObject o = fields.add<JsonObject>();
-  if (f.kind == AdvancedFieldKind::Table) {
+class JsonAdvancedStatusWriter : public AdvancedStatusWriter {
+ public:
+  explicit JsonAdvancedStatusWriter(JsonArray sections) : sections_(sections) {}
+
+  void section(const char* title = "") override {
+    JsonObject s = sections_.add<JsonObject>();
+    s["title"] = std::string(title);
+    fields_ = s["fields"].to<JsonArray>();
+  }
+
+  void kv(const char* label, const String& value, const char* unit = "",
+          AdvancedSeverity severity = AdvancedSeverity::Normal) override {
+    emit_kv(label, value.c_str(), unit, severity);
+  }
+
+  void kv(const char* label, const char* value, const char* unit = "",
+          AdvancedSeverity severity = AdvancedSeverity::Normal) override {
+    emit_kv(label, value, unit, severity);
+  }
+
+  void table(const char* label, std::initializer_list<const char*> columns,
+             const char* catalogue = nullptr) override {
+    JsonObject o = fields_.add<JsonObject>();
     o["kind"] = "table";
-    o["label"] = std::string(f.label.c_str());
+    o["label"] = std::string(label);
     JsonArray cols = o["columns"].to<JsonArray>();
-    for (const String& c : f.columns) cols.add(std::string(c.c_str()));
-    JsonArray rows = o["rows"].to<JsonArray>();
-    for (const auto& r : f.rows) {
-      JsonArray row = rows.add<JsonArray>();
-      for (const String& cell : r) row.add(std::string(cell.c_str()));
+    for (const char* c : columns) cols.add(std::string(c));
+    rows_ = o["rows"].to<JsonArray>();
+    if (catalogue != nullptr) {
+      o["catalogue"] = std::string(catalogue);
+      keys_ = o["row_keys"].to<JsonArray>();
+    } else {
+      keys_ = JsonArray();
     }
-    if (!f.row_keys.empty()) {
-      o["catalogue"] = std::string(f.catalogue.c_str());
-      JsonArray keys = o["row_keys"].to<JsonArray>();
-      for (const String& k : f.row_keys) keys.add(std::string(k.c_str()));
+  }
+
+  void row_begin(const char* key = nullptr) override {
+    row_ = rows_.add<JsonArray>();
+    if (key != nullptr && !keys_.isNull()) {
+      keys_.add(std::string(key));
     }
-  } else {
+  }
+
+  void cell(const String& text) override { row_.add(std::string(text.c_str())); }
+
+  void row_end() override { row_ = JsonArray(); }
+
+ private:
+  void emit_kv(const char* label, const char* value, const char* unit, AdvancedSeverity severity) {
+    JsonObject o = fields_.add<JsonObject>();
     o["kind"] = "kv";
-    o["label"] = std::string(f.label.c_str());
-    o["value"] = std::string(f.value.c_str());
-    o["unit"] = std::string(f.unit.c_str());
-    if (f.severity != AdvancedSeverity::Normal) {
+    o["label"] = std::string(label);
+    o["value"] = std::string(value);
+    o["unit"] = std::string(unit);
+    if (severity != AdvancedSeverity::Normal) {
       o["sev"] = "warn";
     }
   }
-}
 
+  JsonArray sections_;
+  JsonArray fields_;
+  JsonArray rows_;
+  JsonArray keys_;
+  JsonArray row_;
+};
 
 void emit_battery(JsonArray entries, Battery* batt, uint8_t index) {
   JsonObject entry = entries.add<JsonObject>();
   entry["index"] = index;
   JsonArray sections = entry["sections"].to<JsonArray>();
-  BatteryAdvancedStatus status = batt->get_advanced_status();
-  for (const AdvancedSection& s : status.sections) {
-    JsonObject so = sections.add<JsonObject>();
-    so["title"] = std::string(s.title.c_str());
-    JsonArray fields = so["fields"].to<JsonArray>();
-    for (const AdvancedField& f : s.fields) emit_field(fields, f);
-  }
+  JsonAdvancedStatusWriter writer(sections);
+  batt->write_advanced_status(writer);
   JsonArray commands = entry["commands"].to<JsonArray>();
   for (const BatteryCommand& cmd : batt->get_commands()) {
     if (cmd.available && !cmd.available()) continue;
@@ -165,35 +197,31 @@ bool run_advanced_command(const char* id, uint8_t battery_index, const int32_t* 
   return false;
 }
 
-AdvancedSection dtc_advanced_section(Battery& batt, DATALAYER_BATTERY_DTC_TYPE& dtc, DtcCodeStyle code_style) {
-  AdvancedSection section;
-  section.title = "Diagnostic Trouble Codes";
+void write_dtc_section(AdvancedStatusWriter& out, Battery& batt, DATALAYER_BATTERY_DTC_TYPE& dtc,
+                       DtcCodeStyle code_style) {
+  out.section("Diagnostic Trouble Codes");
   if (dtc.dtc_last_read_millis == 0) {
-    section.fields.push_back(kv("Status", "Not read yet"));
+    out.kv("Status", "Not read yet");
   } else if (dtc.dtc_read_failed) {
-    section.fields.push_back(kv("Status", "Last read failed"));
+    out.kv("Status", "Last read failed");
   } else if (dtc.dtc_count == 0) {
-    section.fields.push_back(kv("Status", "No DTCs present"));
+    out.kv("Status", "No DTCs present");
   } else {
     constexpr uint32_t MS_PER_S = 1000;
-    section.fields.push_back(
-        kv("Read", String((millis() - dtc.dtc_last_read_millis) / MS_PER_S) + "s ago"));
+    out.kv("Read", String((millis() - dtc.dtc_last_read_millis) / MS_PER_S) + "s ago");
     if (dtc.dtc_reported_count > dtc.dtc_count) {
       // The battery had more to say than there are slots to hold it. Say so, rather than presenting
       // a truncated list as if it were the whole story.
-      section.fields.push_back(kv(
-          "Status", String(dtc.dtc_count) + " codes shown of " + String(dtc.dtc_reported_count) + " reported"));
+      out.kv("Status",
+             String(dtc.dtc_count) + " codes shown of " + String(dtc.dtc_reported_count) + " reported");
     }
-    AdvancedField table;
-    table.kind = AdvancedFieldKind::Table;
-    table.columns = {"DTC", "Status", "Description"};
-    table.catalogue = batt.get_dtc_json_filename();
+    out.table("", {TL("DTC"), TL("Status"), TL("Description")}, batt.get_dtc_json_filename());
     for (uint8_t i = 0; i < dtc.dtc_count; i++) {
-      table.rows.push_back({format_dtc_code(dtc.dtc_codes[i], code_style),
-                            String(dtc_status_string(dtc.dtc_status[i])), "Unknown"});
-      table.row_keys.push_back(format_dtc_match_key(dtc.dtc_codes[i], code_style));
+      out.row_begin(format_dtc_match_key(dtc.dtc_codes[i], code_style).c_str());
+      out.cell(format_dtc_code(dtc.dtc_codes[i], code_style));
+      out.cell(String(dtc_status_string(dtc.dtc_status[i])));
+      out.cell("Unknown");
+      out.row_end();
     }
-    section.fields.push_back(table);
   }
-  return section;
 }

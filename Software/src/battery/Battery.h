@@ -103,7 +103,7 @@ class Battery {
   virtual bool supports_insulation_resistance() { return false; }
 
   // Structured advanced status; drivers override to emit data.
-  virtual BatteryAdvancedStatus get_advanced_status() { return {}; }
+  virtual void write_advanced_status(AdvancedStatusWriter& out) {}
 
   virtual const char* get_dtc_json_filename() { return ""; }
 

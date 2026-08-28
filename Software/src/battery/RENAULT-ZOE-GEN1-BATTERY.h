@@ -24,21 +24,18 @@ class RenaultZoeGen1Battery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
-    s.fields.push_back(kv("CUV", String(datalayer_extended.zoe.CUV)));
-    s.fields.push_back(kv("HVBIR", String(datalayer_extended.zoe.HVBIR)));
-    s.fields.push_back(kv("HVBUV", String(datalayer_extended.zoe.HVBUV)));
-    s.fields.push_back(kv("EOCR", String(datalayer_extended.zoe.EOCR)));
-    s.fields.push_back(kv("HVBOC", String(datalayer_extended.zoe.HVBOC)));
-    s.fields.push_back(kv("HVBOT", String(datalayer_extended.zoe.HVBOT)));
-    s.fields.push_back(kv("HVBOV", String(datalayer_extended.zoe.HVBOV)));
-    s.fields.push_back(kv("COV", String(datalayer_extended.zoe.COV)));
-    s.fields.push_back(kv("Battery mileage", String(datalayer_extended.zoe.mileage_km), "km"));
-    s.fields.push_back(kv("Alltime energy", String(datalayer_extended.zoe.alltime_kWh), "kWh"));
-    status.sections.push_back(s);
-    return status;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section("");
+    out.kv("CUV", String(datalayer_extended.zoe.CUV));
+    out.kv("HVBIR", String(datalayer_extended.zoe.HVBIR));
+    out.kv("HVBUV", String(datalayer_extended.zoe.HVBUV));
+    out.kv("EOCR", String(datalayer_extended.zoe.EOCR));
+    out.kv("HVBOC", String(datalayer_extended.zoe.HVBOC));
+    out.kv("HVBOT", String(datalayer_extended.zoe.HVBOT));
+    out.kv("HVBOV", String(datalayer_extended.zoe.HVBOV));
+    out.kv("COV", String(datalayer_extended.zoe.COV));
+    out.kv(TL("Battery mileage"), String(datalayer_extended.zoe.mileage_km), "km");
+    out.kv(TL("Alltime energy"), String(datalayer_extended.zoe.alltime_kWh), "kWh");
   }
 
  private:

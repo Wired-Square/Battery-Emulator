@@ -493,21 +493,14 @@ void UdsCanBattery::set_pid_scan_list(const uint16_t* pid_list, uint16_t length)
   this->pending_pid = 0;
 }
 
-BatteryAdvancedStatus UdsCanBattery::get_advanced_status() {
-  BatteryAdvancedStatus status;
+void UdsCanBattery::write_advanced_status(AdvancedStatusWriter& out) {
 
-  AdvancedSection uds_info;
-  append_uds_info_fields(uds_info.fields);
-  if (!uds_info.fields.empty()) {
-    status.sections.push_back(uds_info);
-  }
+  append_uds_info_fields(out);
 
   if (dtc != nullptr) {
     DtcCodeStyle style = get_dtc_standard_code_string() ? DtcCodeStyle::kStandard : DtcCodeStyle::kRawHex;
-    status.sections.push_back(dtc_advanced_section(*this, *dtc, style));
+    write_dtc_section(out, *this, *dtc, style);
   }
-
-  return status;
 }
 
 void UdsCanBattery::read_DTC() {

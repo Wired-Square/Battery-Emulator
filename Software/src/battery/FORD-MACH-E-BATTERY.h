@@ -18,36 +18,34 @@ class FordMachEBattery : public CanBattery {
 
   const char* get_dtc_json_filename() override { return "ford_machE_dtc.json"; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
-    s.title = "Ford Mach-E Extra Information";
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section(TL("Ford Mach-E Extra Information"));
 
-    s.fields.push_back(kv("Polled allowed charge power",
+    out.kv(TL("Polled allowed charge power"),
                           datalayer_extended.fordMachE.pid_hvb_max_charge_current == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_max_charge_current),
-                          "A"));
-    s.fields.push_back(kv("Average temperature",
+                          "A");
+    out.kv(TL("Average temperature"),
                           datalayer_extended.fordMachE.pid_hvb_temp == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_temp),
-                          "°C"));
-    s.fields.push_back(kv("High precision voltage",
+                          "°C");
+    out.kv(TL("High precision voltage"),
                           datalayer_extended.fordMachE.pid_hvb_voltage == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_voltage / 100.0, 2),
-                          "V"));
-    s.fields.push_back(kv("State of health",
+                          "V");
+    out.kv(TL("State of health"),
                           datalayer_extended.fordMachE.pid_hvb_soh == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_soh),
-                          "%"));
-    s.fields.push_back(kv("State of charge",
+                          "%");
+    out.kv(TL("State of charge"),
                           datalayer_extended.fordMachE.pid_hvb_soc == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_soc / 1000.0, 3),
-                          "%"));
+                          "%");
 
     String contactor_status;
     if (datalayer_extended.fordMachE.pid_hvb_contactor_status == 255) {
@@ -63,53 +61,53 @@ class FordMachEBattery : public CanBattery {
         contactor_status = "Unknown enumeration: " + String(datalayer_extended.fordMachE.pid_hvb_contactor_status);
       }
     }
-    s.fields.push_back(kv("Contactor status", contactor_status));
+    out.kv(TL("Contactor status"), contactor_status);
 
-    s.fields.push_back(kv("Pos contactor leak voltage",
+    out.kv(TL("Pos contactor leak voltage"),
                           datalayer_extended.fordMachE.pid_hvb_contactor_positive_leak_voltage == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_contactor_positive_leak_voltage),
-                          "mV"));
-    s.fields.push_back(kv("Neg contactor leak voltage",
+                          "mV");
+    out.kv(TL("Neg contactor leak voltage"),
                           datalayer_extended.fordMachE.pid_hvb_contactor_negative_leak_voltage == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_contactor_negative_leak_voltage),
-                          "mV"));
-    s.fields.push_back(kv("Pos contactor voltage",
+                          "mV");
+    out.kv(TL("Pos contactor voltage"),
                           datalayer_extended.fordMachE.pid_hvb_contactor_positive_voltage == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_contactor_positive_voltage),
-                          "mV"));
-    s.fields.push_back(kv("Neg contactor voltage",
+                          "mV");
+    out.kv(TL("Neg contactor voltage"),
                           datalayer_extended.fordMachE.pid_hvb_contactor_negative_voltage == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_contactor_negative_voltage),
-                          "mV"));
-    s.fields.push_back(kv("Pos contactor bus leak resistance",
+                          "mV");
+    out.kv(TL("Pos contactor bus leak resistance"),
                           datalayer_extended.fordMachE.pid_hvb_contactor_positive_bus_leak_resistance == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_contactor_positive_bus_leak_resistance),
-                          "kOhm"));
-    s.fields.push_back(kv("Neg contactor bus leak resistance",
+                          "kOhm");
+    out.kv(TL("Neg contactor bus leak resistance"),
                           datalayer_extended.fordMachE.pid_hvb_contactor_negative_bus_leak_resistance == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_contactor_negative_bus_leak_resistance),
-                          "kOhm"));
-    s.fields.push_back(kv("Overall contactor leak resistance",
+                          "kOhm");
+    out.kv(TL("Overall contactor leak resistance"),
                           datalayer_extended.fordMachE.pid_hvb_contactor_overall_leak_resistance == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_contactor_overall_leak_resistance),
-                          "kOhm"));
-    s.fields.push_back(kv("Open contactor leak resistance",
+                          "kOhm");
+    out.kv(TL("Open contactor leak resistance"),
                           datalayer_extended.fordMachE.pid_hvb_contactor_open_leak_resistance == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_contactor_open_leak_resistance),
-                          "kOhm"));
-    s.fields.push_back(kv("Capacity",
+                          "kOhm");
+    out.kv(TL("Capacity"),
                           datalayer_extended.fordMachE.pid_battery_capacity_ah == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_battery_capacity_ah / 10.0, 1),
-                          "Ah"));
+                          "Ah");
 
     String rebalance_status;
     if (datalayer_extended.fordMachE.pid_maintenance_rebalance_status == 255) {
@@ -127,17 +125,15 @@ class FordMachEBattery : public CanBattery {
         rebalance_status = String(datalayer_extended.fordMachE.pid_maintenance_rebalance_status);
       }
     }
-    s.fields.push_back(kv("Maintenance rebalance status", rebalance_status));
+    out.kv(TL("Maintenance rebalance status"), rebalance_status);
 
-    s.fields.push_back(kv("Calendar age",
+    out.kv(TL("Calendar age"),
                           datalayer_extended.fordMachE.pid_hvb_calendar_age_months == 255
                               ? "N/A"
                               : String(datalayer_extended.fordMachE.pid_hvb_calendar_age_months / 100.0, 0),
-                          "Months"));
+                          "Months");
 
-    status.sections.push_back(s);
-    status.sections.push_back(dtc_advanced_section(*this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType));
-    return status;
+    write_dtc_section(out, *this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType);
   }
 
  private:

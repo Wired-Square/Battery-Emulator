@@ -17,12 +17,15 @@ EVENTS_SOURCE = "Software/src/devboard/utils/events.cpp"
 SETTINGS_JS = "Software/src/devboard/webserver/web/settings.js"
 DASHBOARD_JS = "Software/src/devboard/webserver/web/dashboard.js"
 SETTINGS_API = "Software/src/devboard/webserver/settings_api.cpp"
+DRIVER_DIR = "Software/src/battery"
+ADVANCED_API = "Software/src/devboard/webserver/advanced_api.cpp"
 WEB_DIR = "Software/src/devboard/webserver/web"
 OUT_FILE = "translations/en.json"
 
 EVENT_PREFIX = "EVENT_"
 EVENT_KEY_PREFIX = "event."
 SETTING_KEY_PREFIX = "setting."
+ADVANCED_KEY_PREFIX = "adv."
 
 MESSAGE_FN = "String get_event_message_string"
 LABELS_DECL = "const LABELS = {"
@@ -44,6 +47,11 @@ MODULE_CONST = re.compile(r"^const ([A-Z][A-Z0-9_]*) =\s*((?:" + JS_STRING + r")
                           re.M | re.S)
 SHELL_MARKER = re.compile(r'data-i18n="([^"]+)"[^>]*>([^<]*)<')
 SHELL_ATTR_MARKER = re.compile(r'(\w[\w-]*)="([^"]*)"[^>]*data-i18n-attr="\1:([^"]+)"')
+# TL() marks a driver label or section title as English prose rather than a
+# signal name. The slug must match slugify() in advanced.js.
+TL_CALL = re.compile(r'\bTL\(\s*((?:"(?:[^"\\\\]|\\\\.)*"\s*)+)\)')
+SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+SLUG_RUNS = re.compile(r"_+")
 
 
 def unquote_js(literal: str) -> str:
@@ -120,6 +128,18 @@ def translate_calls(source: str) -> dict:
     return out
 
 
+def advanced_slug(text: str) -> str:
+    return SLUG_RUNS.sub("_", SLUG_STRIP.sub("_", text.lower())).strip("_")
+
+
+def advanced_labels(source: str) -> dict:
+    out = {}
+    for literals in TL_CALL.findall(source):
+        text = "".join(unquote_c(part) for part in C_STRING.findall(literals))
+        out[ADVANCED_KEY_PREFIX + advanced_slug(text)] = text
+    return out
+
+
 def shell_markers(source: str) -> dict:
     out = {key: text for key, text in SHELL_MARKER.findall(source)}
     for _, value, key in SHELL_ATTR_MARKER.findall(source):
@@ -134,6 +154,10 @@ def collect(repo_root: Path) -> dict:
     strings.update(setting_labels(root.joinpath(SETTINGS_JS).read_text(encoding=SOURCE_ENCODING)))
     strings.update(row_labels(root.joinpath(DASHBOARD_JS).read_text(encoding=SOURCE_ENCODING)))
     strings.update(apply_errors(root.joinpath(SETTINGS_API).read_text(encoding=SOURCE_ENCODING)))
+    marked = [p for p in sorted((root / DRIVER_DIR).rglob("*")) if p.suffix in (".h", ".cpp")]
+    marked.append(root / ADVANCED_API)
+    for path in marked:
+        strings.update(advanced_labels(path.read_text(encoding=SOURCE_ENCODING)))
     web = root / WEB_DIR
     for path in sorted(web.glob("*.js")):
         strings.update(translate_calls(path.read_text(encoding=SOURCE_ENCODING)))

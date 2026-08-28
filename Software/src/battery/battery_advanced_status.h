@@ -3,50 +3,35 @@
 
 #include <WString.h>
 #include <stdint.h>
-#include <vector>
+#include <initializer_list>
 
-enum class AdvancedFieldKind { KeyValue, Table };
+#include "translatable_label.h"
 
 enum class AdvancedSeverity : uint8_t { Normal, Warning };
 
-// A single rendered element. KeyValue = one labelled value (with optional unit).
-// Table = a grid: `columns` headers over `rows` of equal-length string cells.
+// Abstract, not JSON-backed: holding a JsonArray here would pull ArduinoJson
+// into every driver that includes this header.
 //
-// A table may name a `catalogue` of descriptions for its coded values. The client
-// fetches it and appends a description column, matching row i on `row_keys[i]`.
-// The key is separate from the displayed cell because a code's display form may
-// carry detail the catalogue does not key on.
-struct AdvancedField {
-  AdvancedFieldKind kind = AdvancedFieldKind::KeyValue;
-  String label;
-  String value;
-  String unit;
-  std::vector<String> columns;
-  std::vector<std::vector<String>> rows;
-  String catalogue;
-  std::vector<String> row_keys;
-  AdvancedSeverity severity = AdvancedSeverity::Normal;
-};
+// A table may name a `catalogue` of descriptions for its coded values. The
+// client fetches it and appends a description column, matching each row on the
+// key given to row_begin(). The key is separate from the displayed cells
+// because a code's display form may carry detail the catalogue does not key on.
+class AdvancedStatusWriter {
+ public:
+  virtual ~AdvancedStatusWriter() = default;
 
-struct AdvancedSection {
-  String title;  // "" for an untitled/leading group
-  std::vector<AdvancedField> fields;
-};
+  virtual void section(const char* title = "") = 0;
 
-struct BatteryAdvancedStatus {
-  std::vector<AdvancedSection> sections;
-};
+  virtual void kv(const char* label, const String& value, const char* unit = "",
+                  AdvancedSeverity severity = AdvancedSeverity::Normal) = 0;
+  virtual void kv(const char* label, const char* value, const char* unit = "",
+                  AdvancedSeverity severity = AdvancedSeverity::Normal) = 0;
 
-// Convenience builder keeps driver conversions terse and uniform.
-inline AdvancedField kv(String label, String value, String unit = "",
-                        AdvancedSeverity severity = AdvancedSeverity::Normal) {
-  AdvancedField f;
-  f.kind = AdvancedFieldKind::KeyValue;
-  f.label = label;
-  f.value = value;
-  f.unit = unit;
-  f.severity = severity;
-  return f;
-}
+  virtual void table(const char* label, std::initializer_list<const char*> columns,
+                     const char* catalogue = nullptr) = 0;
+  virtual void row_begin(const char* key = nullptr) = 0;
+  virtual void cell(const String& text) = 0;
+  virtual void row_end() = 0;
+};
 
 #endif

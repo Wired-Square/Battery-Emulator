@@ -42,8 +42,7 @@ class TeslaBattery : public CanBattery {
 
   const char* get_dtc_json_filename() override { return "tesla_model3y_dtc.json"; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
 
     float beginning_of_life = static_cast<float>(datalayer_tesla->battery_beginning_of_life);
     float battTempPct = static_cast<float>(datalayer_tesla->battery_battTempPct) * 0.4f;
@@ -200,295 +199,258 @@ class TeslaBattery : public CanBattery {
     static const char* noYes[] = {"No", "Yes"};
 
     // ---- Leading (untitled) section: main battery / contactor info ----
-    AdvancedSection main_section;
+    out.section("");
 
     char readableBatterySerialNumber[15];  // One extra space for null terminator
     memcpy(readableBatterySerialNumber, datalayer_tesla->battery_serialNumber,
            sizeof(datalayer_tesla->battery_serialNumber));
     readableBatterySerialNumber[14] = '\0';  // Null terminate the string
-    main_section.fields.push_back(kv("Battery Serial Number", String(readableBatterySerialNumber)));
+    out.kv(TL("Battery Serial Number"), String(readableBatterySerialNumber));
     char readableBatteryPartNumber[13];  // One extra space for null terminator
     memcpy(readableBatteryPartNumber, datalayer_tesla->battery_partNumber,
            sizeof(datalayer_tesla->battery_partNumber));
     readableBatteryPartNumber[12] = '\0';  // Null terminate the string
-    main_section.fields.push_back(kv("Battery Part Number", String(readableBatteryPartNumber)));
+    out.kv(TL("Battery Part Number"), String(readableBatteryPartNumber));
     char readablePCSPartNumber[13];  // One extra space for null terminator
     memcpy(readablePCSPartNumber, datalayer_tesla->PCS_partNumber,
            sizeof(datalayer_tesla->PCS_partNumber));
     readablePCSPartNumber[12] = '\0';  // Null terminate the string
-    main_section.fields.push_back(kv("PCS Part Number", String(readablePCSPartNumber)));
-    main_section.fields.push_back(
-        kv("Battery Manufacture Date", String(datalayer_tesla->battery_manufactureDate)));
-    main_section.fields.push_back(kv("Battery Pack Mass", String(packMass), "KG"));
-    main_section.fields.push_back(kv("Battery Total Discharge", String(total_discharge), "kWh"));
-    main_section.fields.push_back(kv("Battery Total Charge", String(total_charge), "kWh"));
-    main_section.fields.push_back(
-        kv("HVIL Status", String(hvilStatusState[datalayer_tesla->hvil_status])));
-    main_section.fields.push_back(
-        kv("HVP Contactor State", String(contactorText[datalayer_tesla->packContactorSetState])));
-    main_section.fields.push_back(
-        kv("BMS Contactor State", String(BMS_contactorState[datalayer_tesla->BMS_contactorState])));
-    main_section.fields.push_back(
-        kv("Negative Contactor", String(contactorState[datalayer_tesla->packContNegativeState])));
-    main_section.fields.push_back(
-        kv("Positive Contactor", String(contactorState[datalayer_tesla->packContPositiveState])));
+    out.kv(TL("PCS Part Number"), String(readablePCSPartNumber));
+    out.kv(TL("Battery Manufacture Date"), String(datalayer_tesla->battery_manufactureDate));
+    out.kv(TL("Battery Pack Mass"), String(packMass), "KG");
+    out.kv(TL("Battery Total Discharge"), String(total_discharge), "kWh");
+    out.kv(TL("Battery Total Charge"), String(total_charge), "kWh");
+    out.kv(TL("HVIL Status"), String(hvilStatusState[datalayer_tesla->hvil_status]));
+    out.kv(TL("HVP Contactor State"), String(contactorText[datalayer_tesla->packContactorSetState]));
+    out.kv(TL("BMS Contactor State"), String(BMS_contactorState[datalayer_tesla->BMS_contactorState]));
+    out.kv(TL("Negative Contactor"), String(contactorState[datalayer_tesla->packContNegativeState]));
+    out.kv(TL("Positive Contactor"), String(contactorState[datalayer_tesla->packContPositiveState]));
     String closing_blocked = String(noYes[datalayer_tesla->packCtrsClosingBlocked]);
     if (datalayer_tesla->packContactorSetState == 5) {  //Closed
       closing_blocked += " (already CLOSED)";
     }
-    main_section.fields.push_back(kv("Closing blocked", closing_blocked));
-    main_section.fields.push_back(
-        kv("Pyrotest in progress", String(noYes[datalayer_tesla->pyroTestInProgress])));
-    main_section.fields.push_back(kv("Contactors Open Now Requested",
-                                     String(noYes[datalayer_tesla->battery_packCtrsOpenNowRequested])));
-    main_section.fields.push_back(
-        kv("Contactors Open Requested", String(noYes[datalayer_tesla->battery_packCtrsOpenRequested])));
-    main_section.fields.push_back(kv(
-        "Contactors Request Status", String(HVP_contactor[datalayer_tesla->battery_packCtrsRequestStatus])));
-    main_section.fields.push_back(kv("Contactors Reset Request Required",
-                                     String(noYes[datalayer_tesla->battery_packCtrsResetRequestRequired])));
-    main_section.fields.push_back(kv(
-        "DC Link Allowed to Energize", String(noYes[datalayer_tesla->battery_dcLinkAllowedToEnergize])));
-    status.sections.push_back(main_section);
+    out.kv(TL("Closing blocked"), closing_blocked);
+    out.kv(TL("Pyrotest in progress"), String(noYes[datalayer_tesla->pyroTestInProgress]));
+    out.kv(TL("Contactors Open Now Requested"),
+                                     String(noYes[datalayer_tesla->battery_packCtrsOpenNowRequested]));
+    out.kv(TL("Contactors Open Requested"), String(noYes[datalayer_tesla->battery_packCtrsOpenRequested]));
+    out.kv(
+        TL("Contactors Request Status"), String(HVP_contactor[datalayer_tesla->battery_packCtrsRequestStatus]));
+    out.kv(TL("Contactors Reset Request Required"),
+                                     String(noYes[datalayer_tesla->battery_packCtrsResetRequestRequired]));
+    out.kv(
+        TL("DC Link Allowed to Energize"), String(noYes[datalayer_tesla->battery_dcLinkAllowedToEnergize]));
 
     // ---- "BMS 0x352 w/o mux" or "BMS 0x352 w/ mux" section: everything through the HVP debug block ----
-    AdvancedSection bms_section;
     if (datalayer_tesla->BMS352_mux == false) {
-      bms_section.title = "BMS 0x352 w/o mux";  //if using older BMS <2021 and comment 0x352 without MUX
-      bms_section.fields.push_back(
-          kv("Calculated SOH", String(nominal_full_pack_energy * 100 / beginning_of_life)));
-      bms_section.fields.push_back(kv("Nominal Full Pack Energy", String(nominal_full_pack_energy), "kWh"));
-      bms_section.fields.push_back(kv("Nominal Energy Remaining", String(nominal_energy_remaining), "kWh"));
-      bms_section.fields.push_back(kv("Ideal Energy Remaining", String(ideal_energy_remaining), "kWh"));
-      bms_section.fields.push_back(
-          kv("Energy to Charge Complete", String(energy_to_charge_complete), "kWh"));
-      bms_section.fields.push_back(kv("Energy Buffer", String(energy_buffer), "kWh"));
-      bms_section.fields.push_back(
-          kv("Full Charge Complete", String(noYes[datalayer_tesla->battery_full_charge_complete])));
+      out.section("BMS 0x352 w/o mux");
+      out.kv(TL("Calculated SOH"), String(nominal_full_pack_energy * 100 / beginning_of_life));
+      out.kv(TL("Nominal Full Pack Energy"), String(nominal_full_pack_energy), "kWh");
+      out.kv(TL("Nominal Energy Remaining"), String(nominal_energy_remaining), "kWh");
+      out.kv(TL("Ideal Energy Remaining"), String(ideal_energy_remaining), "kWh");
+      out.kv(TL("Energy to Charge Complete"), String(energy_to_charge_complete), "kWh");
+      out.kv(TL("Energy Buffer"), String(energy_buffer), "kWh");
+      out.kv(TL("Full Charge Complete"), String(noYes[datalayer_tesla->battery_full_charge_complete]));
     } else {
-      bms_section.title = "BMS 0x352 w/ mux";  //if using newer BMS >2021 and comment 0x352 with MUX
-      bms_section.fields.push_back(
-          kv("Calculated SOH", String(nominal_full_pack_energy_m0 * 100 / beginning_of_life)));
-      bms_section.fields.push_back(
-          kv("Nominal Full Pack Energy", String(nominal_full_pack_energy_m0), "kWh"));
-      bms_section.fields.push_back(
-          kv("Nominal Energy Remaining", String(nominal_energy_remaining_m0), "kWh"));
-      bms_section.fields.push_back(kv("Ideal Energy Remaining", String(ideal_energy_remaining_m0), "kWh"));
-      bms_section.fields.push_back(
-          kv("Energy to Charge Complete", String(energy_to_charge_complete_m1), "kWh"));
-      bms_section.fields.push_back(kv("Energy Buffer", String(energy_buffer_m1), "kWh"));
-      bms_section.fields.push_back(
-          kv("Expected Energy Remaining", String(expected_energy_remaining_m1), "kWh"));
-      bms_section.fields.push_back(
-          kv("Fully Charged", String(noYes[datalayer_tesla->battery_fully_charged])));
+      out.section("BMS 0x352 w/ mux");
+      out.kv(TL("Calculated SOH"), String(nominal_full_pack_energy_m0 * 100 / beginning_of_life));
+      out.kv(TL("Nominal Full Pack Energy"), String(nominal_full_pack_energy_m0), "kWh");
+      out.kv(TL("Nominal Energy Remaining"), String(nominal_energy_remaining_m0), "kWh");
+      out.kv(TL("Ideal Energy Remaining"), String(ideal_energy_remaining_m0), "kWh");
+      out.kv(TL("Energy to Charge Complete"), String(energy_to_charge_complete_m1), "kWh");
+      out.kv(TL("Energy Buffer"), String(energy_buffer_m1), "kWh");
+      out.kv(TL("Expected Energy Remaining"), String(expected_energy_remaining_m1), "kWh");
+      out.kv(TL("Fully Charged"), String(noYes[datalayer_tesla->battery_fully_charged]));
     }
-    bms_section.fields.push_back(kv("Isolation Resistance", String(isolationResistance), "kOhms"));
-    bms_section.fields.push_back(kv("BMS State", String(BMS_state[datalayer_tesla->BMS_state])));
-    bms_section.fields.push_back(kv("BMS HV State", String(BMS_hvState[datalayer_tesla->BMS_hvState])));
-    bms_section.fields.push_back(
-        kv("BMS UI Charge Status", String(BMS_uiChargeStatus[datalayer_tesla->BMS_uiChargeStatus])));
-    bms_section.fields.push_back(kv("BMS_buildConfigId", String(datalayer_tesla->BMS_info_buildConfigId)));
-    bms_section.fields.push_back(kv("BMS_hardwareId", String(datalayer_tesla->BMS_info_hardwareId)));
-    bms_section.fields.push_back(kv("BMS_componentId", String(datalayer_tesla->BMS_info_componentId)));
+    out.kv(TL("Isolation Resistance"), String(isolationResistance), "kOhms");
+    out.kv(TL("BMS State"), String(BMS_state[datalayer_tesla->BMS_state]));
+    out.kv(TL("BMS HV State"), String(BMS_hvState[datalayer_tesla->BMS_hvState]));
+    out.kv(TL("BMS UI Charge Status"), String(BMS_uiChargeStatus[datalayer_tesla->BMS_uiChargeStatus]));
+    out.kv("BMS_buildConfigId", String(datalayer_tesla->BMS_info_buildConfigId));
+    out.kv("BMS_hardwareId", String(datalayer_tesla->BMS_info_hardwareId));
+    out.kv("BMS_componentId", String(datalayer_tesla->BMS_info_componentId));
     if (datalayer_tesla->BMS_pcsPwmEnabled) {
-      bms_section.fields.push_back(kv("BMS PCS PWM Enabled", "ACTIVE"));
+      out.kv(TL("BMS PCS PWM Enabled"), "ACTIVE");
     }
-    bms_section.fields.push_back(kv("Battery Beginning of Life", String(beginning_of_life), "kWh"));
-    bms_section.fields.push_back(kv("Battery SOC UI", String(soc_ui)));
-    bms_section.fields.push_back(kv("Battery SOC Ave", String(soc_ave)));
-    bms_section.fields.push_back(kv("Battery SOC Max", String(soc_max)));
-    bms_section.fields.push_back(kv("Battery SOC Min", String(soc_min)));
-    bms_section.fields.push_back(kv("Battery Temp Percent", String(battTempPct)));
-    bms_section.fields.push_back(kv("PCS Lv Output", String(dcdcLvOutputCurrent), "A"));
-    bms_section.fields.push_back(kv("PCS Lv Bus", String(dcdcLvBusVolt), "V"));
-    bms_section.fields.push_back(kv("PCS Hv Bus", String(dcdcHvBusVolt), "V"));
-    bms_section.fields.push_back(kv("Platform Max Bus Voltage", String(platformMaxBusVoltage), "V"));
-    bms_section.fields.push_back(kv("BMS Min Voltage", String(bms_min_voltage), "V"));
-    bms_section.fields.push_back(kv("BMS Max Voltage", String(bms_max_voltage), "V"));
-    bms_section.fields.push_back(kv("Max Charge Current", String(max_charge_current), "A"));
-    bms_section.fields.push_back(kv("Max Discharge Current", String(max_discharge_current), "A"));
-    bms_section.fields.push_back(kv("Brick Voltage Max", String(BrickVoltageMax), "V"));
-    bms_section.fields.push_back(kv("Brick Voltage Min", String(BrickVoltageMin), "V"));
-    bms_section.fields.push_back(kv("Brick Temp Max Num", String(datalayer_tesla->battery_BrickTempMaxNum)));
-    bms_section.fields.push_back(kv("Brick Temp Min Num", String(datalayer_tesla->battery_BrickTempMinNum)));
-    bms_section.fields.push_back(kv("PCS dcdc Temp", String(PCS_dcdcTemp), "DegC"));
-    bms_section.fields.push_back(kv("PCS Ambient Temp", String(PCS_ambientTemp), "DegC"));
-    bms_section.fields.push_back(kv("PCS Chg PhA Temp", String(PCS_chgPhATemp), "DegC"));
-    bms_section.fields.push_back(kv("PCS Chg PhB Temp", String(PCS_chgPhBTemp), "DegC"));
-    bms_section.fields.push_back(kv("PCS Chg PhC Temp", String(PCS_chgPhCTemp), "DegC"));
-    bms_section.fields.push_back(kv("Max Regen Power", String(BMS_maxRegenPower), "kW"));
-    bms_section.fields.push_back(kv("Max Discharge Power", String(BMS_maxDischargePower), "kW"));
-    bms_section.fields.push_back(
-        kv("Power Limit State", String(BMS_powerLimitState[datalayer_tesla->BMS_powerLimitState])));
-    bms_section.fields.push_back(kv("Power Dissipation", String(BMS_powerDissipation), "kW"));
-    bms_section.fields.push_back(kv("Flow Request", String(BMS_flowRequest), "LPM"));
-    bms_section.fields.push_back(kv("Inlet Active Cool Target Temp", String(BMS_inletActiveCoolTargetT), "DegC"));
-    bms_section.fields.push_back(kv("Inlet Passive Target Temp", String(BMS_inletPassiveTargetT), "DegC"));
-    bms_section.fields.push_back(kv("Inlet Active Heat Target Temp", String(BMS_inletActiveHeatTargetT), "DegC"));
-    bms_section.fields.push_back(kv("Pack Temp Min", String(BMS_packTMin), "DegC"));
-    bms_section.fields.push_back(kv("Pack Temp Max", String(BMS_packTMax), "DegC"));
+    out.kv(TL("Battery Beginning of Life"), String(beginning_of_life), "kWh");
+    out.kv(TL("Battery SOC UI"), String(soc_ui));
+    out.kv(TL("Battery SOC Ave"), String(soc_ave));
+    out.kv(TL("Battery SOC Max"), String(soc_max));
+    out.kv(TL("Battery SOC Min"), String(soc_min));
+    out.kv(TL("Battery Temp Percent"), String(battTempPct));
+    out.kv(TL("PCS Lv Output"), String(dcdcLvOutputCurrent), "A");
+    out.kv(TL("PCS Lv Bus"), String(dcdcLvBusVolt), "V");
+    out.kv(TL("PCS Hv Bus"), String(dcdcHvBusVolt), "V");
+    out.kv(TL("Platform Max Bus Voltage"), String(platformMaxBusVoltage), "V");
+    out.kv(TL("BMS Min Voltage"), String(bms_min_voltage), "V");
+    out.kv(TL("BMS Max Voltage"), String(bms_max_voltage), "V");
+    out.kv(TL("Max Charge Current"), String(max_charge_current), "A");
+    out.kv(TL("Max Discharge Current"), String(max_discharge_current), "A");
+    out.kv(TL("Brick Voltage Max"), String(BrickVoltageMax), "V");
+    out.kv(TL("Brick Voltage Min"), String(BrickVoltageMin), "V");
+    out.kv(TL("Brick Temp Max Num"), String(datalayer_tesla->battery_BrickTempMaxNum));
+    out.kv(TL("Brick Temp Min Num"), String(datalayer_tesla->battery_BrickTempMinNum));
+    out.kv(TL("PCS dcdc Temp"), String(PCS_dcdcTemp), "DegC");
+    out.kv(TL("PCS Ambient Temp"), String(PCS_ambientTemp), "DegC");
+    out.kv(TL("PCS Chg PhA Temp"), String(PCS_chgPhATemp), "DegC");
+    out.kv(TL("PCS Chg PhB Temp"), String(PCS_chgPhBTemp), "DegC");
+    out.kv(TL("PCS Chg PhC Temp"), String(PCS_chgPhCTemp), "DegC");
+    out.kv(TL("Max Regen Power"), String(BMS_maxRegenPower), "kW");
+    out.kv(TL("Max Discharge Power"), String(BMS_maxDischargePower), "kW");
+    out.kv(TL("Power Limit State"), String(BMS_powerLimitState[datalayer_tesla->BMS_powerLimitState]));
+    out.kv(TL("Power Dissipation"), String(BMS_powerDissipation), "kW");
+    out.kv(TL("Flow Request"), String(BMS_flowRequest), "LPM");
+    out.kv(TL("Inlet Active Cool Target Temp"), String(BMS_inletActiveCoolTargetT), "DegC");
+    out.kv(TL("Inlet Passive Target Temp"), String(BMS_inletPassiveTargetT), "DegC");
+    out.kv(TL("Inlet Active Heat Target Temp"), String(BMS_inletActiveHeatTargetT), "DegC");
+    out.kv(TL("Pack Temp Min"), String(BMS_packTMin), "DegC");
+    out.kv(TL("Pack Temp Max"), String(BMS_packTMax), "DegC");
     if (datalayer_tesla->BMS_pcsNoFlowRequest) {
-      bms_section.fields.push_back(kv("PCS No Flow Request", "ACTIVE"));
+      out.kv(TL("PCS No Flow Request"), "ACTIVE");
     }
     if (datalayer_tesla->BMS_noFlowRequest) {
-      bms_section.fields.push_back(kv("BMS No Flow Request", "ACTIVE"));
+      out.kv(TL("BMS No Flow Request"), "ACTIVE");
     }
-    bms_section.fields.push_back(
-        kv("Precharge Status", String(PCS_dcdcStatus[datalayer_tesla->PCS_dcdcPrechargeStatus])));
-    bms_section.fields.push_back(
-        kv("12V Support Status", String(PCS_dcdcStatus[datalayer_tesla->PCS_dcdc12VSupportStatus])));
-    bms_section.fields.push_back(kv(
-        "HV Bus Discharge Status", String(PCS_dcdcStatus[datalayer_tesla->PCS_dcdcHvBusDischargeStatus])));
-    bms_section.fields.push_back(
-        kv("Main State", String(PCS_dcdcMainState[datalayer_tesla->PCS_dcdcMainState])));
-    bms_section.fields.push_back(
-        kv("Sub State", String(PCS_dcdcSubState[datalayer_tesla->PCS_dcdcSubState])));
+    out.kv(TL("Precharge Status"), String(PCS_dcdcStatus[datalayer_tesla->PCS_dcdcPrechargeStatus]));
+    out.kv(TL("12V Support Status"), String(PCS_dcdcStatus[datalayer_tesla->PCS_dcdc12VSupportStatus]));
+    out.kv(
+        TL("HV Bus Discharge Status"), String(PCS_dcdcStatus[datalayer_tesla->PCS_dcdcHvBusDischargeStatus]));
+    out.kv(TL("Main State"), String(PCS_dcdcMainState[datalayer_tesla->PCS_dcdcMainState]));
+    out.kv(TL("Sub State"), String(PCS_dcdcSubState[datalayer_tesla->PCS_dcdcSubState]));
     if (datalayer_tesla->PCS_dcdcFaulted) {
-      bms_section.fields.push_back(kv("PCS Faulted", "ACTIVE"));
+      out.kv(TL("PCS Faulted"), "ACTIVE");
     }
     if (datalayer_tesla->PCS_dcdcOutputIsLimited) {
-      bms_section.fields.push_back(kv("Output Is Limited", "ACTIVE"));
+      out.kv(TL("Output Is Limited"), "ACTIVE");
     }
-    bms_section.fields.push_back(
-        kv("Max Output Current Allowed", String(PCS_dcdcMaxOutputCurrentAllowed), "A"));
-    bms_section.fields.push_back(
-        kv("Precharge Rty Cnt", String(falseTrue[datalayer_tesla->PCS_dcdcPrechargeRtyCnt])));
-    bms_section.fields.push_back(
-        kv("12V Support Rty Cnt", String(falseTrue[datalayer_tesla->PCS_dcdc12VSupportRtyCnt])));
-    bms_section.fields.push_back(
-        kv("Discharge Rty Cnt", String(falseTrue[datalayer_tesla->PCS_dcdcDischargeRtyCnt])));
+    out.kv(TL("Max Output Current Allowed"), String(PCS_dcdcMaxOutputCurrentAllowed), "A");
+    out.kv(TL("Precharge Rty Cnt"), String(falseTrue[datalayer_tesla->PCS_dcdcPrechargeRtyCnt]));
+    out.kv(TL("12V Support Rty Cnt"), String(falseTrue[datalayer_tesla->PCS_dcdc12VSupportRtyCnt]));
+    out.kv(TL("Discharge Rty Cnt"), String(falseTrue[datalayer_tesla->PCS_dcdcDischargeRtyCnt]));
     if (datalayer_tesla->PCS_dcdcPwmEnableLine) {
-      bms_section.fields.push_back(kv("PWM Enable Line", "ACTIVE"));
+      out.kv(TL("PWM Enable Line"), "ACTIVE");
     }
     if (datalayer_tesla->PCS_dcdcSupportingFixedLvTarget) {
-      bms_section.fields.push_back(kv("Supporting Fixed LV Target", "ACTIVE"));
+      out.kv(TL("Supporting Fixed LV Target"), "ACTIVE");
     }
-    bms_section.fields.push_back(
-        kv("Precharge Restart Cnt", String(falseTrue[datalayer_tesla->PCS_dcdcPrechargeRestartCnt])));
-    bms_section.fields.push_back(kv("Initial Precharge Substate",
-                                    String(PCS_dcdcSubState[datalayer_tesla->PCS_dcdcInitialPrechargeSubState])));
-    bms_section.fields.push_back(kv("PCS_buildConfigId", String(datalayer_tesla->PCS_info_buildConfigId)));
-    bms_section.fields.push_back(kv("PCS_hardwareId", String(datalayer_tesla->PCS_info_hardwareId)));
-    bms_section.fields.push_back(kv("PCS_componentId", String(datalayer_tesla->PCS_info_componentId)));
-    bms_section.fields.push_back(kv("PCS_dcdcMaxLvOutputCurrent", String(PCS_dcdcMaxLvOutputCurrent), "A"));
-    bms_section.fields.push_back(kv("PCS_dcdcCurrentLimit", String(PCS_dcdcCurrentLimit), "A"));
-    bms_section.fields.push_back(
-        kv("PCS_dcdcLvOutputCurrentTempLimit", String(PCS_dcdcLvOutputCurrentTempLimit), "A"));
-    bms_section.fields.push_back(kv("PCS_dcdcUnifiedCommand", String(PCS_dcdcUnifiedCommand)));
-    bms_section.fields.push_back(kv("PCS_dcdcCLAControllerOutput", String(PCS_dcdcCLAControllerOutput)));
-    bms_section.fields.push_back(kv("PCS_dcdcTankVoltage", String(PCS_dcdcTankVoltage), "V"));
-    bms_section.fields.push_back(kv("PCS_dcdcTankVoltageTarget", String(PCS_dcdcTankVoltageTarget), "V"));
-    bms_section.fields.push_back(kv("PCS_dcdcClaCurrentFreq", String(PCS_dcdcClaCurrentFreq), "kHz"));
-    bms_section.fields.push_back(kv("PCS_dcdcTCommMeasured", String(PCS_dcdcTCommMeasured), "us"));
-    bms_section.fields.push_back(kv("PCS_dcdcShortTimeUs", String(PCS_dcdcShortTimeUs), "us"));
-    bms_section.fields.push_back(kv("PCS_dcdcHalfPeriodUs", String(PCS_dcdcHalfPeriodUs), "us"));
-    bms_section.fields.push_back(kv("PCS_dcdcIntervalMaxFrequency", String(PCS_dcdcIntervalMaxFrequency), "kHz"));
-    bms_section.fields.push_back(kv("PCS_dcdcIntervalMaxHvBusVolt", String(PCS_dcdcIntervalMaxHvBusVolt), "V"));
-    bms_section.fields.push_back(kv("PCS_dcdcIntervalMaxLvBusVolt", String(PCS_dcdcIntervalMaxLvBusVolt), "V"));
-    bms_section.fields.push_back(
-        kv("PCS_dcdcIntervalMaxLvOutputCurr", String(PCS_dcdcIntervalMaxLvOutputCurr), "A"));
-    bms_section.fields.push_back(kv("PCS_dcdcIntervalMinFrequency", String(PCS_dcdcIntervalMinFrequency), "kHz"));
-    bms_section.fields.push_back(kv("PCS_dcdcIntervalMinHvBusVolt", String(PCS_dcdcIntervalMinHvBusVolt), "V"));
-    bms_section.fields.push_back(kv("PCS_dcdcIntervalMinLvBusVolt", String(PCS_dcdcIntervalMinLvBusVolt), "V"));
-    bms_section.fields.push_back(
-        kv("PCS_dcdcIntervalMinLvOutputCurr", String(PCS_dcdcIntervalMinLvOutputCurr), "A"));
-    bms_section.fields.push_back(kv("PCS_dcdc12vSupportLifetimekWh", String(PCS_dcdc12vSupportLifetimekWh), "kWh"));
-    bms_section.fields.push_back(kv("HVP_buildConfigId", String(datalayer_tesla->HVP_info_buildConfigId)));
-    bms_section.fields.push_back(kv("HVP_hardwareId", String(datalayer_tesla->HVP_info_hardwareId)));
-    bms_section.fields.push_back(kv("HVP_componentId", String(datalayer_tesla->HVP_info_componentId)));
-    bms_section.fields.push_back(kv("HVP_battery12V", String(HVP_battery12V), "V"));
-    bms_section.fields.push_back(kv("HVP_dcLinkVoltage", String(HVP_dcLinkVoltage), "V"));
-    bms_section.fields.push_back(kv("HVP_packVoltage", String(HVP_packVoltage), "V"));
-    bms_section.fields.push_back(kv("HVP_packContVoltage", String(HVP_packContVoltage), "V"));
-    bms_section.fields.push_back(kv("HVP_packContCoilCurrent", String(HVP_packContCoilCurrent), "A"));
-    bms_section.fields.push_back(kv("HVP_pyroAnalog", String(HVP_pyroAnalog), "V"));
-    bms_section.fields.push_back(kv("HVP_hvp1v5Ref", String(HVP_hvp1v5Ref), "V"));
-    bms_section.fields.push_back(kv("HVP_hvilInVoltage", String(HVP_hvilInVoltage), "V"));
-    bms_section.fields.push_back(kv("HVP_hvilOutVoltage", String(HVP_hvilOutVoltage), "V"));
+    out.kv(TL("Precharge Restart Cnt"), String(falseTrue[datalayer_tesla->PCS_dcdcPrechargeRestartCnt]));
+    out.kv(TL("Initial Precharge Substate"),
+                                    String(PCS_dcdcSubState[datalayer_tesla->PCS_dcdcInitialPrechargeSubState]));
+    out.kv("PCS_buildConfigId", String(datalayer_tesla->PCS_info_buildConfigId));
+    out.kv("PCS_hardwareId", String(datalayer_tesla->PCS_info_hardwareId));
+    out.kv("PCS_componentId", String(datalayer_tesla->PCS_info_componentId));
+    out.kv("PCS_dcdcMaxLvOutputCurrent", String(PCS_dcdcMaxLvOutputCurrent), "A");
+    out.kv("PCS_dcdcCurrentLimit", String(PCS_dcdcCurrentLimit), "A");
+    out.kv("PCS_dcdcLvOutputCurrentTempLimit", String(PCS_dcdcLvOutputCurrentTempLimit), "A");
+    out.kv("PCS_dcdcUnifiedCommand", String(PCS_dcdcUnifiedCommand));
+    out.kv("PCS_dcdcCLAControllerOutput", String(PCS_dcdcCLAControllerOutput));
+    out.kv("PCS_dcdcTankVoltage", String(PCS_dcdcTankVoltage), "V");
+    out.kv("PCS_dcdcTankVoltageTarget", String(PCS_dcdcTankVoltageTarget), "V");
+    out.kv("PCS_dcdcClaCurrentFreq", String(PCS_dcdcClaCurrentFreq), "kHz");
+    out.kv("PCS_dcdcTCommMeasured", String(PCS_dcdcTCommMeasured), "us");
+    out.kv("PCS_dcdcShortTimeUs", String(PCS_dcdcShortTimeUs), "us");
+    out.kv("PCS_dcdcHalfPeriodUs", String(PCS_dcdcHalfPeriodUs), "us");
+    out.kv("PCS_dcdcIntervalMaxFrequency", String(PCS_dcdcIntervalMaxFrequency), "kHz");
+    out.kv("PCS_dcdcIntervalMaxHvBusVolt", String(PCS_dcdcIntervalMaxHvBusVolt), "V");
+    out.kv("PCS_dcdcIntervalMaxLvBusVolt", String(PCS_dcdcIntervalMaxLvBusVolt), "V");
+    out.kv("PCS_dcdcIntervalMaxLvOutputCurr", String(PCS_dcdcIntervalMaxLvOutputCurr), "A");
+    out.kv("PCS_dcdcIntervalMinFrequency", String(PCS_dcdcIntervalMinFrequency), "kHz");
+    out.kv("PCS_dcdcIntervalMinHvBusVolt", String(PCS_dcdcIntervalMinHvBusVolt), "V");
+    out.kv("PCS_dcdcIntervalMinLvBusVolt", String(PCS_dcdcIntervalMinLvBusVolt), "V");
+    out.kv("PCS_dcdcIntervalMinLvOutputCurr", String(PCS_dcdcIntervalMinLvOutputCurr), "A");
+    out.kv("PCS_dcdc12vSupportLifetimekWh", String(PCS_dcdc12vSupportLifetimekWh), "kWh");
+    out.kv("HVP_buildConfigId", String(datalayer_tesla->HVP_info_buildConfigId));
+    out.kv("HVP_hardwareId", String(datalayer_tesla->HVP_info_hardwareId));
+    out.kv("HVP_componentId", String(datalayer_tesla->HVP_info_componentId));
+    out.kv("HVP_battery12V", String(HVP_battery12V), "V");
+    out.kv("HVP_dcLinkVoltage", String(HVP_dcLinkVoltage), "V");
+    out.kv("HVP_packVoltage", String(HVP_packVoltage), "V");
+    out.kv("HVP_packContVoltage", String(HVP_packContVoltage), "V");
+    out.kv("HVP_packContCoilCurrent", String(HVP_packContCoilCurrent), "A");
+    out.kv("HVP_pyroAnalog", String(HVP_pyroAnalog), "V");
+    out.kv("HVP_hvp1v5Ref", String(HVP_hvp1v5Ref), "V");
+    out.kv("HVP_hvilInVoltage", String(HVP_hvilInVoltage), "V");
+    out.kv("HVP_hvilOutVoltage", String(HVP_hvilOutVoltage), "V");
     if (datalayer_tesla->HVP_gpioPassivePyroDepl) {
-      bms_section.fields.push_back(kv("HVP_gpioPassivePyroDepl", "ACTIVE"));
+      out.kv("HVP_gpioPassivePyroDepl", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioPyroIsoEn) {
-      bms_section.fields.push_back(kv("HVP_gpioPyroIsoEn", "ACTIVE"));
+      out.kv("HVP_gpioPyroIsoEn", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioCpFaultIn) {
-      bms_section.fields.push_back(kv("HVP_gpioCpFaultIn", "ACTIVE"));
+      out.kv("HVP_gpioCpFaultIn", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioPackContPowerEn) {
-      bms_section.fields.push_back(kv("HVP_gpioPackContPowerEn", "ACTIVE"));
+      out.kv("HVP_gpioPackContPowerEn", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioHvCablesOk) {
-      bms_section.fields.push_back(kv("HVP_gpioHvCablesOk", "ACTIVE"));
+      out.kv("HVP_gpioHvCablesOk", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioHvpSelfEnable) {
-      bms_section.fields.push_back(kv("HVP_gpioHvpSelfEnable", "ACTIVE"));
+      out.kv("HVP_gpioHvpSelfEnable", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioLed) {
-      bms_section.fields.push_back(kv("HVP_gpioLed", "ACTIVE"));
+      out.kv("HVP_gpioLed", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioCrashSignal) {
-      bms_section.fields.push_back(kv("HVP_gpioCrashSignal", "ACTIVE"));
+      out.kv("HVP_gpioCrashSignal", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioShuntDataReady) {
-      bms_section.fields.push_back(kv("HVP_gpioShuntDataReady", "ACTIVE"));
+      out.kv("HVP_gpioShuntDataReady", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioFcContPosAux) {
-      bms_section.fields.push_back(kv("HVP_gpioFcContPosAux", "ACTIVE"));
+      out.kv("HVP_gpioFcContPosAux", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioFcContNegAux) {
-      bms_section.fields.push_back(kv("HVP_gpioFcContNegAux", "ACTIVE"));
+      out.kv("HVP_gpioFcContNegAux", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioBmsEout) {
-      bms_section.fields.push_back(kv("HVP_gpioBmsEout", "ACTIVE"));
+      out.kv("HVP_gpioBmsEout", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioCpFaultOut) {
-      bms_section.fields.push_back(kv("HVP_gpioCpFaultOut", "ACTIVE"));
+      out.kv("HVP_gpioCpFaultOut", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioPyroPor) {
-      bms_section.fields.push_back(kv("HVP_gpioPyroPor", "ACTIVE"));
+      out.kv("HVP_gpioPyroPor", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioShuntEn) {
-      bms_section.fields.push_back(kv("HVP_gpioShuntEn", "ACTIVE"));
+      out.kv("HVP_gpioShuntEn", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioHvpVerEn) {
-      bms_section.fields.push_back(kv("HVP_gpioHvpVerEn", "ACTIVE"));
+      out.kv("HVP_gpioHvpVerEn", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioPackCoontPosFlywheel) {
-      bms_section.fields.push_back(kv("HVP_gpioPackCoontPosFlywheel", "ACTIVE"));
+      out.kv("HVP_gpioPackCoontPosFlywheel", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioCpLatchEnable) {
-      bms_section.fields.push_back(kv("HVP_gpioCpLatchEnable", "ACTIVE"));
+      out.kv("HVP_gpioCpLatchEnable", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioPcsEnable) {
-      bms_section.fields.push_back(kv("HVP_gpioPcsEnable", "ACTIVE"));
+      out.kv("HVP_gpioPcsEnable", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioPcsDcdcPwmEnable) {
-      bms_section.fields.push_back(kv("HVP_gpioPcsDcdcPwmEnable", "ACTIVE"));
+      out.kv("HVP_gpioPcsDcdcPwmEnable", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioPcsChargePwmEnable) {
-      bms_section.fields.push_back(kv("HVP_gpioPcsChargePwmEnable", "ACTIVE"));
+      out.kv("HVP_gpioPcsChargePwmEnable", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioFcContPowerEnable) {
-      bms_section.fields.push_back(kv("HVP_gpioFcContPowerEnable", "ACTIVE"));
+      out.kv("HVP_gpioFcContPowerEnable", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioHvilEnable) {
-      bms_section.fields.push_back(kv("HVP_gpioHvilEnable", "ACTIVE"));
+      out.kv("HVP_gpioHvilEnable", "ACTIVE");
     }
     if (datalayer_tesla->HVP_gpioSecDrdy) {
-      bms_section.fields.push_back(kv("HVP_gpioSecDrdy", "ACTIVE"));
+      out.kv("HVP_gpioSecDrdy", "ACTIVE");
     }
-    bms_section.fields.push_back(kv("HVP_shuntCurrentDebug", String(HVP_shuntCurrentDebug), "A"));
-    bms_section.fields.push_back(
-        kv("HVP_packCurrentMia", String(noYes[datalayer_tesla->HVP_packCurrentMia])));
-    bms_section.fields.push_back(kv("HVP_auxCurrentMia", String(noYes[datalayer_tesla->HVP_auxCurrentMia])));
-    bms_section.fields.push_back(
-        kv("HVP_currentSenseMia", String(noYes[datalayer_tesla->HVP_currentSenseMia])));
-    bms_section.fields.push_back(kv("HVP_shuntRefVoltageMismatch",
-                                    String(noYes[datalayer_tesla->HVP_shuntRefVoltageMismatch])));
-    bms_section.fields.push_back(
-        kv("HVP_shuntThermistorMia", String(noYes[datalayer_tesla->HVP_shuntThermistorMia])));
-    bms_section.fields.push_back(kv("HVP_shuntHwMia", String(noYes[datalayer_tesla->HVP_shuntHwMia])));
-    status.sections.push_back(bms_section);
+    out.kv("HVP_shuntCurrentDebug", String(HVP_shuntCurrentDebug), "A");
+    out.kv("HVP_packCurrentMia", String(noYes[datalayer_tesla->HVP_packCurrentMia]));
+    out.kv("HVP_auxCurrentMia", String(noYes[datalayer_tesla->HVP_auxCurrentMia]));
+    out.kv("HVP_currentSenseMia", String(noYes[datalayer_tesla->HVP_currentSenseMia]));
+    out.kv("HVP_shuntRefVoltageMismatch",
+                                    String(noYes[datalayer_tesla->HVP_shuntRefVoltageMismatch]));
+    out.kv("HVP_shuntThermistorMia", String(noYes[datalayer_tesla->HVP_shuntThermistorMia]));
+    out.kv("HVP_shuntHwMia", String(noYes[datalayer_tesla->HVP_shuntHwMia]));
 
     // ---- "Active Faults: N" section: bespoke ECU/Description table ----
     {
@@ -513,29 +475,23 @@ class TeslaBattery : public CanBattery {
         }
       }
 
-      AdvancedSection fault_section;
-      fault_section.title = "Active Faults: " + String(total_active);
+      out.section(("Active Faults: " + String(total_active)).c_str());
       if (total_active > 0) {
-        AdvancedField table;
-        table.kind = AdvancedFieldKind::Table;
-        table.columns = {"ECU", "Description"};
-        table.catalogue = get_dtc_json_filename();
+        out.table("", {TL("ECU"), TL("Description")}, get_dtc_json_filename());
         for (auto& g : groups) {
           for (int i = 0; i < g.count; i++) {
             if (!g.active[i]) {
               continue;
             }
             // Integer match key; the catalogue maps it to the Tesla code and description.
-            table.rows.push_back({String(g.label), String(g.base + i)});
-            table.row_keys.push_back(String(g.base + i));
+            out.row_begin(String(g.base + i).c_str());
+            out.cell(String(g.label));
+            out.cell(String(g.base + i));
+            out.row_end();
           }
         }
-        fault_section.fields.push_back(table);
       }
-      status.sections.push_back(fault_section);
     }
-
-    return status;
   }
 
  private:

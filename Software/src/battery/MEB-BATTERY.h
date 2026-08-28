@@ -32,15 +32,14 @@ class MebBattery : public CanBattery, public IsoTp {
 
   const char* get_dtc_json_filename() override { return "vag_meb_dtc.json"; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section("");
 
-    s.fields.push_back(kv("Service disconnect switch", datalayer_extended.meb.SDSW ? "Missing!" : "OK"));
-    s.fields.push_back(kv("Pilotline", datalayer_extended.meb.pilotline ? "Open!" : "OK"));
-    s.fields.push_back(kv("Transportmode", datalayer_extended.meb.transportmode ? "Locked!" : "OK"));
-    s.fields.push_back(kv("Shutdown", datalayer_extended.meb.shutdown_active ? "Active!" : "No"));
-    s.fields.push_back(kv("Component protection", datalayer_extended.meb.componentprotection ? "Active!" : "No"));
+    out.kv(TL("Service disconnect switch"), datalayer_extended.meb.SDSW ? "Missing!" : "OK");
+    out.kv(TL("Pilotline"), datalayer_extended.meb.pilotline ? "Open!" : "OK");
+    out.kv(TL("Transportmode"), datalayer_extended.meb.transportmode ? "Locked!" : "OK");
+    out.kv(TL("Shutdown"), datalayer_extended.meb.shutdown_active ? "Active!" : "No");
+    out.kv(TL("Component protection"), datalayer_extended.meb.componentprotection ? "Active!" : "No");
 
     String hvil;
     switch (datalayer_extended.meb.HVIL) {
@@ -59,7 +58,7 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         hvil = "?";
     }
-    s.fields.push_back(kv("HVIL status", hvil));
+    out.kv(TL("HVIL status"), hvil);
 
     String kl30c;
     switch (datalayer_extended.meb.BMS_Kl30c_Status) {
@@ -78,7 +77,7 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         kl30c = "?";
     }
-    s.fields.push_back(kv("KL30C status", kl30c));
+    out.kv(TL("KL30C status"), kl30c);
 
     String bms_status;
     switch (datalayer_battery->status.real_bms_status) {
@@ -97,7 +96,7 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         bms_status = "?";
     }
-    s.fields.push_back(kv("BMS status", bms_status));
+    out.kv(TL("BMS status"), bms_status);
 
     String bms_mode;
     switch (datalayer_extended.meb.BMS_mode) {
@@ -128,9 +127,9 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         bms_mode = "?";
     }
-    s.fields.push_back(kv("BMS mode", bms_mode));
+    out.kv(TL("BMS mode"), bms_mode);
 
-    s.fields.push_back(kv("Charging", datalayer_extended.meb.charging_active ? "active" : "not active"));
+    out.kv(TL("Charging"), datalayer_extended.meb.charging_active ? "active" : "not active");
 
     String balancing;
     switch (datalayer_extended.meb.balancing_active) {
@@ -146,10 +145,9 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         balancing = "?";
     }
-    s.fields.push_back(kv("Balancing", balancing));
+    out.kv(TL("Balancing"), balancing);
 
-    s.fields.push_back(
-        kv("Slow charging", datalayer_extended.meb.balancing_request ? "requested" : "not requested"));
+    out.kv(TL("Slow charging"), datalayer_extended.meb.balancing_request ? "requested" : "not requested");
 
     String diagnostic;
     switch (datalayer_extended.meb.battery_diagnostic) {
@@ -171,7 +169,7 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         diagnostic = "?";
     }
-    s.fields.push_back(kv("Diagnostic", diagnostic));
+    out.kv(TL("Diagnostic"), diagnostic);
 
     String hv_line;
     switch (datalayer_extended.meb.status_HV_PTC_line) {
@@ -190,15 +188,14 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         hv_line = "? " + String(datalayer_extended.meb.status_HV_PTC_line);
     }
-    s.fields.push_back(kv("HV line status", hv_line));
+    out.kv(TL("HV line status"), hv_line);
 
-    s.fields.push_back(
-        kv("BMS fault performance", datalayer_extended.meb.BMS_fault_performance ? "Active!" : "Off"));
-    s.fields.push_back(kv("BMS fault emergency shutdown crash",
-                          datalayer_extended.meb.BMS_fault_emergency_shutdown_crash ? "Active!" : "Off"));
-    s.fields.push_back(kv("BMS error shutdown request",
-                          datalayer_extended.meb.BMS_error_shutdown_request ? "Active!" : "Inactive"));
-    s.fields.push_back(kv("BMS error shutdown", datalayer_extended.meb.BMS_error_shutdown ? "Active!" : "Off"));
+    out.kv(TL("BMS fault performance"), datalayer_extended.meb.BMS_fault_performance ? "Active!" : "Off");
+    out.kv(TL("BMS fault emergency shutdown crash"),
+                          datalayer_extended.meb.BMS_fault_emergency_shutdown_crash ? "Active!" : "Off");
+    out.kv(TL("BMS error shutdown request"),
+                          datalayer_extended.meb.BMS_error_shutdown_request ? "Active!" : "Inactive");
+    out.kv(TL("BMS error shutdown"), datalayer_extended.meb.BMS_error_shutdown ? "Active!" : "Off");
 
     String welded;
     switch (datalayer_extended.meb.BMS_welded_contactors_status) {
@@ -217,7 +214,7 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         welded = "?";
     }
-    s.fields.push_back(kv("Welded contactors", welded));
+    out.kv(TL("Welded contactors"), welded);
 
     String warning_support;
     switch (datalayer_extended.meb.warning_support) {
@@ -236,7 +233,7 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         warning_support = "?";
     }
-    s.fields.push_back(kv("Warning support", warning_support));
+    out.kv(TL("Warning support"), warning_support);
 
     String intermediate_voltage_status;
     switch (datalayer_extended.meb.BMS_status_voltage_free) {
@@ -255,9 +252,8 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         intermediate_voltage_status = "?";
     }
-    s.fields.push_back(
-        kv("Intermediate voltage", String(datalayer_extended.meb.BMS_voltage_intermediate_dV / 10.0f, 1), "V"));
-    s.fields.push_back(kv("Intermediate voltage status", intermediate_voltage_status));
+    out.kv(TL("Intermediate voltage"), String(datalayer_extended.meb.BMS_voltage_intermediate_dV / 10.0f, 1), "V");
+    out.kv(TL("Intermediate voltage status"), intermediate_voltage_status);
 
     String bms_error_status;
     switch (datalayer_extended.meb.BMS_error_status) {
@@ -288,39 +284,38 @@ class MebBattery : public CanBattery, public IsoTp {
       default:
         bms_error_status = "?";
     }
-    s.fields.push_back(kv("BMS error status", bms_error_status));
+    out.kv(TL("BMS error status"), bms_error_status);
 
-    s.fields.push_back(kv("BMS voltage", String(datalayer_extended.meb.BMS_voltage_dV / 10.0f, 1)));
-    s.fields.push_back(kv("OBD MIL", datalayer_extended.meb.BMS_OBD_MIL ? "ON!" : "Off"));
-    s.fields.push_back(kv("Red error lamp", datalayer_extended.meb.BMS_error_lamp_req ? "ON!" : "Off"));
-    s.fields.push_back(kv("Yellow warning lamp", datalayer_extended.meb.BMS_warning_lamp_req ? "ON!" : "Off"));
-    s.fields.push_back(kv("Isolation resistance", String(datalayer_extended.meb.isolation_resistance), "kOhm"));
-    s.fields.push_back(kv("Battery heating", datalayer_extended.meb.battery_heating ? "Active!" : "Off"));
+    out.kv(TL("BMS voltage"), String(datalayer_extended.meb.BMS_voltage_dV / 10.0f, 1));
+    out.kv(TL("OBD MIL"), datalayer_extended.meb.BMS_OBD_MIL ? "ON!" : "Off");
+    out.kv(TL("Red error lamp"), datalayer_extended.meb.BMS_error_lamp_req ? "ON!" : "Off");
+    out.kv(TL("Yellow warning lamp"), datalayer_extended.meb.BMS_warning_lamp_req ? "ON!" : "Off");
+    out.kv(TL("Isolation resistance"), String(datalayer_extended.meb.isolation_resistance), "kOhm");
+    out.kv(TL("Battery heating"), datalayer_extended.meb.battery_heating ? "Active!" : "Off");
 
     const char* rt_enum[] = {"No", "Error level 1", "Error level 2", "Error level 3"};
-    s.fields.push_back(kv("Overcurrent", rt_enum[datalayer_extended.meb.rt_overcurrent & 0x03]));
-    s.fields.push_back(kv("CAN fault", rt_enum[datalayer_extended.meb.rt_CAN_fault & 0x03]));
-    s.fields.push_back(kv("Overcharged", rt_enum[datalayer_extended.meb.rt_overcharge & 0x03]));
-    s.fields.push_back(kv("SOC too high", rt_enum[datalayer_extended.meb.rt_SOC_high & 0x03]));
-    s.fields.push_back(kv("SOC too low", rt_enum[datalayer_extended.meb.rt_SOC_low & 0x03]));
-    s.fields.push_back(kv("SOC jumping", rt_enum[datalayer_extended.meb.rt_SOC_jumping & 0x03]));
-    s.fields.push_back(kv("Temp difference", rt_enum[datalayer_extended.meb.rt_temp_difference & 0x03]));
-    s.fields.push_back(kv("Cell overtemp", rt_enum[datalayer_extended.meb.rt_cell_overtemp & 0x03]));
-    s.fields.push_back(kv("Cell undertemp", rt_enum[datalayer_extended.meb.rt_cell_undertemp & 0x03]));
-    s.fields.push_back(kv("Battery overvoltage", rt_enum[datalayer_extended.meb.rt_battery_overvolt & 0x03]));
-    s.fields.push_back(kv("Battery undervoltage", rt_enum[datalayer_extended.meb.rt_battery_undervol & 0x03]));
-    s.fields.push_back(kv("Cell overvoltage", rt_enum[datalayer_extended.meb.rt_cell_overvolt & 0x03]));
-    s.fields.push_back(kv("Cell undervoltage", rt_enum[datalayer_extended.meb.rt_cell_undervol & 0x03]));
-    s.fields.push_back(kv("Cell imbalance", rt_enum[datalayer_extended.meb.rt_cell_imbalance & 0x03]));
-    s.fields.push_back(kv("Battery unathorized", rt_enum[datalayer_extended.meb.rt_battery_unathorized & 0x03]));
+    out.kv(TL("Overcurrent"), rt_enum[datalayer_extended.meb.rt_overcurrent & 0x03]);
+    out.kv(TL("CAN fault"), rt_enum[datalayer_extended.meb.rt_CAN_fault & 0x03]);
+    out.kv(TL("Overcharged"), rt_enum[datalayer_extended.meb.rt_overcharge & 0x03]);
+    out.kv(TL("SOC too high"), rt_enum[datalayer_extended.meb.rt_SOC_high & 0x03]);
+    out.kv(TL("SOC too low"), rt_enum[datalayer_extended.meb.rt_SOC_low & 0x03]);
+    out.kv(TL("SOC jumping"), rt_enum[datalayer_extended.meb.rt_SOC_jumping & 0x03]);
+    out.kv(TL("Temp difference"), rt_enum[datalayer_extended.meb.rt_temp_difference & 0x03]);
+    out.kv(TL("Cell overtemp"), rt_enum[datalayer_extended.meb.rt_cell_overtemp & 0x03]);
+    out.kv(TL("Cell undertemp"), rt_enum[datalayer_extended.meb.rt_cell_undertemp & 0x03]);
+    out.kv(TL("Battery overvoltage"), rt_enum[datalayer_extended.meb.rt_battery_overvolt & 0x03]);
+    out.kv(TL("Battery undervoltage"), rt_enum[datalayer_extended.meb.rt_battery_undervol & 0x03]);
+    out.kv(TL("Cell overvoltage"), rt_enum[datalayer_extended.meb.rt_cell_overvolt & 0x03]);
+    out.kv(TL("Cell undervoltage"), rt_enum[datalayer_extended.meb.rt_cell_undervol & 0x03]);
+    out.kv(TL("Cell imbalance"), rt_enum[datalayer_extended.meb.rt_cell_imbalance & 0x03]);
+    out.kv(TL("Battery unathorized"), rt_enum[datalayer_extended.meb.rt_battery_unathorized & 0x03]);
 
     if (datalayer_extended.meb.battery_temperature_dC == 875) {  //Raw value 255
-      s.fields.push_back(kv("Battery temperature", "ERROR"));
+      out.kv(TL("Battery temperature"), "ERROR");
     } else if (datalayer_extended.meb.battery_temperature_dC == 870) {  //Raw value 254
-      s.fields.push_back(kv("Battery temperature", "INIT"));
+      out.kv(TL("Battery temperature"), "INIT");
     } else {
-      s.fields.push_back(
-          kv("Battery temperature", String(datalayer_extended.meb.battery_temperature_dC / 10.f, 1), "°C"));
+      out.kv(TL("Battery temperature"), String(datalayer_extended.meb.battery_temperature_dC / 10.f, 1), "°C");
     }
 
     for (int i = 0; i < 3; i++) {
@@ -331,7 +326,7 @@ class MebBattery : public CanBattery, public IsoTp {
         }
         points += String(datalayer_extended.meb.temp_points[i * 6 + j], 1);
       }
-      s.fields.push_back(kv("Temperature points " + String(i * 6 + 1) + "-" + String(i * 6 + 6), points, "°C"));
+      out.kv(("Temperature points " + String(i * 6 + 1) + "-" + String(i * 6 + 6)).c_str(), points, "°C");
     }
 
     bool temps_done = false;
@@ -348,17 +343,13 @@ class MebBattery : public CanBattery, public IsoTp {
           cell_temps += String(datalayer_extended.meb.celltemperature_dC[i * 8 + j] / 10.f, 1);
         }
       }
-      s.fields.push_back(kv("Cell temperatures " + String(i * 8 + 1) + "-" + String(i * 8 + 8), cell_temps, "°C"));
+      out.kv(("Cell temperatures " + String(i * 8 + 1) + "-" + String(i * 8 + 8)).c_str(), cell_temps, "°C");
     }
 
-    s.fields.push_back(
-        kv("Total charged", String(datalayer_battery->status.total_charged_battery_Wh / 1000.0, 1), "kWh"));
-    s.fields.push_back(
-        kv("Total discharged", String(datalayer_battery->status.total_discharged_battery_Wh / 1000.0, 1), "kWh"));
+    out.kv(TL("Total charged"), String(datalayer_battery->status.total_charged_battery_Wh / 1000.0, 1), "kWh");
+    out.kv(TL("Total discharged"), String(datalayer_battery->status.total_discharged_battery_Wh / 1000.0, 1), "kWh");
 
-    status.sections.push_back(s);
-    status.sections.push_back(dtc_advanced_section(*this, datalayer_battery->dtc, DtcCodeStyle::kRawHex));
-    return status;
+    write_dtc_section(out, *this, datalayer_battery->dtc, DtcCodeStyle::kRawHex);
   }
 
  protected:

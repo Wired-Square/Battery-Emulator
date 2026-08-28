@@ -33,25 +33,22 @@ class PylonBattery : public CanBattery {
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
-    s.fields.push_back(kv("BMS charge cutoff voltage", String(extended_data.charge_cutoff_dV / 10.0, 1), "V"));
-    s.fields.push_back(kv("BMS discharge cutoff voltage", String(extended_data.discharge_cutoff_dV / 10.0, 1), "V"));
-    s.fields.push_back(kv("Design voltage in use",
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section("");
+    out.kv(TL("BMS charge cutoff voltage"), String(extended_data.charge_cutoff_dV / 10.0, 1), "V");
+    out.kv(TL("BMS discharge cutoff voltage"), String(extended_data.discharge_cutoff_dV / 10.0, 1), "V");
+    out.kv(TL("Design voltage in use"),
                           String(datalayer_battery->info.min_design_voltage_dV / 10.0, 1) + " - " +
                               String(datalayer_battery->info.max_design_voltage_dV / 10.0, 1),
-                          "V"));
+                          "V");
     if (extended_data.cell_max_number > 0 || extended_data.cell_min_number > 0) {
-      s.fields.push_back(kv("Highest / lowest cell",
-                            "#" + String(extended_data.cell_max_number) + " / #" + String(extended_data.cell_min_number)));
+      out.kv(TL("Highest / lowest cell"),
+                            "#" + String(extended_data.cell_max_number) + " / #" + String(extended_data.cell_min_number));
     }
     if (extended_data.temp_max_sensor > 0 || extended_data.temp_min_sensor > 0) {
-      s.fields.push_back(kv("Hottest / coldest sensor",
-                            "#" + String(extended_data.temp_max_sensor) + " / #" + String(extended_data.temp_min_sensor)));
+      out.kv(TL("Hottest / coldest sensor"),
+                            "#" + String(extended_data.temp_max_sensor) + " / #" + String(extended_data.temp_min_sensor));
     }
-    status.sections.push_back(s);
-    return status;
   }
 
  private:

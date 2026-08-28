@@ -99,10 +99,10 @@ class UdsCanBattery : public CanBattery, public IsoTp {
   //    local file picker.
   //  - get_dtc_standard_code_string(): false for raw 6-digit hex codes, true
   //    for SAE-format codes (e.g. P0C9500).
-  virtual void append_uds_info_fields(std::vector<AdvancedField>& /*fields*/) {}
+  virtual void append_uds_info_fields(AdvancedStatusWriter& /*out*/) {}
   virtual bool get_dtc_standard_code_string() { return true; }
 
-  BatteryAdvancedStatus get_advanced_status() override;
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
   // Temporarily block new UDS sends for the given number of 100ms ticks. Blocks
   // transmits at or below the specified priority level, higher priority ones

@@ -11,7 +11,7 @@ class HyundaiIoniq28Battery : public CanBattery {
   // Use the default constructor to create the first or single battery.
   HyundaiIoniq28Battery(const BatterySlotContext& ctx) : CanBattery(ctx.can_interface) { datalayer_battery = ctx.datalayer; }
 
-  BatteryAdvancedStatus get_advanced_status() override;
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
   bool supports_insulation_resistance() override { return true; }
 

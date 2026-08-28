@@ -24,11 +24,10 @@ class KiaHyundai64Battery : public CanBattery {
 
   bool supports_insulation_resistance() override { return true; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
     DATALAYER_INFO_KIAHYUNDAI64* kia_datalayer = &extended_;
-    AdvancedSection s;
-    auto build_fields = [&s](DATALAYER_INFO_KIAHYUNDAI64& data) {
+    out.section("");
+    auto build_fields = [&out](DATALAYER_INFO_KIAHYUNDAI64& data) {
       char readableSerialNumber[17];  // One extra space for null terminator
       memcpy(readableSerialNumber, data.ecu_serial_number, sizeof(data.ecu_serial_number));
       readableSerialNumber[16] = '\0';  // Null terminate the string
@@ -36,10 +35,10 @@ class KiaHyundai64Battery : public CanBattery {
       memcpy(readableVersionNumber, data.ecu_version_number, sizeof(data.ecu_version_number));
       readableVersionNumber[16] = '\0';  // Null terminate the string
 
-      s.fields.push_back(kv("BMS serial number", String(readableSerialNumber)));
-      s.fields.push_back(kv("BMS software version", String(readableVersionNumber)));
-      s.fields.push_back(kv("Cells", String(data.total_cell_count), "S"));
-      s.fields.push_back(kv("12V voltage", String(data.battery_12V / 10.0f, 1), "V"));
+      out.kv(TL("BMS serial number"), String(readableSerialNumber));
+      out.kv(TL("BMS software version"), String(readableVersionNumber));
+      out.kv(TL("Cells"), String(data.total_cell_count), "S");
+      out.kv(TL("12V voltage"), String(data.battery_12V / 10.0f, 1), "V");
 
       String waterleakage;
       if (data.waterleakageSensor == 0) {
@@ -49,34 +48,27 @@ class KiaHyundai64Battery : public CanBattery {
       } else {
         waterleakage = String(data.waterleakageSensor);
       }
-      s.fields.push_back(kv("Waterleakage", waterleakage));
+      out.kv(TL("Waterleakage"), waterleakage);
 
-      s.fields.push_back(kv("Temperature, water inlet", String(data.temperature_water_inlet), "°C"));
-      s.fields.push_back(kv("Temperature, power relay", String(data.powerRelayTemperature), "°C"));
-      s.fields.push_back(kv("Batterymanagement mode", String(data.batteryManagementMode)));
-      s.fields.push_back(kv("BMS ignition", String(data.BMS_ign)));
-      s.fields.push_back(kv("Battery relay", String(data.batteryRelay)));
-      s.fields.push_back(kv("Inverter voltage", String(data.inverterVoltage), "V"));
-      s.fields.push_back(kv("Isolation resistance", String(data.isolation_resistance_kOhm), "kOhm"));
-      s.fields.push_back(kv("Power on total time", String(data.powered_on_total_time), "s"));
-      s.fields.push_back(kv("Fastcharging sessions", String(data.number_of_fastcharging_sessions), "x"));
-      s.fields.push_back(kv("Slowcharging sessions", String(data.number_of_standard_charging_sessions), "x"));
-      s.fields.push_back(
-          kv("Normal charged energy amount", String(data.accumulated_normal_charging_energy_kWh), "kWh"));
-      s.fields.push_back(kv("Fastcharged energy amount", String(data.accumulated_fastcharging_energy_kWh), "kWh"));
-      s.fields.push_back(
-          kv("Total amount charged energy", String(data.cumulative_energy_charged_kWh / 10.0), "kWh"));
-      s.fields.push_back(
-          kv("Total amount discharged energy", String(data.cumulative_energy_discharged_kWh / 10.0), "kWh"));
-      s.fields.push_back(kv("Cumulative charge current", String(data.cumulative_charge_current_ah / 10.0), "Ah"));
-      s.fields.push_back(
-          kv("Cumulative discharge current", String(data.cumulative_discharge_current_ah / 10.0), "Ah"));
+      out.kv(TL("Temperature, water inlet"), String(data.temperature_water_inlet), "°C");
+      out.kv(TL("Temperature, power relay"), String(data.powerRelayTemperature), "°C");
+      out.kv(TL("Batterymanagement mode"), String(data.batteryManagementMode));
+      out.kv(TL("BMS ignition"), String(data.BMS_ign));
+      out.kv(TL("Battery relay"), String(data.batteryRelay));
+      out.kv(TL("Inverter voltage"), String(data.inverterVoltage), "V");
+      out.kv(TL("Isolation resistance"), String(data.isolation_resistance_kOhm), "kOhm");
+      out.kv(TL("Power on total time"), String(data.powered_on_total_time), "s");
+      out.kv(TL("Fastcharging sessions"), String(data.number_of_fastcharging_sessions), "x");
+      out.kv(TL("Slowcharging sessions"), String(data.number_of_standard_charging_sessions), "x");
+      out.kv(TL("Normal charged energy amount"), String(data.accumulated_normal_charging_energy_kWh), "kWh");
+      out.kv(TL("Fastcharged energy amount"), String(data.accumulated_fastcharging_energy_kWh), "kWh");
+      out.kv(TL("Total amount charged energy"), String(data.cumulative_energy_charged_kWh / 10.0), "kWh");
+      out.kv(TL("Total amount discharged energy"), String(data.cumulative_energy_discharged_kWh / 10.0), "kWh");
+      out.kv(TL("Cumulative charge current"), String(data.cumulative_charge_current_ah / 10.0), "Ah");
+      out.kv(TL("Cumulative discharge current"), String(data.cumulative_discharge_current_ah / 10.0), "Ah");
     };
 
     build_fields(*kia_datalayer);
-
-    status.sections.push_back(s);
-    return status;
   }
 
  private:

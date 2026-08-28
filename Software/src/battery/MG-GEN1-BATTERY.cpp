@@ -165,32 +165,33 @@ static void print_chars_or_hex(char* buf, const uint8_t* data, uint16_t length) 
   buf[ptr] = '\0';
 }
 
-void MgGen1Battery::append_uds_info_fields(std::vector<AdvancedField>& fields) {
+void MgGen1Battery::append_uds_info_fields(AdvancedStatusWriter& out) {
+  out.section("");
   char buf[128];
 
-  fields.push_back(kv("UDS address", String(uds_address, 16)));
+  out.kv(TL("UDS address"), String(uds_address, 16));
   print_chars_or_hex(buf, pid_vin, 17);
-  fields.push_back(kv("VIN", String(buf)));
+  out.kv("VIN", String(buf));
   sprintf(buf, "20%02X-%02X-%02X", pid_mfr_date[0], pid_mfr_date[1], pid_mfr_date[2]);
-  fields.push_back(kv("MfrDate", String(buf)));
+  out.kv("MfrDate", String(buf));
   print_chars_or_hex(buf, pid_fingerprint, 10);
-  fields.push_back(kv("Fingerprint", String(buf)));
+  out.kv(TL("Fingerprint"), String(buf));
   print_chars_or_hex(buf, pid_vehicle_hw_number, 5);
-  fields.push_back(kv("VehHWNo", String(buf)));
+  out.kv("VehHWNo", String(buf));
   print_chars_or_hex(buf, pid_system_hw_number, 10);
-  fields.push_back(kv("SysHWNo", String(buf)));
+  out.kv("SysHWNo", String(buf));
   print_chars_or_hex(buf, pid_system_sw_number, 10);
-  fields.push_back(kv("SysSWNo", String(buf)));
+  out.kv("SysSWNo", String(buf));
   print_chars_or_hex(buf, pid_f18a, 8);
-  fields.push_back(kv("F18A", String(buf)));
+  out.kv("F18A", String(buf));
   print_chars_or_hex(buf, pid_f120, 16);
-  fields.push_back(kv("F120", String(buf)));
+  out.kv("F120", String(buf));
   print_chars_or_hex(buf, pid_b18c, 24);
-  fields.push_back(kv("B18C", String(buf)));
+  out.kv("B18C", String(buf));
   print_chars_or_hex(buf, pid_f1a2, 8);
-  fields.push_back(kv("F1A2", String(buf)));
+  out.kv("F1A2", String(buf));
   print_chars_or_hex(buf, pid_f1aa, 5);
-  fields.push_back(kv("F1AA", String(buf)));
+  out.kv("F1AA", String(buf));
 }
 
 void MgGen1Battery::update_values() {

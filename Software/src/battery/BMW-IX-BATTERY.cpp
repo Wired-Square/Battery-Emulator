@@ -1172,37 +1172,29 @@ int BmwIXBattery::get_pyro_status_pss6() const {
   return pyro_status_pss6;
 }
 
-BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
-  BatteryAdvancedStatus status;
+void BmwIXBattery::write_advanced_status(AdvancedStatusWriter& out) {
 
   // Power & Voltage
-  AdvancedSection power_section;
-  power_section.title = "Power & Voltage";
-  power_section.fields.push_back(
-      kv("Battery Voltage (After Contactor)", String(get_battery_voltage_after_contactor()), "dV"));
-  power_section.fields.push_back(kv("Max Design Voltage", String(datalayer_battery->info.max_design_voltage_dV), "dV"));
-  power_section.fields.push_back(kv("Min Design Voltage", String(datalayer_battery->info.min_design_voltage_dV), "dV"));
-  power_section.fields.push_back(kv("T30 Terminal Voltage", String(get_T30_Voltage()), "mV"));
-  power_section.fields.push_back(kv("Allowed Charge Power", String(datalayer_battery->status.max_charge_power_W), "W"));
-  power_section.fields.push_back(
-      kv("Allowed Discharge Power", String(datalayer_battery->status.max_discharge_power_W), "W"));
-  power_section.fields.push_back(kv("BMS Allowed Charge Amps", String(get_allowable_charge_amps()), "A"));
-  power_section.fields.push_back(kv("BMS Allowed Discharge Amps", String(get_allowable_discharge_amps()), "A"));
-  status.sections.push_back(power_section);
+  out.section(TL("Power & Voltage"));
+  out.kv(TL("Battery Voltage (After Contactor)"), String(get_battery_voltage_after_contactor()), "dV");
+  out.kv(TL("Max Design Voltage"), String(datalayer_battery->info.max_design_voltage_dV), "dV");
+  out.kv(TL("Min Design Voltage"), String(datalayer_battery->info.min_design_voltage_dV), "dV");
+  out.kv(TL("T30 Terminal Voltage"), String(get_T30_Voltage()), "mV");
+  out.kv(TL("Allowed Charge Power"), String(datalayer_battery->status.max_charge_power_W), "W");
+  out.kv(TL("Allowed Discharge Power"), String(datalayer_battery->status.max_discharge_power_W), "W");
+  out.kv(TL("BMS Allowed Charge Amps"), String(get_allowable_charge_amps()), "A");
+  out.kv(TL("BMS Allowed Discharge Amps"), String(get_allowable_discharge_amps()), "A");
 
   // Cell Information
-  AdvancedSection cell_section;
-  cell_section.title = "Cell Information";
-  cell_section.fields.push_back(kv("Detected Cell Count", String(datalayer_battery->info.number_of_cells)));
-  cell_section.fields.push_back(kv("Max Cell Design Voltage", String(datalayer_battery->info.max_cell_voltage_mV), "mV"));
-  cell_section.fields.push_back(kv("Min Cell Design Voltage", String(datalayer_battery->info.min_cell_voltage_mV), "mV"));
-  cell_section.fields.push_back(kv("Min Cell Voltage Data Age", String(get_min_cell_voltage_data_age()), "ms"));
-  cell_section.fields.push_back(kv("Max Cell Voltage Data Age", String(get_max_cell_voltage_data_age()), "ms"));
-  status.sections.push_back(cell_section);
+  out.section(TL("Cell Information"));
+  out.kv(TL("Detected Cell Count"), String(datalayer_battery->info.number_of_cells));
+  out.kv(TL("Max Cell Design Voltage"), String(datalayer_battery->info.max_cell_voltage_mV), "mV");
+  out.kv(TL("Min Cell Design Voltage"), String(datalayer_battery->info.min_cell_voltage_mV), "mV");
+  out.kv(TL("Min Cell Voltage Data Age"), String(get_min_cell_voltage_data_age()), "ms");
+  out.kv(TL("Max Cell Voltage Data Age"), String(get_max_cell_voltage_data_age()), "ms");
 
   // Battery Status
-  AdvancedSection battery_status_section;
-  battery_status_section.title = "Battery Status";
+  out.section(TL("Battery Status"));
   String balancing;
   switch (get_balancing_status()) {
     case 0:
@@ -1223,7 +1215,7 @@ BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
     default:
       balancing = "Unknown";
   }
-  battery_status_section.fields.push_back(kv("Balancing", balancing));
+  out.kv(TL("Balancing"), balancing);
 
   String energy_saving_mode;
   int energy_mode = get_energy_saving_mode_status();
@@ -1248,12 +1240,10 @@ BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
       }
       break;
   }
-  battery_status_section.fields.push_back(kv("Energy Saving Mode", energy_saving_mode));
-  status.sections.push_back(battery_status_section);
+  out.kv(TL("Energy Saving Mode"), energy_saving_mode);
 
   // Safety Systems
-  AdvancedSection safety_section;
-  safety_section.title = "Safety Systems";
+  out.section(TL("Safety Systems"));
   String hvil_status;
   AdvancedSeverity hvil_severity = AdvancedSeverity::Normal;
   switch (get_hvil_status()) {
@@ -1267,7 +1257,7 @@ BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
     default:
       hvil_status = "Unknown";
   }
-  safety_section.fields.push_back(kv("HVIL Status", hvil_status, "", hvil_severity));
+  out.kv(TL("HVIL Status"), hvil_status, "", hvil_severity);
 
   auto pyro_status_text = [](int status) {
     switch (status) {
@@ -1287,38 +1277,32 @@ BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
   };
   constexpr int kPyroStatusBlown = 1;
   auto pyro_field = [&](const char* label, int status) {
-    return kv(label, String(pyro_status_text(status)), "",
-              status == kPyroStatusBlown ? AdvancedSeverity::Warning : AdvancedSeverity::Normal);
+    out.kv(label, String(pyro_status_text(status)), "",
+           status == kPyroStatusBlown ? AdvancedSeverity::Warning : AdvancedSeverity::Normal);
   };
-  safety_section.fields.push_back(pyro_field("Pyro Status PSS1", get_pyro_status_pss1()));
-  safety_section.fields.push_back(pyro_field("Pyro Status PSS4", get_pyro_status_pss4()));
-  safety_section.fields.push_back(pyro_field("Pyro Status PSS6", get_pyro_status_pss6()));
-  status.sections.push_back(safety_section);
+  pyro_field("Pyro Status PSS1", get_pyro_status_pss1());
+  pyro_field("Pyro Status PSS4", get_pyro_status_pss4());
+  pyro_field("Pyro Status PSS6", get_pyro_status_pss6());
 
   // Isolation Monitoring
-  AdvancedSection isolation_section;
-  isolation_section.title = "Isolation Monitoring";
-  isolation_section.fields.push_back(kv("Isolation Positive",
+  out.section(TL("Isolation Monitoring"));
+  out.kv(TL("Isolation Positive"),
                                         String(get_iso_safety_positive()) + " (2147483647 = maximum/invalid)",
-                                        "kΩ"));
-  isolation_section.fields.push_back(kv("Isolation Negative",
+                                        "kΩ");
+  out.kv(TL("Isolation Negative"),
                                         String(get_iso_safety_negative()) + " (2147483647 = maximum/invalid)",
-                                        "kΩ"));
-  isolation_section.fields.push_back(kv("Isolation Parallel",
+                                        "kΩ");
+  out.kv(TL("Isolation Parallel"),
                                         String(get_iso_safety_parallel()) + " (2147483647 = maximum/invalid)",
-                                        "kΩ"));
-  status.sections.push_back(isolation_section);
+                                        "kΩ");
 
   // Diagnostics
-  AdvancedSection diagnostics_section;
-  diagnostics_section.title = "Diagnostics";
-  diagnostics_section.fields.push_back(
-      kv("BMS Uptime", format_ms_string((uint64_t)get_bms_uptime() * 1000)));
-  status.sections.push_back(diagnostics_section);
+  out.section(TL("Diagnostics"));
+  out.kv(TL("BMS Uptime"), format_ms_string((uint64_t)get_bms_uptime() * 1000));
 
   // Diagnostic Trouble Codes: the BMW iX DTC store (DATALAYER_INFO_BMWIX) is a
   // distinct type from the shared DATALAYER_BATTERY_DTC_TYPE used by
-  // dtc_advanced_section(*this, ), so its fields are copied into a local adapter
+  // write_dtc_section(), so its fields are copied into a local adapter
   // rather than reimplementing the table/status logic here.
   DATALAYER_BATTERY_DTC_TYPE dtc_adapter{};
   dtc_adapter.dtc_count = datalayer_extended.bmwix.dtc_count;
@@ -1328,7 +1312,5 @@ BatteryAdvancedStatus BmwIXBattery::get_advanced_status() {
     dtc_adapter.dtc_codes[i] = datalayer_extended.bmwix.dtc_codes[i];
     dtc_adapter.dtc_status[i] = datalayer_extended.bmwix.dtc_status[i];
   }
-  status.sections.push_back(dtc_advanced_section(*this, dtc_adapter, DtcCodeStyle::kRawHex));
-
-  return status;
+  write_dtc_section(out, *this, dtc_adapter, DtcCodeStyle::kRawHex);
 }

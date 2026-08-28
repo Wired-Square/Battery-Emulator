@@ -29,9 +29,8 @@ class ChademoBattery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  BatteryAdvancedStatus get_advanced_status() override {
-    BatteryAdvancedStatus status;
-    AdvancedSection s;
+  void write_advanced_status(AdvancedStatusWriter& out) override {
+    out.section("");
 
     String chademo_state;
     switch (datalayer_extended.chademo.CHADEMO_Status) {
@@ -72,27 +71,24 @@ class ChademoBattery : public CanBattery {
         chademo_state = "Unknown";
         break;
     }
-    s.fields.push_back(kv("Chademo state", chademo_state));
+    out.kv(TL("Chademo state"), chademo_state);
 
     if (datalayer_extended.chademo.FaultBatteryCurrentDeviation) {
-      s.fields.push_back(kv("FAULT", "Battery Current Deviation"));
+      out.kv("FAULT", "Battery Current Deviation");
     }
     if (datalayer_extended.chademo.FaultBatteryOverVoltage) {
-      s.fields.push_back(kv("FAULT", "Battery Overvoltage"));
+      out.kv("FAULT", "Battery Overvoltage");
     }
     if (datalayer_extended.chademo.FaultBatteryUnderVoltage) {
-      s.fields.push_back(kv("FAULT", "Battery Undervoltage"));
+      out.kv("FAULT", "Battery Undervoltage");
     }
     if (datalayer_extended.chademo.FaultBatteryVoltageDeviation) {
-      s.fields.push_back(kv("FAULT", "Battery Voltage Deviation"));
+      out.kv("FAULT", "Battery Voltage Deviation");
     }
     if (datalayer_extended.chademo.FaultHighBatteryTemperature) {
-      s.fields.push_back(kv("FAULT", "Battery Temperature"));
+      out.kv("FAULT", "Battery Temperature");
     }
-    s.fields.push_back(kv("Protocol", String(datalayer_extended.chademo.ControlProtocolNumberEV)));
-
-    status.sections.push_back(s);
-    return status;
+    out.kv(TL("Protocol"), String(datalayer_extended.chademo.ControlProtocolNumberEV));
   }
 
  private:

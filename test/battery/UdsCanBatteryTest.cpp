@@ -11,6 +11,7 @@
 
 // TX frame capture injected by the emulated CAN layer (see emul/can.cpp).
 #include "can_recorder.h"
+#include "../advanced_status_recorder.h"
 
 namespace {
 
@@ -890,19 +891,21 @@ TEST_F(UdsCanBatteryTest, ClearDtcSequenceCompletesOnAcknowledgment) {
 // ---------------------------------------------------------------------------
 
 TEST_F(UdsCanBatteryTest, AdvancedStatusShowsInfoAndDtcSection) {
-  // Without a dtc pointer only the (empty, by default) UDS info section is emitted.
-  auto status = battery->get_advanced_status();
-  EXPECT_TRUE(status.sections.empty());
+  // Without a dtc pointer, and with no UDS info fields by default, nothing is written.
+  RecordingWriter without_dtc;
+  battery->write_advanced_status(without_dtc);
+  EXPECT_TRUE(without_dtc.sections.empty());
 
   // With a dtc pointer the standard DTC section appears.
   battery->dtc = &datalayer.battery.pack[0].dtc;
   datalayer.battery.pack[0].dtc = DATALAYER_BATTERY_DTC_TYPE{};
-  status = battery->get_advanced_status();
-  ASSERT_EQ(status.sections.size(), 1u);
-  EXPECT_NE(std::string(status.sections[0].title.c_str()).find("Diagnostic Trouble Codes"), std::string::npos);
+  RecordingWriter with_dtc;
+  battery->write_advanced_status(with_dtc);
+  ASSERT_EQ(with_dtc.sections.size(), 1u);
+  EXPECT_NE(with_dtc.sections[0].title.find("Diagnostic Trouble Codes"), std::string::npos);
   bool found_not_read = false;
-  for (const auto& f : status.sections[0].fields) {
-    if (std::string(f.value.c_str()).find("Not read yet") != std::string::npos) {
+  for (const auto& f : with_dtc.sections[0].fields) {
+    if (f.value.find("Not read yet") != std::string::npos) {
       found_not_read = true;
     }
   }
