@@ -194,6 +194,37 @@ const LABELS = {
   SYSLOGIP: 'Syslog server IP',
   SYSLOGPORT: 'Syslog UDP port',
   SYSLOGFAC: 'Syslog facility',
+  BATTERY_WH_MAX: 'Battery capacity (Wh)',
+  USE_SCALED_SOC: 'Use scaled SOC',
+  MAXPERCENTAGE: 'Maximum SOC (%)',
+  MINPERCENTAGE: 'Minimum SOC (%)',
+  MAXCHARGEAMP: 'Maximum charge current (A)',
+  MAXDISCHARGEAMP: 'Maximum discharge current (A)',
+  USEVOLTLIMITS: 'Use voltage limits',
+  TARGETCHVOLT: 'Maximum charge voltage (V)',
+  TARGETDISCHVOLT: 'Minimum discharge voltage (V)',
+  BMSRESETDUR: 'BMS reset duration (s)',
+  hv_enabled: 'HV charging enabled',
+  aux12v_enabled: 'Aux 12V charging enabled',
+  setpoint_v: 'Charge voltage setpoint (V)',
+  setpoint_a: 'Charge current setpoint (A)',
+  end_a: 'Charge termination current (A)',
+  BYDAUTOCALEN: 'Auto-calibrate SOC (battery 1)',
+  BYDAUTOCALDRIFT: 'Drift (%) (battery 1)',
+  BYDAUTOCALEN2: 'Auto-calibrate SOC (battery 2)',
+  BYDAUTOCALDRFT2: 'Drift (%) (battery 2)',
+  BYDKEEPISOOFF: 'Keep isolation monitoring disabled',
+  cal_target_soc: 'Calibration target SOC (battery 1)',
+  cal_target_ah: 'Calibration target Ah (battery 1)',
+  cal_target_soc2: 'Calibration target SOC (battery 2)',
+  cal_target_ah2: 'Calibration target Ah (battery 2)',
+  recovery_mode: 'Undercharged recovery mode',
+  cutoff: 'CAN ID logging cutoff',
+  max_time_min: 'Balancing max time (min)',
+  max_cell_mv: 'Max cell voltage (mV)',
+  max_dev_mv: 'Max cell deviation (mV)',
+  max_pack_v: 'Max pack voltage (V)',
+  float_power_w: 'Float power (W)',
 };
 
 // Client-only text-field regexes (numeric bounds ride the schema). An empty value passes
@@ -264,6 +295,9 @@ const SHUNT_CTCLAMP = 3;
 const TESLA_CHASSIS_MODEL_3 = 2;
 
 const inList = (list, value) => list.includes(Number(value));
+
+// 3/Y only: the driver's forced-balancing override never runs on S/X.
+const forcedBalancing = (s) => inList(BAT.TESLA, s.battery) && Number(s.GTWCHASSIS) >= TESLA_CHASSIS_MODEL_3;
 
 // Value-driven show/hide; board-gated absence is already handled by the schema.
 const VISIBILITY = {
@@ -354,6 +388,16 @@ const VISIBILITY = {
   SYSLOGIP: (s) => s.SYSLOGEN === true,
   SYSLOGPORT: (s) => s.SYSLOGEN === true,
   SYSLOGFAC: (s) => s.SYSLOGEN === true,
+  hv_enabled: (s) => Number(s.CHGTYPE) !== 0,
+  aux12v_enabled: (s) => Number(s.CHGTYPE) !== 0,
+  setpoint_v: (s) => Number(s.CHGTYPE) !== 0,
+  setpoint_a: (s) => Number(s.CHGTYPE) !== 0,
+  end_a: (s) => Number(s.CHGTYPE) !== 0,
+  max_time_min: (s) => inList(BAT.BMWPHEV, s.battery) || forcedBalancing(s),
+  max_cell_mv: forcedBalancing,
+  max_dev_mv: forcedBalancing,
+  max_pack_v: forcedBalancing,
+  float_power_w: forcedBalancing,
 };
 
 const NUMERIC_TYPES = new Set(['uint', 'int', 'float', 'seconds']);
@@ -385,93 +429,14 @@ const LOAD_SWITCH_NOTE =
   t('ui.load_switch_note',
     'Role changes take effect after reboot; duty and divisor apply immediately on save.');
 
-// Each control POSTs only its own key (absent fields preserve on the device).
-const LIVE_SECTIONS = [
-  {
-    key: 'chargelimits',
-    title: t('live.chargelimits', 'Charge limits'),
-    endpoint: '/api/chargelimits',
-    fields: [
-      { key: 'battery_wh_max', label: t('live.chargelimits.battery_wh_max', 'Battery capacity (Wh)'), type: 'uint' },
-      { key: 'use_scaled_soc', label: t('live.chargelimits.use_scaled_soc', 'Use scaled SOC'), type: 'bool' },
-      { key: 'soc_max', label: t('live.chargelimits.soc_max', 'Maximum SOC (%)'), type: 'float' },
-      { key: 'soc_min', label: t('live.chargelimits.soc_min', 'Minimum SOC (%)'), type: 'float' },
-      { key: 'charge_a', label: t('live.chargelimits.charge_a', 'Maximum charge current (A)'), type: 'float' },
-      { key: 'discharge_a', label: t('live.chargelimits.discharge_a', 'Maximum discharge current (A)'), type: 'float' },
-      { key: 'use_volt_limits', label: t('live.chargelimits.use_volt_limits', 'Use voltage limits'), type: 'bool' },
-      { key: 'target_ch_v', label: t('live.chargelimits.target_ch_v', 'Maximum charge voltage (V)'), type: 'float' },
-      { key: 'target_disch_v', label: t('live.chargelimits.target_disch_v', 'Minimum discharge voltage (V)'), type: 'float' },
-      { key: 'bms_reset_duration', label: t('live.chargelimits.bms_reset_duration', 'BMS reset duration (s)'), type: 'float' },
-    ],
-  },
-  {
-    key: 'charger',
-    title: t('live.charger', 'Charger'),
-    endpoint: '/api/charger',
-    visibleWhen: (s) => Number(s.CHGTYPE) !== 0,
-    fields: [
-      { key: 'hv_enabled', label: t('live.charger.hv_enabled', 'HV charging enabled'), type: 'bool' },
-      { key: 'aux12v_enabled', label: t('live.charger.aux12v_enabled', 'Aux 12V charging enabled'), type: 'bool' },
-      { key: 'setpoint_v', label: t('live.charger.setpoint_v', 'Charge voltage setpoint (V)'), type: 'float' },
-      { key: 'setpoint_a', label: t('live.charger.setpoint_a', 'Charge current setpoint (A)'), type: 'float' },
-      { key: 'end_a', label: t('live.charger.end_a', 'Charge termination current (A)'), type: 'float' },
-    ],
-  },
-  {
-    key: 'bydautocal',
-    title: t('live.bydautocal', 'BYD auto-calibration'),
-    endpoint: '/api/bydautocal',
-    fields: [
-      { key: 'enabled', label: t('live.bydautocal.enabled', 'Auto-calibrate SOC (battery 1)'), type: 'bool' },
-      { key: 'drift', label: t('live.bydautocal.drift', 'Drift (%) (battery 1)'), type: 'uint' },
-      { key: 'enabled2', label: t('live.bydautocal.enabled2', 'Auto-calibrate SOC (battery 2)'), type: 'bool' },
-      { key: 'drift2', label: t('live.bydautocal.drift2', 'Drift (%) (battery 2)'), type: 'uint' },
-      { key: 'cal_target_soc', label: t('live.bydautocal.cal_target_soc', 'Calibration target SOC (battery 1)'), type: 'float' },
-      { key: 'cal_target_ah', label: t('live.bydautocal.cal_target_ah', 'Calibration target Ah (battery 1)'), type: 'float' },
-      { key: 'cal_target_soc2', label: t('live.bydautocal.cal_target_soc2', 'Calibration target SOC (battery 2)'), type: 'float' },
-      { key: 'cal_target_ah2', label: t('live.bydautocal.cal_target_ah2', 'Calibration target Ah (battery 2)'), type: 'float' },
-    ],
-  },
-  {
-    key: 'recoverymode',
-    title: t('live.recoverymode', 'Recovery mode'),
-    endpoint: '/api/recoverymode',
-    fields: [
-      // The endpoint reads {on}; the ack reports {recovery_mode}.
-      { key: 'recovery_mode', label: t('live.recoverymode.recovery_mode', 'Undercharged recovery mode'), type: 'bool', postKey: 'on' },
-    ],
-  },
-  {
-    key: 'canidcutoff',
-    title: t('live.canidcutoff', 'CAN ID cutoff'),
-    endpoint: '/api/canidcutoff',
-    fields: [{ key: 'cutoff', label: t('live.canidcutoff.cutoff', 'CAN ID logging cutoff'), type: 'uint' }],
-  },
-  {
-    key: 'balancing',
-    title: t('live.balancing', 'Balancing'),
-    endpoint: '/api/balancing',
-    // BMW-PHEV-specific: its BMS exposes a user-configurable balancing time limit; other batteries do not.
-    visibleWhen: (s) => inList(BAT.BMWPHEV, s.battery),
-    fields: [{ key: 'max_time_min', label: t('live.balancing.max_time_min', 'Balancing max time (min)'), type: 'float' }],
-  },
-  {
-    key: 'balancing_tesla',
-    title: t('live.balancing_tesla', 'Balancing'),
-    endpoint: '/api/balancing',
-    multiSlot: true,
-    // 3/Y only: the driver's forced-balancing override never runs on S/X.
-    // Bounds live server-side (maxima depend on each pack's detected chemistry).
-    visibleWhen: (s) => inList(BAT.TESLA, s.battery) && Number(s.GTWCHASSIS) >= TESLA_CHASSIS_MODEL_3,
-    fields: [
-      { key: 'max_time_min', label: t('live.balancing_tesla.max_time_min', 'Balancing max time (min)'), type: 'float' },
-      { key: 'max_cell_mv', label: t('live.balancing_tesla.max_cell_mv', 'Max cell voltage (mV)'), type: 'uint' },
-      { key: 'max_dev_mv', label: t('live.balancing_tesla.max_dev_mv', 'Max cell deviation (mV)'), type: 'uint' },
-      { key: 'max_pack_v', label: t('live.balancing_tesla.max_pack_v', 'Max pack voltage (V)'), type: 'float' },
-      { key: 'float_power_w', label: t('live.balancing_tesla.float_power_w', 'Float power (W)'), type: 'uint' },
-    ],
-  },
-];
+const LIVE_SECTION_TITLES = {
+  chargelimits: t('live.chargelimits', 'Charge limits'),
+  charger: t('live.charger', 'Charger'),
+  bydautocal: t('live.bydautocal', 'BYD auto-calibration'),
+  recoverymode: t('live.recoverymode', 'Recovery mode'),
+  canidcutoff: t('live.canidcutoff', 'CAN ID cutoff'),
+  balancing: t('live.balancing', 'Balancing'),
+};
 
 const REBOOT_TO_APPLY =
   t('ui.reboot_to_apply',
@@ -497,8 +462,6 @@ let snapshot = {};
 let saveError = null;
 let saveBarEl = null;
 let saveErrorEl = null;
-let editcards = null;
-let editcardsError = false;
 let dynamicState = { termination: null, loadswitch: null, batteries: null };
 let liveErrors = {};
 let dynamicSnapshot = 'null';
@@ -902,18 +865,73 @@ function liveControl(field, current) {
   const input = el('input');
   input.type = 'number';
   if (field.type === 'float') input.step = 'any';
+  if (field.min != null) input.min = String(field.min);
+  if (field.max != null) input.max = String(field.max);
   input.value = current ?? '';
   return input;
 }
 
 const LIVE_REJECTED = t('ui.live_rejected', 'The device rejected this value.');
 
-// Repaints only this section from the returned ack: the UI must reflect what
+const isVisible = (key) => {
+  const rule = VISIBILITY[key];
+  return !rule || rule(state);
+};
+
+// Consecutive schema rows sharing a section become one card; the firmware emits
+// them grouped, so a section never reopens once it has closed.
+function liveSections() {
+  const sections = [];
+  (data.schema ?? []).forEach((field) => {
+    if (field.category !== LIVE_CATEGORY || !isVisible(field.key)) return;
+    const open = sections[sections.length - 1];
+    if (open && open.id === field.section) open.fields.push(field);
+    else sections.push({ id: field.section, scope: field.scope, fields: [field] });
+  });
+  return sections;
+}
+
+// A battery-scoped section renders one card per dynamic.balancing entry — the
+// firmware serves entries only for slots a POST would accept.
+function liveCards() {
+  return liveSections().flatMap((section) => {
+    if (section.scope !== 'battery') return [{ ...section, key: section.id }];
+    return (data.dynamic?.balancing ?? []).map((entry) => ({
+      ...section,
+      slot: entry.slot,
+      values: entry,
+      key: `${section.id}:${entry.slot}`,
+    }));
+  });
+}
+
+function liveErrorText(e) {
+  let failure = null;
+  try {
+    failure = JSON.parse(e?.body ?? '');
+  } catch {
+    return e?.body || LIVE_REJECTED;
+  }
+  return tf(failure.error_key, failure.error, failure.error_arg);
+}
+
+// Live keys are applied on change, so the save bar must not see them as dirty.
+function adoptLiveResult(result) {
+  data = result;
+  (data.schema ?? []).forEach((field) => {
+    if (field.category !== LIVE_CATEGORY || field.scope === 'battery') return;
+    state[field.key] = result.values?.[field.key];
+    snapshot[field.key] = result.values?.[field.key];
+  });
+}
+
+// Repaints only this card from the device's answer: the UI must reflect what
 // the device applied, not what was typed.
-async function onLiveChange(section, field, ctrl) {
-  const repaintSection = () => {
-    const existing = root.querySelector(`.settings-live-section[data-section="${section.key}"]`);
-    if (existing) existing.replaceWith(buildLiveSection(section));
+async function onLiveChange(card, field, ctrl) {
+  const repaintCard = () => {
+    const existing = root.querySelector(`.settings-live-section[data-section="${card.key}"]`);
+    const rebuilt = liveCards().find((c) => c.key === card.key);
+    if (existing && rebuilt) existing.replaceWith(buildLiveSection(rebuilt));
   };
   let value;
   if (field.type === 'bool') {
@@ -923,69 +941,40 @@ async function onLiveChange(section, field, ctrl) {
     // value) so clearing a field to retype it never live-writes 0.
     value = Number(ctrl.value);
     if (ctrl.value === '' || Number.isNaN(value)) {
-      repaintSection();
+      repaintCard();
       return;
     }
   }
   ctrl.disabled = true;
   try {
-    const body = { [field.postKey ?? field.key]: value };
-    if (section.slot !== undefined) body.battery = section.slot;
-    storeLiveAck(section, await postJson(section.endpoint, body));
-    delete liveErrors[section.key];
+    const body = card.slot === undefined
+      ? { values: { [field.key]: value } }
+      : { dynamic: { balancing: [{ slot: card.slot, [field.key]: value }] } };
+    adoptLiveResult(await postJson('/api/settings', body));
+    delete liveErrors[card.key];
   } catch (e) {
     // The change did not take; re-render restores the device's last-known
     // values and shows why it was refused.
-    liveErrors[section.key] = e?.body || LIVE_REJECTED;
+    liveErrors[card.key] = liveErrorText(e);
   } finally {
     ctrl.disabled = false;
   }
-  repaintSection();
+  repaintCard();
 }
 
-function liveValues(section) {
-  if (section.arrayKey === undefined) return editcards?.[section.key] ?? {};
-  return editcards?.[section.arrayKey]?.find((e) => e.slot === section.slot) ?? {};
-}
-
-function storeLiveAck(section, ack) {
-  if (section.arrayKey === undefined) {
-    editcards[section.key] = ack;
-    return;
-  }
-  const entries = editcards[section.arrayKey];
-  const idx = entries.findIndex((e) => e.slot === section.slot);
-  if (idx >= 0) entries[idx] = { slot: section.slot, ...ack };
-}
-
-// A multiSlot section renders one card per entry in its editcards array —
-// the firmware serves entries only for slots a POST would accept.
-function liveCardInstances() {
-  return LIVE_SECTIONS.filter((section) => !section.visibleWhen || section.visibleWhen(state)).flatMap((section) => {
-    if (!section.multiSlot) return [section];
-    const entries = editcards?.[section.key];
-    if (!Array.isArray(entries)) return [];
-    return entries.map(({ slot }) => ({
-      ...section,
-      slot,
-      arrayKey: section.key,
-      key: slot === 0 ? section.key : `${section.key}:${slot}`,
-      title: slot === 0 ? section.title : tf('ui.section_for_battery', '{} (battery {})', section.title, slot + 1),
-    }));
-  });
-}
-
-function buildLiveSection(section) {
+function buildLiveSection(card) {
   const wrap = el('div', 'settings-live-section');
-  wrap.dataset.section = section.key;
-  wrap.append(el('h3', null, section.title));
-  if (liveErrors[section.key]) wrap.append(el('div', 'settings-error', liveErrors[section.key]));
-  const values = liveValues(section);
-  section.fields.forEach((field) => {
+  wrap.dataset.section = card.key;
+  const title = LIVE_SECTION_TITLES[card.id] ?? prettify(card.id);
+  wrap.append(el('h3', null,
+                 card.slot > 0 ? tf('ui.section_for_battery', '{} (battery {})', title, card.slot + 1) : title));
+  if (liveErrors[card.key]) wrap.append(el('div', 'settings-error', liveErrors[card.key]));
+  card.fields.forEach((field) => {
     const row = el('div', 'field');
-    const ctrl = liveControl(field, values[field.key]);
-    row.append(el('label', null, field.label), ctrl);
-    ctrl.addEventListener('change', () => onLiveChange(section, field, ctrl));
+    const current = card.values ? card.values[field.key] : state[field.key];
+    const ctrl = liveControl(field, current);
+    ctrl.addEventListener('change', () => onLiveChange(card, field, ctrl));
+    row.append(el('label', null, labelFor(field)), ctrl);
     wrap.append(row);
   });
   return wrap;
@@ -994,17 +983,14 @@ function buildLiveSection(section) {
 function buildLivePanel() {
   const panel = el('div', 'settings-panel settings-live');
   panel.append(el('div', 'settings-live-note', t('ui.live_controls_note', 'These controls apply immediately — no reboot required.')));
-  if (editcardsError || !editcards) {
-    panel.append(el('div', 'settings-error', t('ui.live_load_failed', 'Could not load live control values. The device may be busy — try again.')));
-    return panel;
-  }
-  liveCardInstances().forEach((card) => panel.append(buildLiveSection(card)));
+  liveCards().forEach((card) => panel.append(buildLiveSection(card)));
   return panel;
 }
 
 function buildValues() {
   const values = {};
   (data.schema ?? []).forEach((field) => {
+    if (field.category === LIVE_CATEGORY) return;
     values[field.key] = state[field.key];
   });
   // Absent = preserve, so gather from state (never the DOM): an orphan value not
@@ -1042,6 +1028,7 @@ function seedState(values) {
 // on the rendered panel would let it through. VISIBILITY-gated-off fields are not applicable.
 function firstInvalidField() {
   for (const field of data.schema ?? []) {
+    if (field.category === LIVE_CATEGORY) continue;
     const rule = VISIBILITY[field.key];
     if (rule && !rule(state)) continue;
     const value = state[field.key];
@@ -1201,13 +1188,6 @@ export async function mount(container) {
   setSaveError(null);
   liveErrors = {};
   activeCategory = CATEGORIES[0][0];
-  try {
-    editcards = await getJson('/api/editcards');
-    editcardsError = false;
-  } catch {
-    editcards = null;
-    editcardsError = true;
-  }
   renderShell();
 }
 

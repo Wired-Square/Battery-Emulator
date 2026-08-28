@@ -14,6 +14,51 @@ const el = (tag, cls, text) => {
 
 let root = null;
 let timer = null;
+// Last two readings per series, so a counter series can show what each cell
+// gained between them. Keyed by slot and series id.
+const seriesReadings = new Map();
+
+function priorReading(slot, series) {
+  const key = `${slot}:${series.id}`;
+  const seen = seriesReadings.get(key);
+  if (seen && seen.revision === series.revision) return seen.prior;
+  seriesReadings.set(key, { revision: series.revision, values: series.values, prior: seen?.values ?? null });
+  return seen?.values ?? null;
+}
+
+function formatReading(value, series) {
+  if (value === null || value === undefined) return '—';
+  const text = Number(value).toFixed(series.decimals ?? 0);
+  return series.unit ? `${text} ${series.unit}` : text;
+}
+
+const SERIES_STATE_TEXT = {
+  unread: () => t('ui.series_unread', 'Not read yet.'),
+  pending: () => t('ui.series_pending', 'Queued — the reading starts once the battery is idle.'),
+  reading: (s) => tf('ui.series_reading', 'Reading: {} of {} cells so far.', s.read, s.expected),
+  complete: (s) => tf('ui.series_complete', 'Read {} cells.', s.read),
+  partial: (s) => tf('ui.series_partial', 'Read {} of {} cells.', s.read, s.expected),
+  failed: () => t('ui.series_failed', 'The battery answered none of the requests.'),
+};
+
+function seriesSection(battery, series) {
+  const wrap = el('div', 'cell-series');
+  wrap.append(el('h4', null, t(`cellseries.${series.id}`, series.label)));
+  const state = SERIES_STATE_TEXT[series.state];
+  if (state) wrap.append(el('div', 'muted', state(series)));
+  const prior = series.kind === 'counter' ? priorReading(battery.slot ?? 0, series) : null;
+  const grid = el('div', 'cell-grid');
+  (series.values ?? []).forEach((value, i) => {
+    const cell = el('div', 'cell');
+    const gained = prior && value != null && prior[i] != null && value > prior[i];
+    if (gained) cell.classList.add('cell-bal');
+    cell.append(el('div', 'cell-index', String(i + 1)));
+    cell.append(el('div', 'cell-value', formatReading(value, series)));
+    grid.append(cell);
+  });
+  wrap.append(grid);
+  return wrap;
+}
 
 function batterySection(battery, index, multi) {
   const section = el('div', 'card');
@@ -21,6 +66,7 @@ function batterySection(battery, index, multi) {
 
   if (!battery.cells.length) {
     section.append(el('div', 'muted', t('ui.no_cell_voltages', 'No cell voltages read yet.')));
+    (battery.series ?? []).forEach((series) => section.append(seriesSection(battery, series)));
     return section;
   }
 
@@ -54,6 +100,7 @@ function batterySection(battery, index, multi) {
     bars.append(bar);
   });
   section.append(bars);
+  (battery.series ?? []).forEach((series) => section.append(seriesSection(battery, series)));
   return section;
 }
 

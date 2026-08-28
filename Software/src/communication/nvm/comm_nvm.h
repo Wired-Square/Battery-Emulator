@@ -30,15 +30,6 @@ void store_settings_equipment_stop();
 
 void erase_phy_cal_data();
 
-/**
- * @brief Store settings
- *
- * @param[in] void
- *
- * @return void
- */
-void store_settings();
-
 void clear_wifi_sta_settings();
 
 // NVM key for one interface's termination toggle, keyed by descriptor index

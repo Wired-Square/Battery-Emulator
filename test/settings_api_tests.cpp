@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <cstring>
+#include <set>
 #include <string>
 
 #include "../Software/src/communication/nvm/comm_nvm.h"
@@ -95,10 +96,20 @@ TEST_F(SettingsApiTest, WireKeyIsTheNvsKey) {
   EXPECT_FALSE(values["INVTYPE"].isNull());
   EXPECT_EQ(values["INVTYPE"].as<uint32_t>(), 3u);
 
+  JsonObjectConst balancing = doc["dynamic"]["balancing"][0];
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
-    EXPECT_FALSE(values[field.nvs_key].isNull())
-        << field.nvs_key << " is missing, so some field still renames itself on the wire";
+    JsonObjectConst home = field.live.scope == SettingScope::BatterySlot ? balancing : values;
+    EXPECT_FALSE(home[field.key].isNull())
+        << field.key << " is missing, so some field still renames itself on the wire";
+  }
+}
+
+TEST(SettingsTableTest, EveryKeyIsUniqueAcrossStorageKinds) {
+  std::set<std::string> seen;
+  for (size_t i = 0; i < kSettingFieldCount; i++) {
+    const std::string key = kSettingFields[i].key;
+    EXPECT_TRUE(seen.insert(key).second) << key << " is claimed twice; values{} is one flat namespace";
   }
 }
 
@@ -327,14 +338,14 @@ TEST_F(SettingsApiTest, ServerEmittedDropdownsAreNonEmpty) {
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     if (field.type == SettingType::EnumUint) {
-      EXPECT_NE(field.options_key, nullptr) << field.nvs_key;
+      EXPECT_NE(field.options_key, nullptr) << field.key;
     }
     if (field.type == SettingType::InterfacePacked) {
-      EXPECT_GT(interfaces.size(), 0u) << field.nvs_key;
+      EXPECT_GT(interfaces.size(), 0u) << field.key;
     } else if (field.options_key != nullptr) {
       JsonArrayConst list = options[field.options_key];
       if (!list.isNull()) {
-        EXPECT_GT(list.size(), 0u) << field.nvs_key << " -> options." << field.options_key;
+        EXPECT_GT(list.size(), 0u) << field.key << " -> options." << field.options_key;
       }
     }
   }
@@ -355,7 +366,7 @@ TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     JsonObjectConst entry = schema[i];
-    EXPECT_STREQ(entry["key"].as<const char*>(), field.nvs_key);
+    EXPECT_STREQ(entry["key"].as<const char*>(), field.key);
     EXPECT_STREQ(entry["category"].as<const char*>(), field.category);
 
     const char* expected_type = nullptr;
@@ -376,6 +387,8 @@ TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
         expected_type = "enum";
         break;
       case SettingType::FloatX10:
+      case SettingType::SignedFloatX10:
+      case SettingType::Float:
         expected_type = "float";
         break;
       case SettingType::FloatString:
@@ -388,14 +401,14 @@ TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
         expected_type = "interface";
         break;
     }
-    EXPECT_STREQ(entry["type"].as<const char*>(), expected_type) << field.nvs_key;
+    EXPECT_STREQ(entry["type"].as<const char*>(), expected_type) << field.key;
 
     if (field.options_key != nullptr) {
-      EXPECT_STREQ(entry["options"].as<const char*>(), field.options_key) << field.nvs_key;
+      EXPECT_STREQ(entry["options"].as<const char*>(), field.options_key) << field.key;
     } else if (field.type == SettingType::InterfacePacked) {
-      EXPECT_STREQ(entry["options"].as<const char*>(), "interfaces") << field.nvs_key;
+      EXPECT_STREQ(entry["options"].as<const char*>(), "interfaces") << field.key;
     } else {
-      EXPECT_TRUE(entry["options"].isNull()) << field.nvs_key;
+      EXPECT_TRUE(entry["options"].isNull()) << field.key;
     }
   }
 
@@ -1142,6 +1155,15 @@ static JsonDocument balancing_body(const char* json) {
   return doc;
 }
 
+static const char* validate_balancing_update(battery_chemistry_enum chemistry, const JsonDocument& doc) {
+  for (const char* key : {"max_cell_mv", "max_dev_mv", "float_power_w", "max_pack_v", "max_time_min"}) {
+    if (const char* error = validate_balancing_field(chemistry, key, doc[key])) {
+      return error;
+    }
+  }
+  return nullptr;
+}
+
 namespace {
 class BatterySlotResolutionTest : public testing::Test {
  protected:
@@ -1311,11 +1333,28 @@ TEST(BalancingValidationTest, MalformedValuesAreBadRequest) {
   }
 }
 
-TEST(BalancingApplyTest, WritesEveryPresentFieldWithUnitConversion) {
-  DATALAYER_BATTERY_SETTINGS_TYPE settings{};
-  apply_balancing_update(
-      settings,
-      balancing_body(R"({"max_time_min":90,"max_cell_mv":3650,"max_dev_mv":400,"max_pack_v":394.0,"float_power_w":1500})"));
+struct BalancingSlotScope {
+  DATALAYER_BATTERY_SETTINGS_TYPE saved = datalayer.battery_slot(0).settings;
+  BalancingSlotScope() { datalayer.battery_slot(0).settings = DATALAYER_BATTERY_SETTINGS_TYPE{}; }
+  ~BalancingSlotScope() { datalayer.battery_slot(0).settings = saved; }
+};
+
+static SettingsApplyResult apply_balancing(BatteryEmulatorSettingsStore& store, const char* entry_json) {
+  const std::string body = std::string(R"({"dynamic":{"balancing":[)") + entry_json + "]}}";
+  JsonDocument doc;
+  EXPECT_FALSE(deserializeJson(doc, body));
+  return apply_settings_json(store, doc.as<JsonObjectConst>());
+}
+
+TEST_F(SettingsApiTest, BalancingWritesEveryPresentFieldWithUnitConversion) {
+  HalScope hal;
+  BalancingSlotScope slot;
+  BatteryEmulatorSettingsStore store;
+  const SettingsApplyResult result = apply_balancing(
+      store,
+      R"({"slot":0,"max_time_min":90,"max_cell_mv":3650,"max_dev_mv":400,"max_pack_v":394.0,"float_power_w":1500})");
+  ASSERT_TRUE(result.ok) << result.error.c_str();
+  const auto& settings = datalayer.battery_slot(0).settings;
   EXPECT_EQ(settings.balancing_max_time_ms, 5400000u);
   EXPECT_EQ(settings.balancing_max_cell_voltage_mV, 3650);
   EXPECT_EQ(settings.balancing_max_deviation_cell_voltage_mV, 400);
@@ -1323,30 +1362,48 @@ TEST(BalancingApplyTest, WritesEveryPresentFieldWithUnitConversion) {
   EXPECT_EQ(settings.balancing_float_power_W, 1500);
 }
 
-TEST(BalancingApplyTest, PreservesAbsentFields) {
-  DATALAYER_BATTERY_SETTINGS_TYPE settings{};
+TEST_F(SettingsApiTest, BalancingPreservesAbsentFields) {
+  HalScope hal;
+  BalancingSlotScope slot;
+  BatteryEmulatorSettingsStore store;
+  auto& settings = datalayer.battery_slot(0).settings;
   settings.balancing_max_time_ms = 60000;
   settings.balancing_max_cell_voltage_mV = 3600;
   settings.balancing_max_pack_voltage_dV = 3900;
-  apply_balancing_update(settings, balancing_body(R"({"max_dev_mv":350})"));
+  const SettingsApplyResult result = apply_balancing(store, R"({"slot":0,"max_dev_mv":350})");
+  ASSERT_TRUE(result.ok) << result.error.c_str();
   EXPECT_EQ(settings.balancing_max_time_ms, 60000u);
   EXPECT_EQ(settings.balancing_max_cell_voltage_mV, 3600);
   EXPECT_EQ(settings.balancing_max_deviation_cell_voltage_mV, 350);
   EXPECT_EQ(settings.balancing_max_pack_voltage_dV, 3900);
 }
 
-TEST(BalancingApplyTest, AckRoundTripsAppliedValues) {
-  DATALAYER_BATTERY_SETTINGS_TYPE settings{};
-  apply_balancing_update(
-      settings,
-      balancing_body(R"({"max_time_min":90,"max_cell_mv":3650,"max_dev_mv":400,"max_pack_v":394.0,"float_power_w":1500})"));
-  JsonDocument ack;
-  fill_balancing_ack(settings, ack.to<JsonObject>());
-  EXPECT_FLOAT_EQ(ack["max_time_min"].as<float>(), 90.0f);
-  EXPECT_EQ(ack["max_cell_mv"].as<uint16_t>(), 3650);
-  EXPECT_EQ(ack["max_dev_mv"].as<uint16_t>(), 400);
-  EXPECT_FLOAT_EQ(ack["max_pack_v"].as<float>(), 394.0f);
-  EXPECT_EQ(ack["float_power_w"].as<uint16_t>(), 1500);
+TEST_F(SettingsApiTest, BalancingIsEmittedPerSlotAndRoundTrips) {
+  HalScope hal;
+  BalancingSlotScope slot;
+  BatteryEmulatorSettingsStore store;
+  const SettingsApplyResult result = apply_balancing(
+      store,
+      R"({"slot":0,"max_time_min":90,"max_cell_mv":3650,"max_dev_mv":400,"max_pack_v":394.0,"float_power_w":1500})");
+  ASSERT_TRUE(result.ok) << result.error.c_str();
+
+  const JsonDocument doc = parse_values(build_settings_json(store));
+  JsonObjectConst entry = doc["dynamic"]["balancing"][0];
+  EXPECT_EQ(entry["slot"].as<uint8_t>(), 0);
+  EXPECT_FLOAT_EQ(entry["max_time_min"].as<float>(), 90.0f);
+  EXPECT_EQ(entry["max_cell_mv"].as<uint16_t>(), 3650);
+  EXPECT_EQ(entry["max_dev_mv"].as<uint16_t>(), 400);
+  EXPECT_FLOAT_EQ(entry["max_pack_v"].as<float>(), 394.0f);
+  EXPECT_EQ(entry["float_power_w"].as<uint16_t>(), 1500);
+}
+
+TEST_F(SettingsApiTest, BalancingRejectsAnOutOfRangeValueForTheSlotChemistry) {
+  HalScope hal;
+  BalancingSlotScope slot;
+  BatteryEmulatorSettingsStore store;
+  const SettingsApplyResult result = apply_balancing(store, R"({"slot":0,"max_dev_mv":501})");
+  EXPECT_FALSE(result.ok);
+  EXPECT_STREQ(result.error.c_str(), "Cell deviation out of range");
 }
 
 TEST_F(SettingsApiTest, RejectsValueAbsentFromItsOptionList) {
@@ -1357,6 +1414,39 @@ TEST_F(SettingsApiTest, RejectsValueAbsentFromItsOptionList) {
   const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
   EXPECT_FALSE(result.ok);
   EXPECT_NE(std::string(result.error.c_str()).find("BATTCHEM"), std::string::npos);
+}
+
+// Regression: the membership check used to reject every value for a pick-list the
+// firmware does not publish, which made saving any settings impossible.
+TEST_F(SettingsApiTest, AcceptsAValueFromAClientOwnedOptionList) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["GTWCOUNTRY"] = 16725;
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  EXPECT_TRUE(result.ok) << result.error.c_str();
+}
+
+// The membership check silently stands down for a list the firmware does not
+// publish, so a mistyped options_key would disable validation unnoticed. Pin the
+// set that is deliberately client-owned; anything else must be published here.
+TEST_F(SettingsApiTest, EveryOptionsKeyIsPublishedOrDeliberatelyClientOwned) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  const JsonDocument doc = parse_values(build_settings_json(store));
+  JsonObjectConst options = doc["options"];
+  const std::set<std::string> client_owned = {"country",    "mapregion",  "chassis", "pack",
+                                              "pylonbrand", "contactor",  "sungrow"};
+  for (size_t i = 0; i < kSettingFieldCount; i++) {
+    const SettingField& field = kSettingFields[i];
+    if (field.options_key == nullptr) {
+      continue;
+    }
+    const bool published = !options[field.options_key].isNull();
+    EXPECT_TRUE(published || client_owned.count(field.options_key) == 1)
+        << field.key << " names option list '" << field.options_key
+        << "' which this firmware never publishes and the client does not own";
+  }
 }
 
 TEST_F(SettingsApiTest, AcceptsValuePresentInItsOptionList) {

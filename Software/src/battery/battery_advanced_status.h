@@ -7,7 +7,7 @@
 
 #include "translatable_label.h"
 
-enum class AdvancedSeverity : uint8_t { Normal, Warning };
+enum class AdvancedSeverity : uint8_t { Normal, Good, Warning, Critical, Muted };
 
 // Abstract, not JSON-backed: holding a JsonArray here would pull ArduinoJson
 // into every driver that includes this header.

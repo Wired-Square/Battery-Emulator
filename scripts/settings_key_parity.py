@@ -6,10 +6,8 @@ what the web API can read and write. A key present in one and absent from the
 other is how the two drift apart, which is the class of bug upstream #2697 and
 #2839 both fixed.
 
-Not every boot key belongs in the table. Some are datalayer-backed and persisted
-by comm_nvm's own store_settings(), others are written through the dynamic
-sections of the settings POST, and one belongs to the MQTT discovery client.
-Those owners are listed below, so anything left unowned fails the run.
+Not every boot key belongs in the table: OWNED_ELSEWHERE names the writer of each
+one that does not, so a key left unowned fails the run.
 """
 import re
 import sys
@@ -22,21 +20,6 @@ TABLE = SRC / "devboard/webserver/settings_api.cpp"
 
 # Boot keys the settings table deliberately does not describe, and who owns them.
 OWNED_ELSEWHERE = {
-    "BATTERY_WH_MAX": "POST /api/chargelimits",
-    "MAXCHARGEAMP": "POST /api/chargelimits",
-    "MAXDISCHARGEAMP": "POST /api/chargelimits",
-    "MAXPERCENTAGE": "POST /api/chargelimits",
-    "MINPERCENTAGE": "POST /api/chargelimits",
-    "TARGETCHVOLT": "POST /api/chargelimits",
-    "TARGETDISCHVOLT": "POST /api/chargelimits",
-    "USE_SCALED_SOC": "POST /api/chargelimits",
-    "USEVOLTLIMITS": "POST /api/chargelimits",
-    "BYDAUTOCALEN": "POST /api/bydautocal",
-    "BYDAUTOCALEN2": "POST /api/bydautocal",
-    "BYDAUTOCALDRIFT": "POST /api/bydautocal",
-    "BYDAUTOCALDRFT2": "POST /api/bydautocal",
-    "BYDKEEPISOOFF": "POST /api/bydautocal",
-    "BMSRESETDUR": "POST /api/recoverymode",
     "EQUIPMENT_STOP": "POST /api/equipmentstop",
     "IFSCHEMA": "interface schema, written by the webserver",
     "HADISCFW": "MQTT discovery client",
@@ -60,13 +43,43 @@ NOT_READ_AT_BOOT = {
 }
 
 BOOT_READ = re.compile(r'settings\.get[A-Za-z]+\("([A-Za-z0-9_]+)"')
-TABLE_ROW = re.compile(r'^\s*\{"([A-Za-z0-9_]+)",\s*ST::', re.M)
+TABLE_DECL = "const SettingField kSettingFields[] = {"
+ROW_KEY = re.compile(r'^\s*\{"([A-Za-z0-9_]+)",\s*ST::', re.M)
+VOLATILE_ROW = "SS::Volatile"
 NVS_KEY_MAX = 15
+
+
+def table_keys(source: str) -> set:
+    """Keys of the NVS-backed rows. Volatile rows name no NVS key at all.
+
+    Rows are found by brace depth, not by a regex over the whole file: a row can
+    span several lines and can follow a comment or an #if. A line-anchored pattern
+    misses those rows silently, and the gate then reports their keys as read at
+    boot but settable nowhere.
+    """
+    body = source[source.index(TABLE_DECL) + len(TABLE_DECL):]
+    keys = set()
+    depth = 0
+    row = ""
+    for char in body:
+        if depth == 0 and char == "}":
+            break
+        row += char
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                match = ROW_KEY.search(row)
+                if match and VOLATILE_ROW not in row:
+                    keys.add(match.group(1))
+                row = ""
+    return keys
 
 
 def main() -> int:
     boot = set(BOOT_READ.findall(NVM.read_text()))
-    table = set(TABLE_ROW.findall(TABLE.read_text()))
+    table = table_keys(TABLE.read_text())
 
     unowned = sorted(boot - table - set(OWNED_ELSEWHERE))
     unread = sorted(table - boot - set(NOT_READ_AT_BOOT))

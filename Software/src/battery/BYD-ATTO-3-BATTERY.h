@@ -5,6 +5,7 @@
 #include "../datalayer/datalayer_extended.h"
 
 #include <Arduino.h>
+#include <atomic>
 #include "../devboard/webserver/advanced_api.h"
 #include "BatterySlotContext.h"
 #include "CanBattery.h"
@@ -30,6 +31,12 @@ class BydAttoBattery : public CanBattery {
   bool supports_insulation_resistance() override { return true; }
 
   const char* get_dtc_json_filename() override { return "byd_atto3_dtc.json"; }
+
+  void write_cell_series(CellSeriesWriter& out) override;
+
+  const CellSeriesBuffer& cell_balance_times() const { return cell_balance_time_data; }
+
+  bool request_cell_balance_times();
 
   void write_advanced_status(AdvancedStatusWriter& out) override {
     DATALAYER_INFO_BYDATTO3* byd_datalayer = datalayer_bydatto;
@@ -200,36 +207,29 @@ class BydAttoBattery : public CanBattery {
         current_in_range = "No — " + String(grace_sec) + "s / 60s";
       }
 
-      out.table(TL("Auto-calibration status"), {TL("Metric"), TL("Value")});
-      out.row_begin();
-      out.cell("Contactors");
-      out.cell(byd_datalayer->autocal_crit_contactors ? "OK" : "Open");
-      out.row_end();
-      out.row_begin();
-      out.cell("Full / In taper?");
-      out.cell(byd_datalayer->autocal_crit_taper ? "Yes" : "No");
-      out.row_end();
-      out.row_begin();
-      out.cell("Battery current");
-      out.cell(String(autocal_current_A, 1) + " A (" + String(current_direction) + ")");
-      out.row_end();
-      out.row_begin();
-      out.cell("Current in range");
-      out.cell(current_in_range);
-      out.row_end();
-      out.row_begin();
-      out.cell("Dwell time");
-      out.cell(String(dwell_min) + "m " + String(dwell_rem) + "s / 10m");
-      out.row_end();
-      out.row_begin();
-      out.cell("SOC drift");
-      out.cell(String(byd_datalayer->autocal_drift_percent, 1) + "% / threshold " +
-                                                       String(byd_datalayer->auto_calibrate_soc_drift_percent) + "%");
-      out.row_end();
-      out.row_begin();
-      out.cell("Cooldown");
-      out.cell(byd_datalayer->autocal_crit_cooldown_ready ? "Ready" : "Waiting");
-      out.row_end();
+      AdvancedSeverity range_severity = AdvancedSeverity::Muted;
+      if (byd_datalayer->autocal_crit_taper) {
+        range_severity =
+            byd_datalayer->autocal_crit_low_current ? AdvancedSeverity::Good : AdvancedSeverity::Warning;
+      }
+
+      out.section(TL("Auto-calibration status"));
+      out.kv(TL("Contactors"), byd_datalayer->autocal_crit_contactors ? "OK" : "Open", "",
+             byd_datalayer->autocal_crit_contactors ? AdvancedSeverity::Good : AdvancedSeverity::Critical);
+      out.kv(TL("Full / In taper?"), byd_datalayer->autocal_crit_taper ? "Yes" : "No", "",
+             byd_datalayer->autocal_crit_taper ? AdvancedSeverity::Good : AdvancedSeverity::Critical);
+      out.kv(TL("Battery current"), String(autocal_current_A, 1) + " A (" + String(current_direction) + ")");
+      out.kv(TL("Current in range"), current_in_range, "", range_severity);
+      out.kv(TL("Dwell time"), String(dwell_min) + "m " + String(dwell_rem) + "s / 10m");
+      out.kv(TL("SOC drift"),
+             String(byd_datalayer->autocal_drift_percent, 1) + "% / threshold " +
+                 String(byd_datalayer->auto_calibrate_soc_drift_percent) + "%",
+             "",
+             byd_datalayer->autocal_drift_percent >= byd_datalayer->auto_calibrate_soc_drift_percent
+                 ? AdvancedSeverity::Good
+                 : AdvancedSeverity::Normal);
+      out.kv(TL("Cooldown"), byd_datalayer->autocal_crit_cooldown_ready ? "Ready" : "Waiting", "",
+             byd_datalayer->autocal_crit_cooldown_ready ? AdvancedSeverity::Good : AdvancedSeverity::Warning);
     }
 
 
@@ -285,10 +285,15 @@ class BydAttoBattery : public CanBattery {
       command(CMD_READ_DTC, [this] { read_DTC(); }),
       command(CMD_RESET_CRASH, [this] { reset_crash(); }),
       command(CMD_RESET_DTC, [this] { reset_DTC(); }),
-      command(CMD_ISO_MONITOR_ENABLE, [this] { iso_monitor_enable(); },
-              [this] { return datalayer_bydatto == &datalayer_extended.bydAtto3; }),
-      command(CMD_ISO_MONITOR_DISABLE, [this] { iso_monitor_disable(); },
-              [this] { return datalayer_bydatto == &datalayer_extended.bydAtto3; }),
+      command(
+          CMD_ISO_MONITOR_ENABLE, [this] { iso_monitor_enable(); },
+          [this] { return datalayer_bydatto == &datalayer_extended.bydAtto3; }),
+      command(
+          CMD_ISO_MONITOR_DISABLE, [this] { iso_monitor_disable(); },
+          [this] { return datalayer_bydatto == &datalayer_extended.bydAtto3; }),
+      command(
+          CMD_READ_CELL_BALANCE_TIMES, [this] { request_cell_balance_times(); },
+          [this] { return datalayer_battery->info.number_of_cells > 0; }),
   };
 
   DATALAYER_BATTERY_TYPE* datalayer_battery;
@@ -430,6 +435,29 @@ class BydAttoBattery : public CanBattery {
   static const uint8_t RUNNING_STEP_2 = 2;
   static const uint8_t RUNNING_STEP_3 = 3;
   static const uint8_t RUNNING_STEP_4 = 4;
+  static const uint16_t CELL_BALANCE_TIME_DID_BASE = 0x003F;
+  static const uint16_t CELL_BALANCE_TIME_TIMEOUT_MS = 600;
+  // 126 cells take about 27s, so the cap needs headroom for the largest packs on a slow bus.
+  static const uint32_t CELL_BALANCE_TIME_SCAN_TIMEOUT_MS = 90000;
+  static const uint8_t CELL_BALANCE_TIME_RETRIES = 1;
+  CellSeriesBuffer cell_balance_time_data;
+  unsigned long cell_balance_time_scan_millis = 0;
+  unsigned long cell_balance_time_request_millis = 0;
+  uint8_t cell_balance_time_cell = 0;
+  uint8_t cell_balance_time_retries = 0;
+  bool cell_balance_time_queued = false;
+  bool cell_balance_time_active = false;
+  bool cell_balance_time_waiting = false;
+  std::atomic<bool> cell_balance_time_requested{false};
+
+  bool awaiting_cell_balance_reply() const { return cell_balance_time_active && cell_balance_time_waiting; }
+  bool diagnostics_idle() const;
+  void begin_cell_balance_time_scan(unsigned long currentMillis);
+  bool handle_cell_balance_time_reply(const CAN_frame& frame);
+  void advance_cell_balance_time_cell();
+  void handle_cell_balance_time_poll(unsigned long currentMillis);
+  void finish_cell_balance_time_scan();
+
   uint8_t battery_type = NOT_DETERMINED_YET;
   uint8_t stateMachineClearCrash = NOT_RUNNING;
   uint8_t stateMachineCalibrateSOC = NOT_RUNNING;

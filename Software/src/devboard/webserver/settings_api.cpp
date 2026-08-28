@@ -4,15 +4,18 @@
 #include "../../battery/BATTERIES.h"
 #include "../../battery/Battery.h"
 #include "../../battery/Shunt.h"
+#include "../../charger/CHARGERS.h"
 #include "../../charger/CanCharger.h"
 #include "../../communication/equipmentstopbutton/comm_equipmentstopbutton.h"
 #include "../../communication/nvm/comm_nvm.h"
 #include "../../datalayer/datalayer.h"
+#include "../../datalayer/datalayer_extended.h"
 #include "../../inverter/InverterProtocol.h"
 #include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "../hal/hal.h"
 #include "../utils/types.h"
 #include "../wifi/wifi.h"
+#include "web_json.h"
 
 #include <cmath>
 #include <cstring>
@@ -23,9 +26,14 @@
 // Edit-card fields, internal keys (IFSCHEMA/EQUIPMENT_STOP) and the form-only
 // HTTPPASSCONFIRM are deliberately absent: they are not /saveSettings scalars.
 
+extern uint16_t user_selected_CAN_ID_cutoff_filter;
+
 namespace {
 using ST = SettingType;
 using SA = SettingApplies;
+using SS = SettingStorage;
+using SR = SettingRam;
+using SCP = SettingScope;
 
 template <typename E>
 constexpr auto to_underlying(E e) noexcept {
@@ -79,6 +87,55 @@ constexpr const char* kInterface = "interface";
 constexpr double kDeciUnitsPerUnit = 10.0;
 constexpr uint32_t kMillisecondsPerSecond = 1000;
 constexpr uint32_t kPercentMax = 100;
+constexpr int32_t kPptPerPercent = 100;
+constexpr int32_t kDeciPerUnit = 10;
+constexpr int32_t kMsPerMinute = 60000;
+constexpr int32_t kBydAutoCalDriftMin = 1;
+constexpr int32_t kBydAutoCalDriftMax = 20;
+
+constexpr const char* kLive = "live";
+constexpr const char* kSecChargeLimits = "chargelimits";
+constexpr const char* kSecCharger = "charger";
+constexpr const char* kSecBydCal = "bydautocal";
+constexpr const char* kSecRecovery = "recoverymode";
+constexpr const char* kSecCanIdCutoff = "canidcutoff";
+constexpr const char* kSecBalancing = "balancing";
+
+void seed_slot_capacities(uint8_t) {
+  for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+    datalayer.battery_slot(slot).info.total_capacity_Wh = datalayer.battery.settings.user_set_total_capacity_Wh;
+  }
+}
+
+void mirror_keep_iso_disabled(uint8_t) {
+  datalayer_extended.bydAtto3_2.keep_iso_disabled = datalayer_extended.bydAtto3.keep_iso_disabled;
+}
+
+const char* check_charger_field(const SettingField& field, uint8_t, JsonObjectConst fields) {
+  if (charger == nullptr) {
+    return "No charger configured";
+  }
+  if (std::strcmp(field.key, "setpoint_v") == 0) {
+    const float volts = fields[field.key].as<float>();
+    if (volts < CHARGER_MIN_HV || volts > CHARGER_MAX_HV) {
+      return "Invalid value";
+    }
+  } else if (std::strcmp(field.key, "setpoint_a") == 0) {
+    const float amps = fields[field.key].as<float>();
+    JsonVariantConst requested_volts = fields["setpoint_v"];
+    const float volts =
+        requested_volts.isNull() ? datalayer.charger.charger_setpoint_HV_VDC : requested_volts.as<float>();
+    if (amps < 0 || amps > CHARGER_MAX_A || amps * kDeciPerUnit > datalayer.battery.settings.max_user_set_charge_dA ||
+        amps * volts > CHARGER_MAX_POWER) {
+      return "Invalid value";
+    }
+  }
+  return nullptr;
+}
+
+const char* check_balancing_field(const SettingField& field, uint8_t slot, JsonObjectConst fields) {
+  return validate_balancing_field(datalayer.battery_slot(slot).info.chemistry, field.key, fields[field.key]);
+}
 
 struct BatterySlotKeys {
   uint8_t slot;
@@ -228,6 +285,404 @@ const SettingField kSettingFields[] = {
     {"SYSLOGPORT", ST::Uint, kDebug, SA::Boot, 514, nullptr, nullptr, 1, 65535},
     {"SYSLOGFAC", ST::Uint, kDebug, SA::Boot, 1, nullptr, nullptr, 0, 23},
 #endif
+
+    {"BATTERY_WH_MAX",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::U32, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_total_capacity_Wh; }, 1, SCP::Global,
+      seed_slot_capacities}},
+    {"USE_SCALED_SOC",
+     ST::Bool,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer.battery.settings.soc_scaling_active; }}},
+    {"MAXPERCENTAGE",
+     ST::FloatX10,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_percentage; }, kPptPerPercent}},
+    {"MINPERCENTAGE",
+     ST::SignedFloatX10,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::I16, [](uint8_t) -> void* { return &datalayer.battery.settings.min_percentage; }, kPptPerPercent}},
+    {"MAXCHARGEAMP",
+     ST::FloatX10,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_charge_dA; }, kDeciPerUnit}},
+    {"MAXDISCHARGEAMP",
+     ST::FloatX10,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_discharge_dA; }, kDeciPerUnit}},
+    {"USEVOLTLIMITS",
+     ST::Bool,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_voltage_limits_active; }}},
+    {"TARGETCHVOLT",
+     ST::FloatX10,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_charge_voltage_dV; },
+      kDeciPerUnit}},
+    {"TARGETDISCHVOLT",
+     ST::FloatX10,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_discharge_voltage_dV; },
+      kDeciPerUnit}},
+    {"BMSRESETDUR",
+     ST::SecondsToMs,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecChargeLimits,
+     {SR::U32, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_bms_reset_duration_ms; },
+      kMillisecondsPerSecond}},
+
+    {"hv_enabled",
+     ST::Bool,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecCharger,
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_HV_enabled; }, 1, SCP::Global, nullptr,
+      check_charger_field}},
+    {"aux12v_enabled",
+     ST::Bool,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecCharger,
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_aux12V_enabled; }, 1, SCP::Global, nullptr,
+      check_charger_field}},
+    {"setpoint_v",
+     ST::Float,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecCharger,
+     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_VDC; }, 1, SCP::Global, nullptr,
+      check_charger_field}},
+    {"setpoint_a",
+     ST::Float,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecCharger,
+     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC; }, 1, SCP::Global, nullptr,
+      check_charger_field}},
+    {"end_a",
+     ST::Float,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecCharger,
+     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC_END; }, 1, SCP::Global, nullptr,
+      check_charger_field}},
+
+    {"BYDAUTOCALEN",
+     ST::Bool,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecBydCal,
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_enabled; }}},
+    {"BYDAUTOCALDRIFT",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kBydAutoCalDriftMin,
+     kBydAutoCalDriftMax,
+     SS::Nvs,
+     kSecBydCal,
+     {SR::U8, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_drift_percent; }}},
+    {"BYDAUTOCALEN2",
+     ST::Bool,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecBydCal,
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_enabled; }}},
+    {"BYDAUTOCALDRFT2",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kBydAutoCalDriftMin,
+     kBydAutoCalDriftMax,
+     SS::Nvs,
+     kSecBydCal,
+     {SR::U8, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_drift_percent; }}},
+    {"BYDKEEPISOOFF",
+     ST::Bool,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Nvs,
+     kSecBydCal,
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.keep_iso_disabled; }, 1, SCP::Global,
+      mirror_keep_iso_disabled}},
+    {"cal_target_soc",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBydCal,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetSOC; }}},
+    {"cal_target_ah",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBydCal,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetAH; }}},
+    {"cal_target_soc2",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBydCal,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetSOC; }}},
+    {"cal_target_ah2",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBydCal,
+     {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetAH; }}},
+
+    {"recovery_mode",
+     ST::Bool,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecRecovery,
+     {SR::Bool,
+      [](uint8_t) -> void* { return &datalayer.battery.settings.user_requests_forced_charging_recovery_mode; }}},
+
+    {"cutoff",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecCanIdCutoff,
+     {SR::U16, [](uint8_t) -> void* { return &user_selected_CAN_ID_cutoff_filter; }}},
+
+    {"max_time_min",
+     ST::Float,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBalancing,
+     {SR::U32, [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_time_ms; },
+      kMsPerMinute, SCP::BatterySlot, nullptr, check_balancing_field}},
+    {"max_cell_mv",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBalancing,
+     {SR::U16,
+      [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_cell_voltage_mV; }, 1,
+      SCP::BatterySlot, nullptr, check_balancing_field}},
+    {"max_dev_mv",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBalancing,
+     {SR::U16,
+      [](uint8_t slot)
+          -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_deviation_cell_voltage_mV; },
+      1, SCP::BatterySlot, nullptr, check_balancing_field}},
+    {"max_pack_v",
+     ST::Float,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBalancing,
+     {SR::U16,
+      [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_pack_voltage_dV; },
+      kDeciPerUnit, SCP::BatterySlot, nullptr, check_balancing_field}},
+    {"float_power_w",
+     ST::Uint,
+     kLive,
+     SA::Live,
+     0,
+     nullptr,
+     nullptr,
+     kNoMin,
+     kNoMax,
+     SS::Volatile,
+     kSecBalancing,
+     {SR::U16, [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_float_power_W; }, 1,
+      SCP::BatterySlot, nullptr, check_balancing_field}},
 };
 
 const size_t kSettingFieldCount = sizeof(kSettingFields) / sizeof(kSettingFields[0]);
@@ -342,6 +797,8 @@ const char* widget_type_name(SettingType type) {
     case ST::EnumUint:
       return "enum";
     case ST::FloatX10:
+    case ST::SignedFloatX10:
+    case ST::Float:
       return "float";
     case ST::FloatString:
       return "floatstring";
@@ -358,6 +815,74 @@ bool value_matches_option(SettingType type, JsonVariantConst value, JsonVariantC
     return strcmp(value.as<const char*>(), option.as<const char*>()) == 0;
   }
   return value.as<uint32_t>() == option.as<uint32_t>();
+}
+
+double read_live(const SettingField& field, uint8_t slot) {
+  void* address = field.live.address(slot);
+  switch (field.live.kind) {
+    case SR::Bool:
+      return *static_cast<bool*>(address) ? 1.0 : 0.0;
+    case SR::U8:
+      return *static_cast<uint8_t*>(address);
+    case SR::U16:
+      return *static_cast<uint16_t*>(address);
+    case SR::I16:
+      return *static_cast<int16_t*>(address);
+    case SR::U32:
+      return *static_cast<uint32_t*>(address);
+    case SR::F32:
+      return *static_cast<float*>(address);
+    case SR::None:
+      break;
+  }
+  return 0.0;
+}
+
+void write_live(const SettingField& field, uint8_t slot, double json_value) {
+  void* address = field.live.address(slot);
+  const double scaled = json_value * field.live.ram_per_json;
+  switch (field.live.kind) {
+    case SR::Bool:
+      *static_cast<bool*>(address) = json_value != 0.0;
+      break;
+    case SR::U8:
+      *static_cast<uint8_t*>(address) = static_cast<uint8_t>(std::llround(scaled));
+      break;
+    case SR::U16:
+      *static_cast<uint16_t*>(address) = static_cast<uint16_t>(std::llround(scaled));
+      break;
+    case SR::I16:
+      *static_cast<int16_t*>(address) = static_cast<int16_t>(std::llround(scaled));
+      break;
+    case SR::U32:
+      *static_cast<uint32_t*>(address) = static_cast<uint32_t>(std::llround(scaled));
+      break;
+    case SR::F32:
+      *static_cast<float*>(address) = static_cast<float>(scaled);
+      break;
+    case SR::None:
+      break;
+  }
+  if (field.live.on_apply != nullptr) {
+    field.live.on_apply(slot);
+  }
+}
+
+void emit_live_value(JsonObject out, const SettingField& field, uint8_t slot) {
+  const double value = read_live(field, slot) / field.live.ram_per_json;
+  switch (field.type) {
+    case ST::Bool:
+      out[field.key] = value != 0.0;
+      break;
+    case ST::FloatX10:
+    case ST::SignedFloatX10:
+    case ST::Float:
+      out[field.key] = value;
+      break;
+    default:
+      out[field.key] = static_cast<int64_t>(std::llround(value));
+      break;
+  }
 }
 
 void emit_asset_name_options(JsonObject options, const char* options_key, AssetNameSpec spec) {
@@ -433,43 +958,52 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
 
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
+    if (field.live.kind != SR::None) {
+      if (field.live.scope == SCP::Global) {
+        emit_live_value(values, field, 0);
+      }
+      continue;
+    }
     switch (field.type) {
       case ST::Bool:
-        values[field.nvs_key] = store.getBool(field.nvs_key, field.default_int != 0);
+        values[field.key] = store.getBool(field.key, field.default_int != 0);
         break;
       case ST::Uint:
       case ST::EnumUint:
-        values[field.nvs_key] = store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int));
+        values[field.key] = store.getUInt(field.key, static_cast<uint32_t>(field.default_int));
         break;
       case ST::Int:
-        values[field.nvs_key] = store.getInt(field.nvs_key, field.default_int);
+        values[field.key] = store.getInt(field.key, field.default_int);
         break;
       case ST::StringVal:
       case ST::FloatString:
-        set_json_string(
-            values, field.nvs_key,
-            is_password_key(field.nvs_key) ? String("") : store.getString(field.nvs_key, field.default_str));
+        set_json_string(values, field.key,
+                        is_password_key(field.key) ? String("") : store.getString(field.key, field.default_str));
         break;
       case ST::FloatX10:
-        values[field.nvs_key] =
-            store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int)) / kDeciUnitsPerUnit;
+        values[field.key] = store.getUInt(field.key, static_cast<uint32_t>(field.default_int)) / kDeciUnitsPerUnit;
+        break;
+      case ST::SignedFloatX10:
+        values[field.key] = store.getInt(field.key, field.default_int) / kDeciUnitsPerUnit;
+        break;
+      case ST::Float:
         break;
       case ST::SecondsToMs:
-        values[field.nvs_key] =
-            store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int) * kMillisecondsPerSecond) /
+        values[field.key] =
+            store.getUInt(field.key, static_cast<uint32_t>(field.default_int) * kMillisecondsPerSecond) /
             kMillisecondsPerSecond;
         break;
       case ST::InterfacePacked: {
         // A raw or unresolvable stored value would match no interfaces[].id and,
         // once re-saved, freeze invalid config into NVS; fall back to the default.
-        uint32_t stored = store.getUInt(field.nvs_key, 0);
+        uint32_t stored = store.getUInt(field.key, 0);
         if (esp32hal != nullptr) {
           InterfaceList list = esp32hal->interfaces();
           if (resolve_interface_config(list, stored) == nullptr) {
             stored = default_interface_config(list);
           }
         }
-        values[field.nvs_key] = stored;
+        values[field.key] = stored;
         break;
       }
     }
@@ -494,7 +1028,7 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     JsonObject entry = schema.add<JsonObject>();
-    entry["key"] = field.nvs_key;
+    entry["key"] = field.key;
     entry["category"] = field.category;
     entry["type"] = widget_type_name(field.type);
     const char* options = field.options_key;
@@ -502,6 +1036,10 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
       options = "interfaces";
     }
     entry["options"] = options;  // null const char* serialises as JSON null
+    entry["section"] = field.section;
+    if (field.live.scope == SCP::BatterySlot) {
+      entry["scope"] = "battery";
+    }
     if (field.min_value != kNoMin) {
       entry["min"] = field.min_value;
     }
@@ -542,6 +1080,21 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
     }
     slot["comm"] = comm;
     slot["contactor_control"] = store.getBool(keys.contactor_key, false);
+  }
+
+  JsonArray balancing_slots = doc["dynamic"]["balancing"].to<JsonArray>();
+  for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
+    if (!battery_slot_addressable(slot)) {
+      continue;
+    }
+    JsonObject entry = balancing_slots.add<JsonObject>();
+    entry["slot"] = slot;
+    for (size_t i = 0; i < kSettingFieldCount; i++) {
+      const SettingField& field = kSettingFields[i];
+      if (field.live.scope == SCP::BatterySlot) {
+        emit_live_value(entry, field, slot);
+      }
+    }
   }
 
   if (esp32hal != nullptr) {
@@ -643,6 +1196,8 @@ bool value_matches_type(SettingType type, JsonVariantConst value) {
     case ST::FloatString:
       return value.is<const char*>();
     case ST::FloatX10:
+    case ST::SignedFloatX10:
+    case ST::Float:
       return value.is<float>();
   }
   return false;
@@ -691,15 +1246,18 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   bool options_built = false;
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
-    JsonVariantConst value = values[field.nvs_key];
+    if (field.live.scope == SCP::BatterySlot) {
+      continue;
+    }
+    JsonVariantConst value = values[field.key];
     if (value.isNull()) {
       continue;
     }
     if (!value_matches_type(field.type, value)) {
       result.ok = false;
-      result.error = String("Invalid type for setting ") + field.nvs_key;
+      result.error = String("Invalid type for setting ") + field.key;
       result.error_key = "error.setting_invalid_type";
-      result.error_arg = field.nvs_key;
+      result.error_arg = field.key;
       return result;
     }
     // as<double>() is safe: bounds sit only on numeric rows, already type-checked above.
@@ -709,9 +1267,9 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       const double numeric = value.as<double>();
       if ((has_min && numeric < field.min_value) || (has_max && numeric > field.max_value)) {
         result.ok = false;
-        result.error = String("Setting ") + field.nvs_key + " is out of range";
+        result.error = String("Setting ") + field.key + " is out of range";
         result.error_key = "error.setting_out_of_range";
-        result.error_arg = field.nvs_key;
+        result.error_arg = field.key;
         return result;
       }
     }
@@ -721,19 +1279,65 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
         options_built = true;
       }
       JsonArrayConst choices = all_options[field.options_key].as<JsonArrayConst>();
-      bool found = false;
-      for (JsonObjectConst opt : choices) {
-        if (value_matches_option(field.type, value, opt["v"])) {
-          found = true;
-          break;
+      // Some pick-lists are static enough to live in the client instead of costing
+      // flash here. Membership is only checkable against a list this firmware
+      // publishes; an absent one is client-owned, not an empty list of choices.
+      if (!choices.isNull()) {
+        bool found = false;
+        for (JsonObjectConst opt : choices) {
+          if (value_matches_option(field.type, value, opt["v"])) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          result.ok = false;
+          result.error = String("Setting ") + field.key + " is not an available option";
+          result.error_key = "error.setting_not_an_option";
+          result.error_arg = field.key;
+          return result;
         }
       }
-      if (!found) {
+    }
+    if (field.live.check != nullptr) {
+      if (const char* error = field.live.check(field, 0, values)) {
         result.ok = false;
-        result.error = String("Setting ") + field.nvs_key + " is not an available option";
-        result.error_key = "error.setting_not_an_option";
-        result.error_arg = field.nvs_key;
+        result.error = error;
         return result;
+      }
+    }
+  }
+
+  for (JsonObjectConst entry : root["dynamic"]["balancing"].as<JsonArrayConst>()) {
+    if (!entry["slot"].is<uint8_t>() || !battery_slot_addressable(entry["slot"].as<uint8_t>())) {
+      result.ok = false;
+      result.error = "Unknown battery slot";
+      result.error_key = "error.battery_slot_unknown";
+      return result;
+    }
+    const uint8_t slot = entry["slot"].as<uint8_t>();
+    for (size_t i = 0; i < kSettingFieldCount; i++) {
+      const SettingField& field = kSettingFields[i];
+      if (field.live.scope != SCP::BatterySlot) {
+        continue;
+      }
+      JsonVariantConst value = entry[field.key];
+      if (value.isNull()) {
+        continue;
+      }
+      if (!value_matches_type(field.type, value)) {
+        result.ok = false;
+        result.error = String("Invalid type for setting ") + field.key;
+        result.error_key = "error.setting_invalid_type";
+        result.error_arg = field.key;
+        return result;
+      }
+      if (field.live.check != nullptr) {
+        if (const char* error = field.live.check(field, slot, entry)) {
+          result.ok = false;
+          result.error = error;
+          return result;
+        }
       }
     }
   }
@@ -809,24 +1413,33 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   for (size_t i = 0; i < kSettingFieldCount; i++) {
     const SettingField& field = kSettingFields[i];
     const bool gates_reboot = field.applies == SA::Boot;
-    JsonVariantConst value = values[field.nvs_key];
+    if (field.live.scope == SCP::BatterySlot) {
+      continue;
+    }
+    JsonVariantConst value = values[field.key];
     if (value.isNull()) {
       // Explicit JSON null on a present password key clears the secret; an absent key — or
       // null on any non-password key — preserves the stored value (the bool-wipe invariant).
-      if (is_password_key(field.nvs_key) && values.containsKey(field.nvs_key)) {
-        reboot_required |= gates_reboot && (store.getString(field.nvs_key, "").length() > 0);
-        store.saveString(field.nvs_key, "");
-        if (std::strcmp(field.nvs_key, "PASSWORD") == 0) {
+      if (is_password_key(field.key) && values.containsKey(field.key)) {
+        reboot_required |= gates_reboot && (store.getString(field.key, "").length() > 0);
+        store.saveString(field.key, "");
+        if (std::strcmp(field.key, "PASSWORD") == 0) {
           password = store.getString("PASSWORD", "").c_str();
         }
       }
       continue;
     }
+    if (field.live.kind != SR::None) {
+      write_live(field, 0, field.type == ST::Bool ? (value.as<bool>() ? 1.0 : 0.0) : value.as<double>());
+    }
+    if (field.storage == SS::Volatile) {
+      continue;
+    }
     switch (field.type) {
       case ST::Bool: {
         const bool new_value = value.as<bool>();
-        reboot_required |= gates_reboot && (store.getBool(field.nvs_key, field.default_int != 0) != new_value);
-        store.saveBool(field.nvs_key, new_value);
+        reboot_required |= gates_reboot && (store.getBool(field.key, field.default_int != 0) != new_value);
+        store.saveBool(field.key, new_value);
         break;
       }
       case ST::Uint:
@@ -834,44 +1447,53 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       case ST::InterfacePacked: {
         const uint32_t new_value = value.as<uint32_t>();
         reboot_required |=
-            gates_reboot && (store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int)) != new_value);
-        store.saveUInt(field.nvs_key, new_value);
+            gates_reboot && (store.getUInt(field.key, static_cast<uint32_t>(field.default_int)) != new_value);
+        store.saveUInt(field.key, new_value);
         break;
       }
       case ST::Int: {
         const int32_t new_value = value.as<int32_t>();
-        reboot_required |= gates_reboot && (store.getInt(field.nvs_key, field.default_int) != new_value);
-        store.saveInt(field.nvs_key, new_value);
+        reboot_required |= gates_reboot && (store.getInt(field.key, field.default_int) != new_value);
+        store.saveInt(field.key, new_value);
         break;
       }
       case ST::SecondsToMs: {
         const uint32_t new_value = value.as<uint32_t>() * kMillisecondsPerSecond;
-        reboot_required |= gates_reboot && (store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int) *
-                                                                             kMillisecondsPerSecond) != new_value);
-        store.saveUInt(field.nvs_key, new_value);
+        reboot_required |=
+            gates_reboot &&
+            (store.getUInt(field.key, static_cast<uint32_t>(field.default_int) * kMillisecondsPerSecond) != new_value);
+        store.saveUInt(field.key, new_value);
         break;
       }
       case ST::FloatX10: {
         const uint32_t new_value = static_cast<uint32_t>(std::lround(value.as<float>() * kDeciUnitsPerUnit));
         reboot_required |=
-            gates_reboot && (store.getUInt(field.nvs_key, static_cast<uint32_t>(field.default_int)) != new_value);
-        store.saveUInt(field.nvs_key, new_value);
+            gates_reboot && (store.getUInt(field.key, static_cast<uint32_t>(field.default_int)) != new_value);
+        store.saveUInt(field.key, new_value);
         break;
       }
+      case ST::SignedFloatX10: {
+        const int32_t new_value = static_cast<int32_t>(std::lround(value.as<float>() * kDeciUnitsPerUnit));
+        reboot_required |= gates_reboot && (store.getInt(field.key, field.default_int) != new_value);
+        store.saveInt(field.key, new_value);
+        break;
+      }
+      case ST::Float:
+        break;
       case ST::StringVal:
       case ST::FloatString: {
         const char* new_value = value.as<const char*>();
-        if (is_password_key(field.nvs_key) && (new_value == nullptr || new_value[0] == '\0')) {
+        if (is_password_key(field.key) && (new_value == nullptr || new_value[0] == '\0')) {
           break;  // blank keeps the stored secret — skip the write and the live-global refresh
         }
         const char* baseline = field.default_str != nullptr ? field.default_str : "";
-        reboot_required |= gates_reboot && (!(store.getString(field.nvs_key, baseline) == String(new_value)));
-        store.saveString(field.nvs_key, new_value);
+        reboot_required |= gates_reboot && (!(store.getString(field.key, baseline) == String(new_value)));
+        store.saveString(field.key, new_value);
         // SSID/PASSWORD are boot-gated in NVS but the legacy handler also refreshed
         // the live WiFi globals; keep that so a reconnect sees the new credentials.
-        if (std::strcmp(field.nvs_key, "SSID") == 0) {
+        if (std::strcmp(field.key, "SSID") == 0) {
           ssid = store.getString("SSID", "").c_str();
-        } else if (std::strcmp(field.nvs_key, "PASSWORD") == 0) {
+        } else if (std::strcmp(field.key, "PASSWORD") == 0) {
           password = store.getString("PASSWORD", "").c_str();
         }
         break;
@@ -980,84 +1602,68 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   }
 #endif
 
+  for (JsonObjectConst entry : root["dynamic"]["balancing"].as<JsonArrayConst>()) {
+    const uint8_t slot = entry["slot"].as<uint8_t>();
+    for (size_t i = 0; i < kSettingFieldCount; i++) {
+      const SettingField& field = kSettingFields[i];
+      if (field.live.scope != SCP::BatterySlot) {
+        continue;
+      }
+      JsonVariantConst value = entry[field.key];
+      if (!value.isNull()) {
+        write_live(field, slot, field.type == ST::Bool ? (value.as<bool>() ? 1.0 : 0.0) : value.as<double>());
+      }
+    }
+  }
+
   result.changed = store.were_settings_updated();
   result.reboot_required = reboot_required;
   return result;
 }
 
 static constexpr float DECI_PER_UNIT = 10.0f;
-static constexpr float MS_PER_MINUTE = 60000.0f;
 
-const char* validate_balancing_update(battery_chemistry_enum chemistry, const JsonDocument& doc) {
-  const auto malformed_u16 = [&doc](const char* key) {
-    return !doc[key].isNull() && !doc[key].is<uint16_t>();
-  };
-  const auto malformed_float = [&doc](const char* key) {
-    return !doc[key].isNull() && !doc[key].is<float>();
-  };
-  if (malformed_u16("max_cell_mv") || malformed_u16("max_dev_mv") || malformed_u16("float_power_w") ||
-      malformed_float("max_pack_v") || malformed_float("max_time_min")) {
+const char* validate_balancing_field(battery_chemistry_enum chemistry, const char* key, JsonVariantConst value) {
+  if (value.isNull()) {
+    return nullptr;
+  }
+  const bool lfp = chemistry == battery_chemistry_enum::LFP;
+
+  if (std::strcmp(key, "max_cell_mv") == 0) {
+    if (!value.is<uint16_t>()) {
+      return "Bad Request";
+    }
+    const uint16_t mv = value.as<uint16_t>();
+    const uint16_t cell_max_mV = lfp ? BALANCING_CELL_MAX_LFP_MV : BALANCING_CELL_MAX_NCM_MV;
+    return (mv < BALANCING_CELL_MIN_MV || mv > cell_max_mV) ? "Cell voltage out of range" : nullptr;
+  }
+  if (std::strcmp(key, "max_dev_mv") == 0) {
+    if (!value.is<uint16_t>()) {
+      return "Bad Request";
+    }
+    const uint16_t mv = value.as<uint16_t>();
+    const uint16_t deviation_max_mV = lfp ? BALANCING_DEVIATION_MAX_LFP_MV : BALANCING_DEVIATION_MAX_NCM_MV;
+    return (mv < BALANCING_DEVIATION_MIN_MV || mv > deviation_max_mV) ? "Cell deviation out of range" : nullptr;
+  }
+  if (std::strcmp(key, "float_power_w") == 0) {
+    if (!value.is<uint16_t>()) {
+      return "Bad Request";
+    }
+    const uint16_t watts = value.as<uint16_t>();
+    return (watts < BALANCING_FLOAT_POWER_MIN_W || watts > BALANCING_FLOAT_POWER_MAX_W) ? "Float power out of range"
+                                                                                        : nullptr;
+  }
+  if (std::strcmp(key, "max_pack_v") == 0) {
+    if (!value.is<float>()) {
+      return "Bad Request";
+    }
+    const uint16_t pack_max_dV =
+        (lfp ? BALANCING_PACK_MAX_LFP_DV : BALANCING_PACK_MAX_NCM_DV) + BALANCING_PACK_HEADROOM_DV;
+    const long dv = lroundf(value.as<float>() * DECI_PER_UNIT);
+    return (dv < BALANCING_PACK_MIN_DV || dv > pack_max_dV) ? "Pack voltage out of range" : nullptr;
+  }
+  if (std::strcmp(key, "max_time_min") == 0 && !value.is<float>()) {
     return "Bad Request";
   }
-
-  // Same mapping as the driver: LFP when detected or selected, NCM otherwise
-  // (Tesla autodetect can only ever conclude LFP, so Autodetect runs as NCM).
-  const bool lfp = chemistry == battery_chemistry_enum::LFP;
-  const uint16_t cell_max_mV = lfp ? BALANCING_CELL_MAX_LFP_MV : BALANCING_CELL_MAX_NCM_MV;
-  const uint16_t deviation_max_mV = lfp ? BALANCING_DEVIATION_MAX_LFP_MV : BALANCING_DEVIATION_MAX_NCM_MV;
-  const uint16_t pack_max_dV =
-      (lfp ? BALANCING_PACK_MAX_LFP_DV : BALANCING_PACK_MAX_NCM_DV) + BALANCING_PACK_HEADROOM_DV;
-
-  if (!doc["max_cell_mv"].isNull()) {
-    const uint16_t mv = doc["max_cell_mv"].as<uint16_t>();
-    if (mv < BALANCING_CELL_MIN_MV || mv > cell_max_mV) {
-      return "Cell voltage out of range";
-    }
-  }
-  if (!doc["max_dev_mv"].isNull()) {
-    const uint16_t mv = doc["max_dev_mv"].as<uint16_t>();
-    if (mv < BALANCING_DEVIATION_MIN_MV || mv > deviation_max_mV) {
-      return "Cell deviation out of range";
-    }
-  }
-  if (!doc["max_pack_v"].isNull()) {
-    const long dv = lroundf(doc["max_pack_v"].as<float>() * DECI_PER_UNIT);
-    if (dv < BALANCING_PACK_MIN_DV || dv > pack_max_dV) {
-      return "Pack voltage out of range";
-    }
-  }
-  if (!doc["float_power_w"].isNull()) {
-    const uint16_t watts = doc["float_power_w"].as<uint16_t>();
-    if (watts < BALANCING_FLOAT_POWER_MIN_W || watts > BALANCING_FLOAT_POWER_MAX_W) {
-      return "Float power out of range";
-    }
-  }
   return nullptr;
-}
-
-void apply_balancing_update(DATALAYER_BATTERY_SETTINGS_TYPE& settings, const JsonDocument& doc) {
-  if (!doc["max_time_min"].isNull()) {
-    settings.balancing_max_time_ms = static_cast<uint32_t>(doc["max_time_min"].as<float>() * MS_PER_MINUTE);
-  }
-  if (!doc["max_cell_mv"].isNull()) {
-    settings.balancing_max_cell_voltage_mV = doc["max_cell_mv"].as<uint16_t>();
-  }
-  if (!doc["max_dev_mv"].isNull()) {
-    settings.balancing_max_deviation_cell_voltage_mV = doc["max_dev_mv"].as<uint16_t>();
-  }
-  if (!doc["max_pack_v"].isNull()) {
-    settings.balancing_max_pack_voltage_dV =
-        static_cast<uint16_t>(lroundf(doc["max_pack_v"].as<float>() * DECI_PER_UNIT));
-  }
-  if (!doc["float_power_w"].isNull()) {
-    settings.balancing_float_power_W = doc["float_power_w"].as<uint16_t>();
-  }
-}
-
-void fill_balancing_ack(const DATALAYER_BATTERY_SETTINGS_TYPE& settings, JsonObject ack) {
-  ack["max_time_min"] = settings.balancing_max_time_ms / MS_PER_MINUTE;
-  ack["max_cell_mv"] = settings.balancing_max_cell_voltage_mV;
-  ack["max_dev_mv"] = settings.balancing_max_deviation_cell_voltage_mV;
-  ack["max_pack_v"] = settings.balancing_max_pack_voltage_dV / DECI_PER_UNIT;
-  ack["float_power_w"] = settings.balancing_float_power_W;
 }

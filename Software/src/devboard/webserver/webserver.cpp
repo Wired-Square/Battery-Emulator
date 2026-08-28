@@ -12,7 +12,6 @@
 #include "../../communication/equipmentstopbutton/comm_equipmentstopbutton.h"
 #include "../../communication/nvm/comm_nvm.h"
 #include "../../datalayer/datalayer.h"
-#include "../../datalayer/datalayer_extended.h"
 #include "../../devboard/safety/safety.h"
 #include "../../inverter/INVERTERS.h"
 #include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
@@ -24,9 +23,9 @@
 #include "../utils/time_format.h"
 #include "../utils/timer.h"
 #include "../utils/version.h"
+#include "../wifi/wifi.h"
 #include "esp_task_wdt.h"
 #include "favicon.h"
-#include "../wifi/wifi.h"
 #include "static_assets.h"
 #include "web_ui_selection.h"
 #include "webserver_can_streaming.h"
@@ -49,10 +48,6 @@ static constexpr int kWebApiVersion = 1;
 static constexpr float PPTT_PER_PERCENT = 100.0f;
 static constexpr float DECI_PER_UNIT = 10.0f;
 static constexpr float MS_PER_SECOND = 1000.0f;
-// BYD auto-calibrate drift threshold accepted range (out-of-range is ignored, matching the GET origin)
-static constexpr int BYD_AUTOCAL_DRIFT_MIN = 1;
-static constexpr int BYD_AUTOCAL_DRIFT_MAX = 20;
-
 static char web_ui_shell_name[kMaxAssetNameLen + 1] = "";
 
 static void refresh_web_ui_shell(BatteryEmulatorSettingsStore& store) {
@@ -283,55 +278,6 @@ static void serve_web_asset_or_fail(AsyncWebServerRequest* request, const char* 
   }
 }
 
-// Edit-card acks read live device state (state_json carries none of these); one
-// builder per card keeps the GET /api/editcards snapshot and the POST acks in lockstep.
-static void fill_chargelimits_ack(JsonObject ack) {
-  auto& settings = datalayer.battery.settings;
-  // The user's configured capacity, NOT a pack's live info value — drivers
-  // overwrite the live values with BMS-reported capacity; this field keeps
-  // the user's intent.
-  ack["battery_wh_max"] = settings.user_set_total_capacity_Wh;
-  ack["use_scaled_soc"] = settings.soc_scaling_active;
-  ack["soc_max"] = settings.max_percentage / PPTT_PER_PERCENT;
-  ack["soc_min"] = settings.min_percentage / PPTT_PER_PERCENT;
-  ack["charge_a"] = settings.max_user_set_charge_dA / DECI_PER_UNIT;
-  ack["discharge_a"] = settings.max_user_set_discharge_dA / DECI_PER_UNIT;
-  ack["use_volt_limits"] = settings.user_set_voltage_limits_active;
-  ack["target_ch_v"] = settings.max_user_set_charge_voltage_dV / DECI_PER_UNIT;
-  ack["target_disch_v"] = settings.max_user_set_discharge_voltage_dV / DECI_PER_UNIT;
-  ack["bms_reset_duration"] = settings.user_set_bms_reset_duration_ms / MS_PER_SECOND;
-}
-
-static void fill_bydautocal_ack(JsonObject ack) {
-  auto& byd = datalayer_extended.bydAtto3;
-  auto& byd2 = datalayer_extended.bydAtto3_2;
-  ack["enabled"] = byd.auto_calibrate_soc_enabled;
-  ack["drift"] = byd.auto_calibrate_soc_drift_percent;
-  ack["enabled2"] = byd2.auto_calibrate_soc_enabled;
-  ack["drift2"] = byd2.auto_calibrate_soc_drift_percent;
-  ack["cal_target_soc"] = byd.calibrationTargetSOC;
-  ack["cal_target_ah"] = byd.calibrationTargetAH;
-  ack["cal_target_soc2"] = byd2.calibrationTargetSOC;
-  ack["cal_target_ah2"] = byd2.calibrationTargetAH;
-  ack["keep_iso_off"] = byd.keep_iso_disabled;
-}
-
-static void fill_recoverymode_ack(JsonObject ack) {
-  ack["recovery_mode"] = datalayer.battery.settings.user_requests_forced_charging_recovery_mode;
-}
-
-static void fill_canidcutoff_ack(JsonObject ack) {
-  ack["cutoff"] = user_selected_CAN_ID_cutoff_filter;
-}
-
-static void fill_charger_ack(JsonObject ack) {
-  ack["hv_enabled"] = datalayer.charger.charger_HV_enabled;
-  ack["aux12v_enabled"] = datalayer.charger.charger_aux12V_enabled;
-  ack["setpoint_v"] = datalayer.charger.charger_setpoint_HV_VDC;
-  ack["setpoint_a"] = datalayer.charger.charger_setpoint_HV_IDC;
-  ack["end_a"] = datalayer.charger.charger_setpoint_HV_IDC_END;
-}
-
 void init_webserver() {
   {
     BatteryEmulatorSettingsStore store(true);
@@ -462,33 +408,6 @@ void init_webserver() {
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, json);
   });
 
-  // Current values for the live Edit-card panel; shapes mirror the POST acks.
-  def_route_with_auth("/api/editcards", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    JsonDocument doc;
-    fill_chargelimits_ack(doc["chargelimits"].to<JsonObject>());
-    fill_bydautocal_ack(doc["bydautocal"].to<JsonObject>());
-    fill_recoverymode_ack(doc["recoverymode"].to<JsonObject>());
-    fill_canidcutoff_ack(doc["canidcutoff"].to<JsonObject>());
-    if (charger) {
-      fill_charger_ack(doc["charger"].to<JsonObject>());
-    }
-    fill_balancing_ack(datalayer.battery.pack[0].settings, doc["balancing"].to<JsonObject>());
-    // The SPA renders one card per entry: never emit an entry for a slot the
-    // POST path would reject.
-    JsonArray balancing_slots = doc["balancing_tesla"].to<JsonArray>();
-    for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
-      if (!battery_slot_addressable(slot)) {
-        continue;
-      }
-      JsonObject entry = balancing_slots.add<JsonObject>();
-      entry["slot"] = slot;
-      fill_balancing_ack(datalayer.battery_slot(slot).settings, entry);
-    }
-    String out;
-    serializeJson(doc, out);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, out);
-  });
-
   def_json_post_with_auth("/api/settings", [](AsyncWebServerRequest* request, JsonDocument& doc) {
     BatteryEmulatorSettingsStore settings;
     SettingsApplyResult result = apply_settings_json(settings, doc.as<JsonObjectConst>());
@@ -531,182 +450,6 @@ void init_webserver() {
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, state_json());
   });
 #endif
-
-  // Absent fields preserve; the ack echoes resulting device state (state_json
-  // carries none of these) so the client repaints truthfully.
-  def_json_post_with_auth("/api/chargelimits", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    auto& settings = datalayer.battery.settings;
-    bool changed = false;
-    if (!doc["battery_wh_max"].isNull()) {
-      // The setting keeps the user's intent; every slot's live capacity is
-      // re-seeded from it, matching boot. BMS-capable drivers overwrite
-      // their own pack's live value afterwards.
-      uint32_t capacity_Wh = doc["battery_wh_max"].as<uint32_t>();
-      settings.user_set_total_capacity_Wh = capacity_Wh;
-      for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
-        datalayer.battery_slot(slot).info.total_capacity_Wh = capacity_Wh;
-      }
-      changed = true;
-    }
-    if (!doc["use_scaled_soc"].isNull()) {
-      settings.soc_scaling_active = doc["use_scaled_soc"].as<bool>();
-      changed = true;
-    }
-    if (!doc["soc_max"].isNull()) {
-      settings.max_percentage = static_cast<uint16_t>(doc["soc_max"].as<float>() * PPTT_PER_PERCENT);
-      changed = true;
-    }
-    if (!doc["soc_min"].isNull()) {
-      settings.min_percentage = static_cast<uint16_t>(doc["soc_min"].as<float>() * PPTT_PER_PERCENT);
-      changed = true;
-    }
-    if (!doc["charge_a"].isNull()) {
-      settings.max_user_set_charge_dA = static_cast<uint16_t>(doc["charge_a"].as<float>() * DECI_PER_UNIT);
-      changed = true;
-    }
-    if (!doc["discharge_a"].isNull()) {
-      settings.max_user_set_discharge_dA = static_cast<uint16_t>(doc["discharge_a"].as<float>() * DECI_PER_UNIT);
-      changed = true;
-    }
-    if (!doc["use_volt_limits"].isNull()) {
-      settings.user_set_voltage_limits_active = doc["use_volt_limits"].as<bool>();
-      changed = true;
-    }
-    if (!doc["target_ch_v"].isNull()) {
-      settings.max_user_set_charge_voltage_dV = static_cast<uint16_t>(doc["target_ch_v"].as<float>() * DECI_PER_UNIT);
-      changed = true;
-    }
-    if (!doc["target_disch_v"].isNull()) {
-      settings.max_user_set_discharge_voltage_dV =
-          static_cast<uint16_t>(doc["target_disch_v"].as<float>() * DECI_PER_UNIT);
-      changed = true;
-    }
-    if (!doc["bms_reset_duration"].isNull()) {
-      settings.user_set_bms_reset_duration_ms = static_cast<uint16_t>(doc["bms_reset_duration"].as<float>() * MS_PER_SECOND);
-      changed = true;
-    }
-    if (changed) {
-      store_settings();
-    }
-    JsonDocument ack;
-    fill_chargelimits_ack(ack.to<JsonObject>());
-    String out;
-    serializeJson(ack, out);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, out);
-  });
-
-  // BYD auto-cal card: enabled/drift persist per-key; cal-targets are RAM writes,
-  // so store_settings() runs only when one is present.
-  def_json_post_with_auth("/api/bydautocal", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    auto& byd = datalayer_extended.bydAtto3;
-    auto& byd2 = datalayer_extended.bydAtto3_2;
-    {
-      BatteryEmulatorSettingsStore settings;
-      if (!doc["enabled"].isNull()) {
-        byd.auto_calibrate_soc_enabled = doc["enabled"].as<bool>();
-        settings.saveBool("BYDAUTOCALEN", byd.auto_calibrate_soc_enabled);
-      }
-      if (!doc["drift"].isNull()) {
-        int value = doc["drift"].as<int>();
-        if (value >= BYD_AUTOCAL_DRIFT_MIN && value <= BYD_AUTOCAL_DRIFT_MAX) {
-          byd.auto_calibrate_soc_drift_percent = (uint8_t)value;
-          settings.saveUInt("BYDAUTOCALDRIFT", (uint8_t)value);
-        }
-      }
-      if (!doc["enabled2"].isNull()) {
-        byd2.auto_calibrate_soc_enabled = doc["enabled2"].as<bool>();
-        settings.saveBool("BYDAUTOCALEN2", byd2.auto_calibrate_soc_enabled);
-      }
-      if (!doc["drift2"].isNull()) {
-        int value = doc["drift2"].as<int>();
-        if (value >= BYD_AUTOCAL_DRIFT_MIN && value <= BYD_AUTOCAL_DRIFT_MAX) {
-          byd2.auto_calibrate_soc_drift_percent = (uint8_t)value;
-          settings.saveUInt("BYDAUTOCALDRFT2", (uint8_t)value);
-        }
-      }
-      if (!doc["keep_iso_off"].isNull()) {
-        byd.keep_iso_disabled = doc["keep_iso_off"].as<bool>();
-        byd2.keep_iso_disabled = byd.keep_iso_disabled;
-        settings.saveBool("BYDKEEPISOOFF", byd.keep_iso_disabled);
-      }
-    }
-    bool cal_changed = false;
-    if (!doc["cal_target_soc"].isNull()) {
-      byd.calibrationTargetSOC = static_cast<uint16_t>(doc["cal_target_soc"].as<float>());
-      cal_changed = true;
-    }
-    if (!doc["cal_target_ah"].isNull()) {
-      byd.calibrationTargetAH = static_cast<uint16_t>(doc["cal_target_ah"].as<float>());
-      cal_changed = true;
-    }
-    if (!doc["cal_target_soc2"].isNull()) {
-      byd2.calibrationTargetSOC = static_cast<uint16_t>(doc["cal_target_soc2"].as<float>());
-      cal_changed = true;
-    }
-    if (!doc["cal_target_ah2"].isNull()) {
-      byd2.calibrationTargetAH = static_cast<uint16_t>(doc["cal_target_ah2"].as<float>());
-      cal_changed = true;
-    }
-    if (cal_changed) {
-      store_settings();
-    }
-    JsonDocument ack;
-    fill_bydautocal_ack(ack.to<JsonObject>());
-    String out;
-    serializeJson(ack, out);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, out);
-  });
-
-  // Undercharged recovery mode. RAM flag that is not persisted;
-  // store_settings() is still called to persist its fixed subset.
-  def_json_post_with_auth("/api/recoverymode", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    if (!doc["on"].is<bool>()) {
-      return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
-    }
-    datalayer.battery.settings.user_requests_forced_charging_recovery_mode = doc["on"].as<bool>();
-    store_settings();
-    JsonDocument ack;
-    fill_recoverymode_ack(ack.to<JsonObject>());
-    String out;
-    serializeJson(ack, out);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, out);
-  });
-
-  // CAN ID cutoff filter. RAM value that is not persisted;
-  // store_settings() is still called to persist its fixed subset.
-  def_json_post_with_auth("/api/canidcutoff", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    if (!doc["cutoff"].is<int>()) {
-      return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
-    }
-    user_selected_CAN_ID_cutoff_filter = (uint16_t)doc["cutoff"].as<int>();
-    store_settings();
-    JsonDocument ack;
-    fill_canidcutoff_ack(ack.to<JsonObject>());
-    String out;
-    serializeJson(ack, out);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, out);
-  });
-
-  // RAM values that are not persisted; store_settings() is still called to
-  // persist its fixed subset. Bounds follow the slot's own chemistry — packs
-  // autodetect independently.
-  def_json_post_with_auth("/api/balancing", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    uint8_t slot = 0;
-    if (const char* error = validate_battery_slot(doc, slot)) {
-      return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", error);
-    }
-    auto& slot_data = datalayer.battery_slot(slot);
-    if (const char* error = validate_balancing_update(slot_data.info.chemistry, doc)) {
-      return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", error);
-    }
-    apply_balancing_update(slot_data.settings, doc);
-    store_settings();
-    JsonDocument ack;
-    fill_balancing_ack(slot_data.settings, ack.to<JsonObject>());
-    String out;
-    serializeJson(ack, out);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, out);
-  });
 
   // Viewing the CAN log implies logging should run; enabling here matches the
   // legacy page's view side effect. Entering fresh (logging was off) clears the
@@ -851,57 +594,6 @@ void init_webserver() {
   });
 
   register_dump_can_route(server);
-
-  // Registered unconditionally: init_webserver() runs in the connectivity task
-  // before setup_charger() creates the charger, so presence must gate at
-  // request time. RAM values that are not persisted; store_settings() is still
-  // called to persist its fixed subset. Absent fields preserve. setpoint_v
-  // applies before setpoint_a is validated, so one POST can raise both without
-  // tripping the power ceiling against the outgoing voltage.
-  def_json_post_with_auth("/api/charger", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    if (!charger) {
-      return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "No charger configured");
-    }
-    bool changed = false;
-    if (!doc["setpoint_v"].isNull()) {
-      float volts = doc["setpoint_v"].as<float>();
-      if (volts < CHARGER_MIN_HV || volts > CHARGER_MAX_HV) {
-        return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Invalid value");
-      }
-      datalayer.charger.charger_setpoint_HV_VDC = volts;
-      changed = true;
-    }
-    if (!doc["setpoint_a"].isNull()) {
-      float amps = doc["setpoint_a"].as<float>();
-      if (amps < 0 || amps > CHARGER_MAX_A ||
-          amps * DECI_PER_UNIT > datalayer.battery.settings.max_user_set_charge_dA ||
-          amps * datalayer.charger.charger_setpoint_HV_VDC > CHARGER_MAX_POWER) {
-        return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Invalid value");
-      }
-      datalayer.charger.charger_setpoint_HV_IDC = amps;
-      changed = true;
-    }
-    if (!doc["end_a"].isNull()) {
-      datalayer.charger.charger_setpoint_HV_IDC_END = doc["end_a"].as<float>();
-      changed = true;
-    }
-    if (!doc["hv_enabled"].isNull()) {
-      datalayer.charger.charger_HV_enabled = doc["hv_enabled"].as<bool>();
-      changed = true;
-    }
-    if (!doc["aux12v_enabled"].isNull()) {
-      datalayer.charger.charger_aux12V_enabled = doc["aux12v_enabled"].as<bool>();
-      changed = true;
-    }
-    if (changed) {
-      store_settings();
-    }
-    JsonDocument ack;
-    fill_charger_ack(ack.to<JsonObject>());
-    String out;
-    serializeJson(ack, out);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, out);
-  });
 
   // Route to handle reboot command
   def_route_with_auth("/reboot", server, HTTP_GET, [](AsyncWebServerRequest* request) {

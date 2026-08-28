@@ -366,10 +366,11 @@ a.btn { display: inline-block; text-decoration: none; }
 .cell-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: var(--space-2); margin-top: var(--space-3); }
 .cell { border: var(--border-width) solid var(--border); border-radius: var(--radius); padding: var(--space-2); text-align: center; }
 .cell-index { font-size: var(--font-size-xs); color: var(--text-muted); }
-.cell-mv { font-variant-numeric: tabular-nums; }
+.cell-mv, .cell-value { font-variant-numeric: tabular-nums; }
 .cell-min { border-color: var(--fault); color: var(--fault); }
 .cell-max { border-color: var(--accent); }
 .cell-bal { border-color: var(--pending); }
+.cell-series { margin-top: var(--space-4); }
 .cell-bars { display: flex; align-items: flex-end; gap: 2px; height: 220px; margin-top: var(--space-4); border-bottom: var(--border-width) solid var(--border); overflow-x: auto; }
 .cell-bar { flex: 0 0 6px; background: var(--accent); border-radius: var(--radius) var(--radius) 0 0; }
 .cell-bar-bal { background: var(--pending); }
@@ -382,8 +383,10 @@ a.btn { display: inline-block; text-decoration: none; }
   .field { grid-template-columns: 1fr; gap: var(--space-1); }
 }
 
+[data-severity="good"] { color: var(--ok); }
 [data-severity="warn"] { color: var(--warn); }
-[data-severity="warn"] > label::before { content: "⚠ "; }
+[data-severity="bad"] { color: var(--fault); }
+[data-severity="muted"] { color: var(--text-muted); }
 
 :root[data-skin="legacy"] {
   --bg: #000000;

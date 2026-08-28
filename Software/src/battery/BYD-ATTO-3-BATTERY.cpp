@@ -290,7 +290,7 @@ void BydAttoBattery::
     bool diag_busy = (stateMachineClearCrash != NOT_RUNNING) || (stateMachineCalibrateSOC != NOT_RUNNING) ||
                      (stateMachineReadDTC != NOT_RUNNING) || (stateMachineEraseDTC != NOT_RUNNING) ||
                      (stateMachineIsoRoutine != NOT_RUNNING) || dtc_rx_active ||
-                     datalayer_bydatto->dtc_read_in_progress;
+                     datalayer_bydatto->dtc_read_in_progress || cell_balance_time_requested.load();
 
     if (datalayer_bydatto->UserRequestCrashReset && !diag_busy) {
       stateMachineClearCrash = STARTED;
@@ -621,7 +621,8 @@ void BydAttoBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
         seed = (rx_frame.data.u8[3] << 8) | rx_frame.data.u8[4];
         solvedKey = byd_generate_key(seed, 0x63);  //For now key can be either 0xbd or 0x63, 50/50 of guessing right
       }
-      if ((rx_frame.data.u8[0] == 0x03) && (rx_frame.data.u8[1] == 0x7F)) {
+      if ((rx_frame.data.u8[0] == 0x03) && (rx_frame.data.u8[1] == 0x7F) &&
+          !(awaiting_cell_balance_reply() && rx_frame.data.u8[2] == 0x22)) {
         servicemode = REJECTED;
       }
       if ((rx_frame.data.u8[0] == 0x02) && (rx_frame.data.u8[1] == 0x67) && (rx_frame.data.u8[2] == 0x02) &&
@@ -643,6 +644,10 @@ void BydAttoBattery::handle_incoming_can_frame(CAN_frame rx_frame) {
 
       if (rx_frame.data.u8[0] == 0x10) {
         transmit_can_frame(&ATTO_3_7E7_ACK);  //Send next line request
+      }
+
+      if (handle_cell_balance_time_reply(rx_frame)) {
+        break;
       }
       pid_reply = ((rx_frame.data.u8[2] << 8) | rx_frame.data.u8[3]);
       switch (pid_reply) {
@@ -897,6 +902,122 @@ void BydAttoBattery::handle_contactor_control(unsigned long currentMillis) {
   }
 }
 
+bool BydAttoBattery::request_cell_balance_times() {
+  if (datalayer_battery->info.number_of_cells == 0) {
+    return false;
+  }
+  bool idle = false;
+  return cell_balance_time_requested.compare_exchange_strong(idle, true);
+}
+
+void BydAttoBattery::begin_cell_balance_time_scan(unsigned long currentMillis) {
+  cell_balance_time_data.begin(min(datalayer_battery->info.number_of_cells, CellSeriesBuffer::kMaxCells));
+  cell_balance_time_cell = 0;
+  cell_balance_time_retries = 0;
+  cell_balance_time_waiting = false;
+  cell_balance_time_queued = true;
+  cell_balance_time_scan_millis = currentMillis;
+}
+
+bool BydAttoBattery::diagnostics_idle() const {
+  return stateMachineClearCrash == NOT_RUNNING && stateMachineCalibrateSOC == NOT_RUNNING &&
+         stateMachineReadDTC == NOT_RUNNING && stateMachineEraseDTC == NOT_RUNNING &&
+         stateMachineIsoRoutine == NOT_RUNNING && !dtc_rx_active && !datalayer_bydatto->dtc_read_in_progress;
+}
+
+void BydAttoBattery::finish_cell_balance_time_scan() {
+  cell_balance_time_active = false;
+  cell_balance_time_waiting = false;
+  cell_balance_time_data.finish();
+  cell_balance_time_requested.store(false);
+}
+
+// Cell timers are little-endian uint16 values from DIDs 0x0040-0x00BD. Returns true when the frame
+// belonged to the scan and needs no further parsing.
+bool BydAttoBattery::handle_cell_balance_time_reply(const CAN_frame& frame) {
+  if (!awaiting_cell_balance_reply()) {
+    return false;
+  }
+
+  if (frame.data.u8[0] >= 0x05 && frame.data.u8[1] == 0x62) {
+    const uint16_t reply_did = (static_cast<uint16_t>(frame.data.u8[2]) << 8) | frame.data.u8[3];
+    if (reply_did != CELL_BALANCE_TIME_DID_BASE + cell_balance_time_cell + 1) {
+      return false;
+    }
+    cell_balance_time_data.set(cell_balance_time_cell,
+                               frame.data.u8[4] | (static_cast<uint16_t>(frame.data.u8[5]) << 8));
+    advance_cell_balance_time_cell();
+    return true;
+  }
+
+  // A pending response keeps the current DID active; other negative replies mark it unreadable.
+  if (frame.data.u8[0] >= 0x03 && frame.data.u8[1] == 0x7F && frame.data.u8[2] == 0x22) {
+    if (frame.data.u8[3] == 0x78) {
+      cell_balance_time_request_millis = millis();
+      return true;
+    }
+    advance_cell_balance_time_cell();
+    return true;
+  }
+
+  return false;
+}
+
+// Every exit from a DID - answered, refused or timed out - goes through here, so the cursor, the
+// retry count and the end-of-scan check cannot drift apart.
+void BydAttoBattery::advance_cell_balance_time_cell() {
+  cell_balance_time_cell++;
+  cell_balance_time_retries = 0;
+  cell_balance_time_waiting = false;
+  if (cell_balance_time_cell >= cell_balance_time_data.expected()) {
+    finish_cell_balance_time_scan();
+  }
+}
+
+void BydAttoBattery::handle_cell_balance_time_poll(unsigned long currentMillis) {
+  if (cell_balance_time_queued) {
+    cell_balance_time_queued = false;
+    cell_balance_time_active = true;
+  }
+  if (!cell_balance_time_active) {
+    return;
+  }
+  if (currentMillis - cell_balance_time_scan_millis >= CELL_BALANCE_TIME_SCAN_TIMEOUT_MS) {
+    finish_cell_balance_time_scan();
+    return;
+  }
+
+  if (cell_balance_time_waiting) {
+    if (currentMillis - cell_balance_time_request_millis < CELL_BALANCE_TIME_TIMEOUT_MS) {
+      return;
+    }
+    if (cell_balance_time_retries < CELL_BALANCE_TIME_RETRIES) {
+      cell_balance_time_retries++;
+    } else {
+      advance_cell_balance_time_cell();
+      if (!cell_balance_time_active) {
+        return;
+      }
+    }
+  }
+
+  const uint16_t did = CELL_BALANCE_TIME_DID_BASE + cell_balance_time_cell + 1;
+  ATTO_3_7E7_POLL.data.u8[2] = static_cast<uint8_t>(did >> 8);
+  ATTO_3_7E7_POLL.data.u8[3] = static_cast<uint8_t>(did);
+  transmit_can_frame(&ATTO_3_7E7_POLL);
+  cell_balance_time_request_millis = currentMillis;
+  cell_balance_time_waiting = true;
+}
+
+void BydAttoBattery::write_cell_series(CellSeriesWriter& out) {
+  static constexpr CellSeriesInfo kBalanceTime{"balance_hours", TL("Cell balance time"), "h", CellSeriesKind::Counter,
+                                               0};
+  // Requested but not yet begun: the battery task starts the scan on its next tick.
+  const bool queued = cell_balance_time_requested.load() && !cell_balance_time_active;
+  cell_balance_time_data.publish(out, kBalanceTime,
+                                 queued ? CellSeriesState::Pending : cell_balance_time_data.state());
+}
+
 void BydAttoBattery::transmit_can(unsigned long currentMillis) {
   //Send 50ms message
   if (currentMillis - previousMillis50 >= INTERVAL_50_MS) {
@@ -1096,6 +1217,17 @@ void BydAttoBattery::transmit_can(unsigned long currentMillis) {
   if (currentMillis - previousMillis200 >= INTERVAL_200_MS) {
     previousMillis200 = currentMillis;
 
+    if (!diagnostics_idle()) {
+      return;
+    }
+    if (cell_balance_time_requested.load() && !cell_balance_time_queued && !cell_balance_time_active) {
+      begin_cell_balance_time_scan(currentMillis);
+    }
+    if (cell_balance_time_queued || cell_balance_time_active) {
+      handle_cell_balance_time_poll(currentMillis);
+      return;
+    }
+
     switch (poll_state) {
       case POLL_FOR_ORIGINAL_CALIBRATION:
         ATTO_3_7E7_POLL.data.u8[2] = (uint8_t)((POLL_FOR_ORIGINAL_CALIBRATION & 0xFF00) >> 8);
@@ -1142,12 +1274,7 @@ void BydAttoBattery::transmit_can(unsigned long currentMillis) {
         break;
     }
 
-    if ((stateMachineClearCrash == NOT_RUNNING) && (stateMachineCalibrateSOC == NOT_RUNNING) &&
-        (stateMachineReadDTC == NOT_RUNNING) && (stateMachineEraseDTC == NOT_RUNNING) &&
-        (stateMachineIsoRoutine == NOT_RUNNING) && !dtc_rx_active &&
-        !datalayer_bydatto->dtc_read_in_progress) {  //Don't poll battery for data if any diag ongoing
-      transmit_can_frame(&ATTO_3_7E7_POLL);
-    }
+    transmit_can_frame(&ATTO_3_7E7_POLL);
   }
 }
 

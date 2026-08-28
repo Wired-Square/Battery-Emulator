@@ -60,14 +60,30 @@ class JsonAdvancedStatusWriter : public AdvancedStatusWriter {
   void row_end() override { row_ = JsonArray(); }
 
  private:
+  static const char* name_for_severity(AdvancedSeverity severity) {
+    switch (severity) {
+      case AdvancedSeverity::Good:
+        return "good";
+      case AdvancedSeverity::Warning:
+        return "warn";
+      case AdvancedSeverity::Critical:
+        return "bad";
+      case AdvancedSeverity::Muted:
+        return "muted";
+      case AdvancedSeverity::Normal:
+        break;
+    }
+    return nullptr;
+  }
+
   void emit_kv(const char* label, const char* value, const char* unit, AdvancedSeverity severity) {
     JsonObject o = fields_.add<JsonObject>();
     o["kind"] = "kv";
     o["label"] = std::string(label);
     o["value"] = std::string(value);
     o["unit"] = std::string(unit);
-    if (severity != AdvancedSeverity::Normal) {
-      o["sev"] = "warn";
+    if (const char* name = name_for_severity(severity)) {
+      o["sev"] = name;
     }
   }
 

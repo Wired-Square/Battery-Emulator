@@ -361,27 +361,6 @@ void erase_phy_cal_data() {
   }
 }
 
-void store_settings() {
-  //  ATTENTION ! The maximum length for settings keys is 15 characters
-  BatteryEmulatorSettingsStore settings(false);
-
-  settings.saveUInt("BATTERY_WH_MAX", datalayer.battery.settings.user_set_total_capacity_Wh);
-  settings.saveBool("USE_SCALED_SOC", datalayer.battery.settings.soc_scaling_active);
-  settings.saveUInt("MAXPERCENTAGE", datalayer.battery.settings.max_percentage / 10);
-  settings.saveInt("MINPERCENTAGE", datalayer.battery.settings.min_percentage / 10);
-  settings.saveUInt("MAXCHARGEAMP", datalayer.battery.settings.max_user_set_charge_dA);
-  settings.saveUInt("MAXDISCHARGEAMP", datalayer.battery.settings.max_user_set_discharge_dA);
-  settings.saveBool("USEVOLTLIMITS", datalayer.battery.settings.user_set_voltage_limits_active);
-  settings.saveUInt("TARGETCHVOLT", datalayer.battery.settings.max_user_set_charge_voltage_dV);
-  settings.saveUInt("TARGETDISCHVOLT", datalayer.battery.settings.max_user_set_discharge_voltage_dV);
-  settings.saveUInt("BMSRESETDUR", datalayer.battery.settings.user_set_bms_reset_duration_ms);
-  settings.saveUInt("BYDAUTOCALDRIFT", datalayer_extended.bydAtto3.auto_calibrate_soc_drift_percent);
-  settings.saveBool("BYDAUTOCALEN", datalayer_extended.bydAtto3.auto_calibrate_soc_enabled);
-  settings.saveBool("BYDKEEPISOOFF", datalayer_extended.bydAtto3.keep_iso_disabled);
-  settings.saveUInt("BYDAUTOCALDRFT2", datalayer_extended.bydAtto3_2.auto_calibrate_soc_drift_percent);
-  settings.saveBool("BYDAUTOCALEN2", datalayer_extended.bydAtto3_2.auto_calibrate_soc_enabled);
-}
-
 #ifdef BOARD_HAS_INTERFACE_TERMINATION
 void apply_stored_interface_termination() {
   BatteryEmulatorSettingsStore settings(true);

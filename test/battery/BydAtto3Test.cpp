@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
-#include "../../Software/src/battery/BYD-ATTO-3-BATTERY.h"
 #include "../../Software/src/battery/BATTERIES.h"
+#include "../../Software/src/battery/BYD-ATTO-3-BATTERY.h"
 #include "../../Software/src/datalayer/datalayer.h"
 #include "../../Software/src/datalayer/datalayer_extended.h"
+#include "../../Software/src/devboard/webserver/cellmonitor_api.h"
+#include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 #include "Arduino.h"
 
@@ -142,4 +144,132 @@ TEST(BydAtto3Tests, ShouldDecode0x444WholePercentSocAndRejectBadChecksum) {
   EXPECT_EQ(datalayer_extended.bydAtto3.SOC_polled, 31);
   EXPECT_EQ(datalayer.battery.pack[0].status.soh_pptt, 9300);
   EXPECT_EQ(datalayer.battery.pack[0].status.CAN_error_counter, 1);
+}
+
+namespace {
+CAN_frame uds_reply(std::initializer_list<uint8_t> bytes) {
+  return byd_frame(0x7EF, bytes);
+}
+}  // namespace
+
+class BydAtto3BalanceTimeTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    reset_byd_state();
+    datalayer.battery.pack[0].info.number_of_cells = 0;
+    battery = new BydAttoBattery(battery_slot_context(0));
+    battery->setup();
+  }
+
+  void TearDown() override { delete battery; }
+
+  BydAttoBattery* battery = nullptr;
+};
+
+TEST_F(BydAtto3BalanceTimeTest, RejectsScanUntilCellCountIsKnown) {
+  EXPECT_FALSE(battery->request_cell_balance_times());
+  EXPECT_EQ(battery->cell_balance_times().state(), CellSeriesState::Unread);
+}
+
+TEST_F(BydAtto3BalanceTimeTest, ReadsMatchingDidsAndKeepsZeroDistinctFromUnread) {
+  datalayer.battery.pack[0].info.number_of_cells = 2;
+  ASSERT_TRUE(battery->request_cell_balance_times());
+  EXPECT_EQ(battery->cell_balance_times().state(), CellSeriesState::Unread);
+
+  battery->transmit_can(200);
+  EXPECT_EQ(battery->cell_balance_times().state(), CellSeriesState::Reading);
+
+  battery->handle_incoming_can_frame(uds_reply({0x05, 0x62, 0x00, 0x41, 0xFF, 0x7F, 0xAA, 0xAA}));
+  EXPECT_EQ(battery->cell_balance_times().received(), 0) << "a reply for another DID must not be banked";
+
+  battery->handle_incoming_can_frame(uds_reply({0x05, 0x62, 0x00, 0x40, 0xA4, 0x01, 0xAA, 0xAA}));
+  EXPECT_EQ(battery->cell_balance_times().value(0), 420);
+  EXPECT_TRUE(battery->cell_balance_times().cell_valid(0));
+
+  battery->transmit_can(400);
+  battery->handle_incoming_can_frame(uds_reply({0x05, 0x62, 0x00, 0x41, 0x00, 0x00, 0xAA, 0xAA}));
+
+  const CellSeriesBuffer& result = battery->cell_balance_times();
+  EXPECT_EQ(result.state(), CellSeriesState::Complete);
+  EXPECT_EQ(result.received(), 2);
+  EXPECT_EQ(result.value(1), 0);
+  EXPECT_TRUE(result.cell_valid(1)) << "zero hours is a reading, not an unread cell";
+  EXPECT_EQ(result.revision(), 1u);
+}
+
+TEST_F(BydAtto3BalanceTimeTest, NegativeReplyProducesUsefulPartialResult) {
+  datalayer.battery.pack[0].info.number_of_cells = 2;
+  ASSERT_TRUE(battery->request_cell_balance_times());
+  battery->transmit_can(200);
+
+  battery->handle_incoming_can_frame(uds_reply({0x03, 0x7F, 0x22, 0x31, 0x00, 0x00, 0x00, 0x00}));
+  battery->transmit_can(400);
+  battery->handle_incoming_can_frame(uds_reply({0x05, 0x62, 0x00, 0x41, 0xDD, 0x01, 0xAA, 0xAA}));
+
+  const CellSeriesBuffer& result = battery->cell_balance_times();
+  EXPECT_EQ(result.state(), CellSeriesState::Partial);
+  EXPECT_EQ(result.received(), 1);
+  EXPECT_FALSE(result.cell_valid(0));
+  EXPECT_TRUE(result.cell_valid(1));
+  EXPECT_EQ(result.value(1), 477);
+}
+
+TEST_F(BydAtto3BalanceTimeTest, ResponsePendingDoesNotAdvanceTheCellCursor) {
+  datalayer.battery.pack[0].info.number_of_cells = 1;
+  ASSERT_TRUE(battery->request_cell_balance_times());
+  battery->transmit_can(200);
+
+  battery->handle_incoming_can_frame(uds_reply({0x03, 0x7F, 0x22, 0x78, 0x00, 0x00, 0x00, 0x00}));
+  EXPECT_EQ(battery->cell_balance_times().state(), CellSeriesState::Reading);
+  EXPECT_EQ(battery->cell_balance_times().received(), 0);
+
+  battery->handle_incoming_can_frame(uds_reply({0x05, 0x62, 0x00, 0x40, 0xA4, 0x01, 0xAA, 0xAA}));
+  EXPECT_EQ(battery->cell_balance_times().state(), CellSeriesState::Complete);
+  EXPECT_EQ(battery->cell_balance_times().value(0), 420);
+}
+
+TEST_F(BydAtto3BalanceTimeTest, ResponsePendingCannotHoldTheScanOpen) {
+  datalayer.battery.pack[0].info.number_of_cells = 1;
+  ASSERT_TRUE(battery->request_cell_balance_times());
+  battery->transmit_can(200);
+
+  battery->handle_incoming_can_frame(uds_reply({0x03, 0x7F, 0x22, 0x78, 0x00, 0x00, 0x00, 0x00}));
+  // Must be past CELL_BALANCE_TIME_SCAN_TIMEOUT_MS, otherwise the scan is still legitimately open.
+  battery->transmit_can(90200);
+
+  EXPECT_EQ(battery->cell_balance_times().state(), CellSeriesState::Failed);
+  EXPECT_EQ(battery->cell_balance_times().revision(), 1u);
+}
+
+TEST_F(BydAtto3BalanceTimeTest, RefusesASecondScanWhileOneIsStillOutstanding) {
+  datalayer.battery.pack[0].info.number_of_cells = 1;
+  ASSERT_TRUE(battery->request_cell_balance_times());
+  EXPECT_FALSE(battery->request_cell_balance_times());
+
+  battery->transmit_can(200);
+  battery->handle_incoming_can_frame(uds_reply({0x05, 0x62, 0x00, 0x40, 0xA4, 0x01, 0xAA, 0xAA}));
+  ASSERT_EQ(battery->cell_balance_times().state(), CellSeriesState::Complete);
+  EXPECT_TRUE(battery->request_cell_balance_times());
+}
+
+TEST_F(BydAtto3BalanceTimeTest, PublishesTheReadingAsACellSeries) {
+  datalayer.battery.pack[0].info.number_of_cells = 2;
+  ASSERT_TRUE(battery->request_cell_balance_times());
+  battery->transmit_can(200);
+  battery->handle_incoming_can_frame(uds_reply({0x05, 0x62, 0x00, 0x40, 0xA4, 0x01, 0xAA, 0xAA}));
+  battery->transmit_can(400);
+  battery->handle_incoming_can_frame(uds_reply({0x03, 0x7F, 0x22, 0x31, 0x00, 0x00, 0x00, 0x00}));
+
+  batteries[0] = battery;
+  JsonDocument doc;
+  ASSERT_FALSE(deserializeJson(doc, build_cellmonitor_json().c_str()));
+  batteries[0] = nullptr;
+
+  JsonObjectConst series = doc["batteries"][0]["series"][0];
+  EXPECT_STREQ(series["id"], "balance_hours");
+  EXPECT_STREQ(series["kind"], "counter");
+  EXPECT_EQ(series["revision"].as<uint32_t>(), 1u);
+  ASSERT_EQ(series["values"].size(), 2u);
+  EXPECT_EQ(series["values"][0].as<int>(), 420);
+  EXPECT_TRUE(series["values"][1].isNull()) << "the refused cell must read as unknown, not as zero hours";
 }

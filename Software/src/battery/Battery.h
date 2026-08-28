@@ -4,6 +4,7 @@
 #include "../../src/devboard/utils/types.h"
 #include "../system_settings.h"
 #include "battery_advanced_status.h"
+#include "battery_cell_series.h"
 #include "battery_command.h"
 
 enum class BatteryType {
@@ -104,6 +105,8 @@ class Battery {
 
   // Structured advanced status; drivers override to emit data.
   virtual void write_advanced_status(AdvancedStatusWriter& out) {}
+
+  virtual void write_cell_series(CellSeriesWriter& out) {}
 
   virtual const char* get_dtc_json_filename() { return ""; }
 

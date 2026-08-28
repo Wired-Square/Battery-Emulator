@@ -87,8 +87,6 @@ void onOTAProgress(size_t current, size_t final);
  */
 void onOTAEnd(bool success);
 
-extern void store_settings();
-
 bool webserver_auth_is_ready();
 void webserver_tick();
 

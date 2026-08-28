@@ -97,6 +97,10 @@ inline constexpr BatteryCommandDescriptor CMD_ISO_MONITOR_ENABLE{"isoMonitorEnab
 inline constexpr BatteryCommandDescriptor CMD_ISO_MONITOR_DISABLE{"isoMonitorDisable", TL("Disable monitoring"),
                                                                   TL("disable the isolation resistance monitor?")};
 inline constexpr BatteryCommandDescriptor CMD_READ_DTC{"readDTC", TL("Read DTC"), nullptr, true};
+inline constexpr BatteryCommandDescriptor CMD_READ_CELL_BALANCE_TIMES{
+    "readCellBalanceTimes", TL("Read cell balance timers"),
+    TL("read every cell's lifetime balancing hours? The scan queries one cell at a time and takes about half a "
+       "minute.")};
 inline constexpr BatteryCommandDescriptor CMD_RESET_BECM{"resetBECM", TL("Restart BECM module"), TL("restart BECM??")};
 inline constexpr BatteryCommandDescriptor CMD_CONTACTOR_CLOSE{"contactorClose", TL("Close Contactors"),
                                                               TL("a contactor close request?")};

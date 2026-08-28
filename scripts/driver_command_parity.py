@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Per-driver command-id parity: declared lists now vs what the old predicates produced.
+"""Per-driver command-id parity against the pre-registry baseline at BASELINE.
 
-Baseline is the pre-Task-14 commit. The registry gated each id on a capability
-predicate; that mapping is transcribed below from advanced_api.cpp at the baseline.
-Capabilities that gated nothing, and ids no driver could reach, both show up as
-differences rather than being silently normalised away.
+Before the registry, each command id was gated by a capability predicate in
+advanced_api.cpp. CAP_TO_IDS transcribes that mapping as it stood at BASELINE, so
+comparing today's declared command lists against it catches a driver silently
+gaining or losing a command.
 
-Two expected differences are ids the baseline declared a capability for but never
-bound in the registry, leaving them unreachable from the web UI: TESLA-BATTERY.h
-gaining startBalancing/endBalancing, and TEST-FAKE-BATTERY.h gaining setFakeVoltage.
-Later entries are commands the drivers genuinely gained after the baseline by
-adopting upstream changes (the upstream PR is noted per entry).
+Capabilities that gated nothing, and ids no driver could reach, are reported as
+differences rather than normalised away, so the baseline stays auditable.
+
+Every intended divergence is recorded in EXPECTED_DIFFS with its cause, which is
+what makes this a gate rather than a report of a known delta.
 """
 import re
 import subprocess
@@ -27,6 +27,8 @@ NON_DRIVER_HEADERS = ("Battery.h", "battery_command.h", "UdsCanBattery.h")
 # driver -> (ids lost, ids gained) that are intended. Anything else fails the run,
 # so this stays re-runnable as a gate rather than always reporting the known delta.
 EXPECTED_DIFFS = {
+    # Declared by a baseline capability but never bound in the registry, so the
+    # baseline could not reach them from the web UI at all.
     "TESLA-BATTERY.h": (frozenset(), frozenset({"startBalancing", "endBalancing"})),
     "TEST-FAKE-BATTERY.h": (frozenset(), frozenset({"setFakeVoltage"})),
     # Upstream #2681: Nissan Leaf gained UDS DTC readout.
@@ -36,7 +38,9 @@ EXPECTED_DIFFS = {
     # Upstream #1941: MG-GEN1 (replacing MG-HS-PHEV) gained a BMS reset command.
     "MG-GEN1-BATTERY.h": (frozenset(), frozenset({"resetBMS"})),
     # Upstream #2656: BYD Atto 3 gained isolation monitor controls.
-    "BYD-ATTO-3-BATTERY.h": (frozenset(), frozenset({"isoMonitorEnable", "isoMonitorDisable"})),
+    # Upstream #2879: BYD Atto 3 gained a per-cell balance timer scan.
+    "BYD-ATTO-3-BATTERY.h": (frozenset(),
+                             frozenset({"isoMonitorEnable", "isoMonitorDisable", "readCellBalanceTimes"})),
     # Upstream #2730: MEB gained a crash reset command.
     "MEB-BATTERY.h": (frozenset(), frozenset({"resetCrash"})),
 }
