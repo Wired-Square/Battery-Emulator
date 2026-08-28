@@ -496,6 +496,8 @@ String get_event_message_string(EVENTS_ENUM_TYPE event) {
       return "CELL VOLTAGE CRITICALLY HIGH! Not possible to continue. Inspect battery!";
     case EVENT_CELL_DEVIATION_HIGH:
       return "Large cell voltage deviation! Check balancing of cells";
+    case EVENT_BATTERY_TEMP_DEVIATION_HIGH:
+      return "Large temperature deviation between battery sensors! Check cooling and sensor wiring";
     case EVENT_UNKNOWN_EVENT_SET:
       return "An unknown event was set! Review your code!";
     case EVENT_DUMMY_INFO:

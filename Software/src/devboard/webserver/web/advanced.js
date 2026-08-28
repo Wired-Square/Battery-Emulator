@@ -1,4 +1,4 @@
-import { getJson, postJson } from '/app.js';
+import { getJson, postJson, t, tf } from '/app.js';
 
 const REFRESH_MS = 2000;
 
@@ -78,19 +78,19 @@ function catalogueFilePicker(field, body, status) {
   const input = el('input');
   input.type = 'file';
   input.accept = '.json';
-  input.setAttribute('aria-label', `Load descriptions from a local ${field.catalogue}`);
+  input.setAttribute('aria-label', tf('ui.load_catalogue_aria', 'Load descriptions from a local {}', field.catalogue));
   input.addEventListener('change', async () => {
     const file = input.files && input.files[0];
     if (!file) return;
     try {
       const entries = JSON.parse(await file.text());
       const matched = applyDescriptions(body, field, indexCatalogue(entries));
-      status.textContent = `${matched}/${field.row_keys.length} matched from ${file.name}`;
+      status.textContent = tf('ui.catalogue_matched_file', '{}/{} matched from {}', matched, field.row_keys.length, file.name);
     } catch {
-      status.textContent = `Could not read ${file.name}`;
+      status.textContent = tf('ui.catalogue_read_failed', 'Could not read {}', file.name);
     }
   });
-  wrap.append(el('label', null, `Load ${field.catalogue}`), input);
+  wrap.append(el('label', null, tf('ui.load_catalogue', 'Load {}', field.catalogue)), input);
   return wrap;
 }
 
@@ -101,19 +101,19 @@ function describedTable(field, table, body) {
   group.append(status);
 
   if (!field.catalogue) {
-    status.textContent = 'No description catalogue for this battery.';
+    status.textContent = t('ui.no_description_catalogue', 'No description catalogue for this battery.');
     group.append(catalogueFilePicker(field, body, status));
     return group;
   }
 
-  status.textContent = `Loading ${field.catalogue}…`;
+  status.textContent = tf('ui.catalogue_loading', 'Loading {}…', field.catalogue);
   loadCatalogue(field.catalogue).then(
     (index) => {
       const matched = applyDescriptions(body, field, index);
-      status.textContent = `${matched}/${field.row_keys.length} descriptions matched`;
+      status.textContent = tf('ui.catalogue_matched', '{}/{} descriptions matched', matched, field.row_keys.length);
     },
     () => {
-      status.textContent = `Could not fetch ${field.catalogue}.`;
+      status.textContent = tf('ui.catalogue_fetch_failed', 'Could not fetch {}.', field.catalogue);
       group.append(catalogueFilePicker(field, body, status));
     },
   );
@@ -146,11 +146,11 @@ function fieldNode(field) {
 }
 
 async function send(cmd, body, btn) {
-  if (cmd.prompt && !window.confirm(`Are you sure you want to ${cmd.prompt}`)) return;
+  if (cmd.prompt && !window.confirm(tf('ui.confirm_command', 'Are you sure you want to {}', cmd.prompt))) return;
   try {
     await postJson('/api/advanced/command', body);
   } catch {
-    window.alert('Command failed.');
+    window.alert(t('ui.command_failed', 'Command failed.'));
     return;
   }
   // A clicked button parks focus, holding the repaint off; release it only on
@@ -187,7 +187,7 @@ function commandValueInput(cmd, batteryIndex) {
     const entered = Number(input.value);
     const value = Math.round(entered * scale);
     if (input.value === '' || !Number.isFinite(entered) || value < cmd.value.min || value > cmd.value.max) {
-      window.alert(`Enter a value between ${lo} and ${hi} ${cmd.value.unit}.`);
+      window.alert(tf('ui.value_range', 'Enter a value between {} and {} {}.', lo, hi, cmd.value.unit));
       return;
     }
     send(cmd, { id: cmd.id, battery: batteryIndex, value }, btn);
@@ -206,9 +206,9 @@ function commandValueInput(cmd, batteryIndex) {
 
 function batterySection(battery, multi) {
   const card = el('div', 'card');
-  if (multi) card.append(el('h3', null, `Battery ${battery.index + 1}`));
+  if (multi) card.append(el('h3', null, tf('ui.battery_n', 'Battery {}', battery.index + 1)));
   if (!battery.sections.length && !battery.commands.length) {
-    card.append(el('div', 'muted', 'This battery has no advanced status or commands.'));
+    card.append(el('div', 'muted', t('ui.no_advanced', 'This battery has no advanced status or commands.')));
     return card;
   }
   battery.sections.forEach((section) => {
@@ -231,9 +231,9 @@ function panelHasFocus() {
 
 function paint(data) {
   const wrap = el('div');
-  wrap.append(el('h1', 'page-title', 'Advanced'));
+  wrap.append(el('h1', 'page-title', t('ui.advanced', 'Advanced')));
   if (!data.batteries.length) {
-    wrap.append(el('div', 'muted', 'No battery configured.'));
+    wrap.append(el('div', 'muted', t('ui.no_battery_configured', 'No battery configured.')));
   } else {
     const multi = data.batteries.length > 1;
     data.batteries.forEach((b) => wrap.append(batterySection(b, multi)));

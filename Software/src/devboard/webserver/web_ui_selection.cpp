@@ -4,39 +4,44 @@
 
 namespace {
 
-size_t shell_name_length(const char* path) {
-  return strlen(path) - strlen(kUiShellPathPrefix) - strlen(kUiShellPathSuffix);
+size_t name_length(AssetNameSpec spec, const char* path) {
+  return strlen(path) - strlen(spec.prefix) - strlen(spec.suffix);
 }
 
-const char* shell_name_start(const char* path) {
-  const size_t prefix_len = strlen(kUiShellPathPrefix);
-  const size_t suffix_len = strlen(kUiShellPathSuffix);
+const char* name_start(AssetNameSpec spec, const char* path) {
+  const size_t prefix_len = strlen(spec.prefix);
+  const size_t suffix_len = strlen(spec.suffix);
   const size_t len = strlen(path);
   if (len <= prefix_len + suffix_len) {
     return nullptr;
   }
-  if (strncmp(path, kUiShellPathPrefix, prefix_len) != 0) {
+  if (strncmp(path, spec.prefix, prefix_len) != 0) {
     return nullptr;
   }
-  if (strcmp(path + len - suffix_len, kUiShellPathSuffix) != 0) {
+  if (strcmp(path + len - suffix_len, spec.suffix) != 0) {
     return nullptr;
   }
   return path + prefix_len;
 }
 
-const char* shell_asset_for_name(UiShellTable table, const char* name) {
-  if (name == nullptr || name[0] == '\0') {
-    return nullptr;
+bool copy_name(AssetNameSpec spec, const char* path, char* out, size_t out_len) {
+  const char* start = name_start(spec, path);
+  if (start == nullptr) {
+    return false;
   }
-  const size_t name_len = strlen(name);
+  const size_t len = name_length(spec, path);
+  if (len + 1 > out_len) {
+    return false;
+  }
+  memcpy(out, start, len);
+  out[len] = '\0';
+  return true;
+}
+
+const char* first_matching_path(WebAssetTable table, AssetNameSpec spec) {
   for (uint32_t i = 0; i < table.count; i++) {
-    const char* path = table.assets[i].path;
-    const char* start = shell_name_start(path);
-    if (start == nullptr) {
-      continue;
-    }
-    if (shell_name_length(path) == name_len && strncmp(start, name, name_len) == 0) {
-      return path;
+    if (name_start(spec, table.assets[i].path) != nullptr) {
+      return table.assets[i].path;
     }
   }
   return nullptr;
@@ -44,55 +49,62 @@ const char* shell_asset_for_name(UiShellTable table, const char* name) {
 
 }  // namespace
 
-size_t ui_shell_count(UiShellTable table) {
+size_t web_asset_name_count(WebAssetTable table, AssetNameSpec spec) {
   size_t count = 0;
   for (uint32_t i = 0; i < table.count; i++) {
-    if (shell_name_start(table.assets[i].path) != nullptr) {
+    if (name_start(spec, table.assets[i].path) != nullptr) {
       count++;
     }
   }
   return count;
 }
 
-bool ui_shell_name_at(UiShellTable table, size_t index, char* out, size_t out_len) {
+bool web_asset_name_at(WebAssetTable table, AssetNameSpec spec, size_t index, char* out, size_t out_len) {
   size_t seen = 0;
   for (uint32_t i = 0; i < table.count; i++) {
     const char* path = table.assets[i].path;
-    const char* start = shell_name_start(path);
-    if (start == nullptr) {
+    if (name_start(spec, path) == nullptr) {
       continue;
     }
     if (seen == index) {
-      const size_t len = shell_name_length(path);
-      if (len + 1 > out_len) {
-        return false;
-      }
-      memcpy(out, start, len);
-      out[len] = '\0';
-      return true;
+      return copy_name(spec, path, out, out_len);
     }
     seen++;
   }
   return false;
 }
 
-const char* resolve_ui_shell_asset(UiShellTable table, const char* requested, const char* stored) {
-  const char* asset = shell_asset_for_name(table, requested);
-  if (asset != nullptr) {
-    return asset;
+const char* web_asset_path_for_name(WebAssetTable table, AssetNameSpec spec, const char* name) {
+  if (name == nullptr || name[0] == '\0') {
+    return nullptr;
   }
-  asset = shell_asset_for_name(table, stored);
-  if (asset != nullptr) {
-    return asset;
-  }
-  asset = shell_asset_for_name(table, kDefaultUiShell);
-  if (asset != nullptr) {
-    return asset;
-  }
+  const size_t len = strlen(name);
   for (uint32_t i = 0; i < table.count; i++) {
-    if (shell_name_start(table.assets[i].path) != nullptr) {
-      return table.assets[i].path;
+    const char* path = table.assets[i].path;
+    const char* start = name_start(spec, path);
+    if (start == nullptr) {
+      continue;
+    }
+    if (name_length(spec, path) == len && strncmp(start, name, len) == 0) {
+      return path;
     }
   }
   return nullptr;
+}
+
+const char* resolve_named_asset(WebAssetTable table, AssetNameSpec spec, const char* requested, const char* stored,
+                                const char* fallback) {
+  const char* path = web_asset_path_for_name(table, spec, requested);
+  if (path != nullptr) {
+    return path;
+  }
+  path = web_asset_path_for_name(table, spec, stored);
+  if (path != nullptr) {
+    return path;
+  }
+  path = web_asset_path_for_name(table, spec, fallback);
+  if (path != nullptr) {
+    return path;
+  }
+  return first_matching_path(table, spec);
 }

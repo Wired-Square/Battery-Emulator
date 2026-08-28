@@ -1,4 +1,4 @@
-import { postJson, repaint, skinName, deviceCapabilities } from '/app.js';
+import { postJson, repaint, skinName, deviceCapabilities, t, tf, uptimeText } from '/app.js';
 
 const EMPTY = '—';
 const WH_PER_KWH = 1000;
@@ -54,16 +54,20 @@ function card(title, rows) {
 // A channel is honest about the gap between what was asked and what the
 // device reached: the tick applies the request, the next poll confirms it.
 function channelPill(ch) {
-  if (ch.fault) return el('span', 'pill pill-fault', 'Fault');
-  if (ch.pending) return el('span', 'pill pill-pending', ch.pending_on ? 'Turning on…' : 'Turning off…');
-  return el('span', `pill ${ch.on ? 'pill-on' : 'pill-off'}`, ch.on ? 'On' : 'Off');
+  if (ch.fault) return el('span', 'pill pill-fault', t('ui.fault', 'Fault'));
+  if (ch.pending) {
+    return el('span', 'pill pill-pending',
+              ch.pending_on ? t('ui.turning_on', 'Turning on…') : t('ui.turning_off', 'Turning off…'));
+  }
+  return el('span', `pill ${ch.on ? 'pill-on' : 'pill-off'}`,
+            ch.on ? t('ui.on', 'On') : t('ui.off', 'Off'));
 }
 
 function loadSwitchCard(ls) {
   const c = el('div', 'card');
-  c.append(el('h2', null, 'Load switch'));
+  c.append(el('h2', null, t('ui.load_switch', 'Load switch')));
   if (!ls.device_ok) {
-    c.append(el('div', 'muted', 'Device not responding'));
+    c.append(el('div', 'muted', t('ui.device_not_responding', 'Device not responding')));
     return c;
   }
   ls.channels.forEach((ch, i) => {
@@ -74,7 +78,7 @@ function loadSwitchCard(ls) {
     const actions = el('div', 'channel-actions');
     actions.append(channelPill(ch));
     if (ch.manual) {
-      const btn = el('button', 'btn', ch.on ? 'Turn off' : 'Turn on');
+      const btn = el('button', 'btn', ch.on ? t('ui.turn_off', 'Turn off') : t('ui.turn_on', 'Turn on'));
       btn.type = 'button';
       btn.addEventListener('click', async () => {
         btn.disabled = true;
@@ -110,29 +114,34 @@ function actionButton(label, cls, confirmText, run) {
 // equipment_stop true is the stopped state: contactors open, no power transfer.
 function actionsCard(sys) {
   const c = el('div', 'card');
-  c.append(el('h2', null, 'Actions'));
+  c.append(el('h2', null, t('ui.actions', 'Actions')));
 
   const stopped = sys.equipment_stop === true;
   const contactors = el('div', 'actions');
   contactors.append(
-    actionButton(stopped ? 'Close Contactors' : 'Open Contactors',
+    actionButton(stopped ? t('ui.close_contactors', 'Close Contactors')
+                         : t('ui.open_contactors', 'Open Contactors'),
                  `btn btn-critical ${stopped ? 'btn-ok' : 'btn-fault'}`,
-                 stopped ? CONFIRM_CLOSE_CONTACTORS : CONFIRM_OPEN_CONTACTORS,
+                 stopped ? t('ui.confirm_close_contactors', CONFIRM_CLOSE_CONTACTORS)
+                         : t('ui.confirm_open_contactors', CONFIRM_OPEN_CONTACTORS),
                  async () => repaint(await postJson('/api/equipmentstop', { on: !stopped }))),
-    el('div', 'muted', stopped ? 'Equipment stop active — contactors open.' : 'Power transfer enabled.'),
+    el('div', 'muted', stopped ? t('ui.equipment_stop_active', 'Equipment stop active — contactors open.')
+                               : t('ui.power_transfer_enabled', 'Power transfer enabled.')),
   );
   c.append(contactors);
 
   const paused = sys.paused === true;
   const rest = el('div', 'action-row');
   rest.append(
-    actionButton(paused ? 'Resume charge/discharge' : 'Pause charge/discharge', 'btn',
-                 paused ? null : CONFIRM_PAUSE,
+    actionButton(paused ? t('ui.resume_charge', 'Resume charge/discharge')
+                        : t('ui.pause_charge', 'Pause charge/discharge'), 'btn',
+                 paused ? null : t('ui.confirm_pause', CONFIRM_PAUSE),
                  async () => repaint(await postJson('/api/pause', { on: !paused }))),
-    actionButton('Reboot Emulator', 'btn', CONFIRM_REBOOT, () => fetch('/reboot')),
+    actionButton(t('ui.reboot_emulator', 'Reboot Emulator'), 'btn',
+                 t('ui.confirm_reboot', CONFIRM_REBOOT), () => fetch('/reboot')),
   );
   if (sys.auth === true) {
-    const logout = el('a', 'btn', 'Logout');
+    const logout = el('a', 'btn', t('ui.logout', 'Logout'));
     logout.href = '/logout';
     rest.append(logout);
   }
@@ -149,60 +158,72 @@ export function mount(container) {
 const ROW = {
   identity: () => {
     const caps = deviceCapabilities();
-    return [{ label: 'Software', value: caps.firmware }, { label: 'Hardware', value: caps.hardware }];
+    return [{ key: 'row.software', label: 'Software', value: caps.firmware },
+            { key: 'row.hardware', label: 'Hardware', value: caps.hardware }];
   },
   system: (sys) => [
-    { label: 'Uptime', value: sys.uptime },
-    { label: 'Free heap', value: present(sys.free_heap) ? `${sys.free_heap} B` : null },
+    { key: 'row.uptime', label: 'Uptime', value: uptimeText(sys.uptime_s) ?? sys.uptime },
+    { key: 'row.free_heap', label: 'Free heap', value: present(sys.free_heap) ? `${sys.free_heap} B` : null },
   ],
   wifi: (wifi) => [
-    { label: 'SSID', value: wifi.ssid },
-    { label: 'Status', value: wifi.connected ? 'Connected' : 'Not connected' },
-    { label: 'IP address', value: wifi.ip },
-    { label: 'Hostname', value: wifi.hostname },
-    { label: 'MAC address', value: wifi.mac },
-    { label: 'Signal', value: present(wifi.rssi) ? `${wifi.rssi} dBm (ch ${wifi.channel})` : null },
+    { key: 'row.ssid', label: 'SSID', value: wifi.ssid },
+    { key: 'row.wifi_status', label: 'Status',
+      value: wifi.connected ? t('ui.connected', 'Connected') : t('ui.not_connected', 'Not connected') },
+    { key: 'row.ip', label: 'IP address', value: wifi.ip },
+    { key: 'row.hostname', label: 'Hostname', value: wifi.hostname },
+    { key: 'row.mac', label: 'MAC address', value: wifi.mac },
+    { key: 'row.signal', label: 'Signal',
+      value: present(wifi.rssi) ? `${wifi.rssi} dBm (ch ${wifi.channel})` : null },
   ],
   accessPoint: (wifi) => (wifi.ap_active
-    ? [{ label: 'Access point SSID', value: wifi.ap_ssid }, { label: 'Access point IP', value: wifi.ap_ip }]
+    ? [{ key: 'row.ap_ssid', label: 'Access point SSID', value: wifi.ap_ssid },
+       { key: 'row.ap_ip', label: 'Access point IP', value: wifi.ap_ip }]
     : []),
   power: (sys) => [
-    { label: 'Power status', value: sys.status },
-    { label: 'Contactors', value: sys.equipment_stop === true ? 'Open (equipment stop)' : 'Closed' },
+    { key: 'row.power_status', label: 'Power status', value: sys.status },
+    { key: 'row.contactors', label: 'Contactors',
+      value: sys.equipment_stop === true ? t('ui.contactors_open_estop', 'Open (equipment stop)')
+                                         : t('ui.contactors_closed', 'Closed') },
   ],
-  packProtocol: (pack) => ({ label: `Battery ${pack.slot + 1} protocol`, value: pack.name }),
+  packProtocol: (pack) => ({ key: 'row.battery_protocol', label: 'Battery {} protocol',
+                             arg: pack.slot + 1, value: pack.name }),
   packSummary: (pack) => [
-    { label: 'SOC', value: pct(pack.soc) },
-    { label: 'Real SOC', value: pct(pack.soc_real) },
-    { label: 'Health', value: pct(pack.soh) },
-    { label: 'Voltage', value: unit(pack.voltage, 'V', 1) },
-    { label: 'Current', value: unit(pack.current, 'A', 1) },
-    { label: 'Power', value: present(pack.power) ? `${pack.power} W` : null },
-    { label: 'Cell min', value: present(pack.cell_min_mV) ? `${pack.cell_min_mV} mV` : null },
-    { label: 'Cell max', value: present(pack.cell_max_mV) ? `${pack.cell_max_mV} mV` : null },
+    { key: 'row.soc', label: 'SOC', value: pct(pack.soc) },
+    { key: 'row.soc_real', label: 'Real SOC', value: pct(pack.soc_real) },
+    { key: 'row.soh', label: 'Health', value: pct(pack.soh) },
+    { key: 'row.voltage', label: 'Voltage', value: unit(pack.voltage, 'V', 1) },
+    { key: 'row.current', label: 'Current', value: unit(pack.current, 'A', 1) },
+    { key: 'row.power', label: 'Power', value: present(pack.power) ? `${pack.power} W` : null },
+    { key: 'row.cell_min', label: 'Cell min', value: present(pack.cell_min_mV) ? `${pack.cell_min_mV} mV` : null },
+    { key: 'row.cell_max', label: 'Cell max', value: present(pack.cell_max_mV) ? `${pack.cell_max_mV} mV` : null },
   ],
   packDetail: (pack) => [
-    { label: 'Total capacity', value: kwh(pack.total_wh) },
-    { label: 'Remaining capacity', value: kwh(pack.remaining_wh) },
-    { label: 'Max discharge power', value: kw(pack.max_discharge_w) },
-    { label: 'Max charge power', value: kw(pack.max_charge_w) },
-    { label: 'Max discharge current', value: unit(pack.max_discharge_a, 'A', 1) },
-    { label: 'Max charge current', value: unit(pack.max_charge_a, 'A', 1) },
-    { label: 'Cell delta', value: cellDelta(pack) },
-    { label: 'Temperature min/max', value: tempRange(pack) },
+    { key: 'row.total_capacity', label: 'Total capacity', value: kwh(pack.total_wh) },
+    { key: 'row.remaining_capacity', label: 'Remaining capacity', value: kwh(pack.remaining_wh) },
+    { key: 'row.max_discharge_power', label: 'Max discharge power', value: kw(pack.max_discharge_w) },
+    { key: 'row.max_charge_power', label: 'Max charge power', value: kw(pack.max_charge_w) },
+    { key: 'row.max_discharge_current', label: 'Max discharge current',
+      value: unit(pack.max_discharge_a, 'A', 1) },
+    { key: 'row.max_charge_current', label: 'Max charge current', value: unit(pack.max_charge_a, 'A', 1) },
+    { key: 'row.cell_delta', label: 'Cell delta', value: cellDelta(pack) },
+    { key: 'row.temp_range', label: 'Temperature min/max', value: tempRange(pack) },
   ],
   charger: (chg) => [
-    { label: 'Type', value: chg.name },
-    { label: 'Status', value: chg.alive ? 'Connected' : 'Not responding' },
-    { label: 'HV output', value: pair(chg.hv_v, 'V', chg.hv_a, 'A') },
-    { label: 'AC input', value: pair(chg.ac_v, 'V', chg.ac_a, 'A') },
-    { label: 'LV output', value: pair(chg.lv_v, 'V', chg.lv_a, 'A') },
-    { label: 'HV charging', value: chg.hv_enabled ? 'Enabled' : 'Disabled' },
-    { label: 'Aux 12V', value: chg.aux12v_enabled ? 'Enabled' : 'Disabled' },
+    { key: 'row.charger_type', label: 'Type', value: chg.name },
+    { key: 'row.charger_status', label: 'Status',
+      value: chg.alive ? t('ui.connected', 'Connected') : t('ui.not_responding', 'Not responding') },
+    { key: 'row.hv_output', label: 'HV output', value: pair(chg.hv_v, 'V', chg.hv_a, 'A') },
+    { key: 'row.ac_input', label: 'AC input', value: pair(chg.ac_v, 'V', chg.ac_a, 'A') },
+    { key: 'row.lv_output', label: 'LV output', value: pair(chg.lv_v, 'V', chg.lv_a, 'A') },
+    { key: 'row.hv_charging', label: 'HV charging',
+      value: chg.hv_enabled ? t('ui.enabled', 'Enabled') : t('ui.disabled', 'Disabled') },
+    { key: 'row.aux12v', label: 'Aux 12V',
+      value: chg.aux12v_enabled ? t('ui.enabled', 'Enabled') : t('ui.disabled', 'Disabled') },
   ],
   events: (ev) => [
-    { label: 'Active', value: ev.active },
-    { label: 'Latest', value: ev.latest },
+    { key: 'row.events_active', label: 'Active', value: ev.active },
+    { key: 'row.events_latest', label: 'Latest',
+      value: present(ev.latest) ? t(`event.${ev.latest_type}`, ev.latest) : null },
   ],
 };
 
@@ -221,29 +242,32 @@ function modelModern(state) {
   const wifi = state.wifi ?? {};
   const blocks = [
     { id: 'actions', section: 'actions', kind: 'component', build: () => actionsCard(sys) },
-    { id: 'system', section: 'system', title: 'System',
-      kind: 'rows', rows: [{ label: 'Status', value: sys.status }, ...ROW.system(sys)] },
-    { id: 'wifi', section: 'wifi', title: 'Wi-Fi network', kind: 'rows', rows: ROW.wifi(wifi) },
+    { id: 'system', section: 'system', title: t('ui.system', 'System'),
+      kind: 'rows', rows: [{ key: 'row.system_status', label: 'Status', value: sys.status }, ...ROW.system(sys)] },
+    { id: 'wifi', section: 'wifi', title: t('ui.wifi_network', 'Wi-Fi network'), kind: 'rows', rows: ROW.wifi(wifi) },
   ];
   if (wifi.ap_active) {
-    blocks.push({ id: 'wifiap', section: 'wifiap', title: 'Wi-Fi access point', kind: 'rows',
-      rows: [{ label: 'SSID', value: wifi.ap_ssid }, { label: 'IP address', value: wifi.ap_ip }] });
+    blocks.push({ id: 'wifiap', section: 'wifiap', title: t('ui.wifi_access_point', 'Wi-Fi access point'), kind: 'rows',
+      rows: [{ key: 'row.ssid', label: 'SSID', value: wifi.ap_ssid },
+             { key: 'row.ip', label: 'IP address', value: wifi.ap_ip }] });
   }
   (state.batteries ?? []).forEach((pack) => {
-    blocks.push({ id: `battery${pack.slot}`, section: 'battery', title: `Battery ${pack.slot + 1}`,
+    blocks.push({ id: `battery${pack.slot}`, section: 'battery', title: tf('ui.battery_n', 'Battery {}', pack.slot + 1),
       kind: 'rows', status: sys.emulator_status,
-      rows: [{ label: 'Protocol', value: pack.name }, ...ROW.packSummary(pack), ...ROW.packDetail(pack)] });
+      rows: [{ key: 'row.protocol', label: 'Protocol', value: pack.name },
+             ...ROW.packSummary(pack), ...ROW.packDetail(pack)] });
   });
   if (state.inverter) {
-    blocks.push({ id: 'inverter', section: 'inverter', title: 'Inverter', kind: 'rows',
-      rows: [{ label: 'Protocol', value: state.inverter.name }] });
+    blocks.push({ id: 'inverter', section: 'inverter', title: t('ui.inverter', 'Inverter'), kind: 'rows',
+      rows: [{ key: 'row.protocol', label: 'Protocol', value: state.inverter.name }] });
   }
   if (state.charger) {
-    blocks.push({ id: 'charger', section: 'charger', title: 'Charger', kind: 'rows',
+    blocks.push({ id: 'charger', section: 'charger', title: t('ui.charger', 'Charger'), kind: 'rows',
       rows: ROW.charger(state.charger) });
   }
   if (state.events) {
-    blocks.push({ id: 'events', section: 'events', title: 'Events', kind: 'rows', rows: ROW.events(state.events) });
+    blocks.push({ id: 'events', section: 'events', title: t('ui.events', 'Events'), kind: 'rows',
+      rows: ROW.events(state.events) });
   }
   if (state.load_switch) {
     blocks.push({ id: 'loadswitch', section: 'loadswitch', kind: 'component',
@@ -260,7 +284,7 @@ function modelLegacy(state) {
     { id: 'identity', section: 'system', kind: 'rows',
       rows: [...ROW.identity(), ...ROW.system(sys), ...ROW.wifi(wifi), ...ROW.accessPoint(wifi)] },
     { id: 'protocols', section: 'inverter', kind: 'rows',
-      rows: [{ label: 'Inverter protocol', value: state.inverter?.name },
+      rows: [{ key: 'row.inverter_protocol', label: 'Inverter protocol', value: state.inverter?.name },
              ...packs.map((pack) => ROW.packProtocol(pack))] },
   ];
   packs.forEach((pack) => {
@@ -285,17 +309,19 @@ function modelLegacy(state) {
 function vitalsRow(state) {
   const b = state.battery ?? {};
   const vitals = el('div', 'vitals');
-  vitals.append(tile('SOC', b.soc?.toFixed(1), '%'),
-                tile('Voltage', b.voltage?.toFixed(1), 'V'),
-                tile('Current', b.current?.toFixed(1), 'A'),
-                tile('Power', b.power, 'W'));
+  vitals.append(tile(t('row.soc', 'SOC'), b.soc?.toFixed(1), '%'),
+                tile(t('row.voltage', 'Voltage'), b.voltage?.toFixed(1), 'V'),
+                tile(t('row.current', 'Current'), b.current?.toFixed(1), 'A'),
+                tile(t('row.power', 'Power'), b.power, 'W'));
   return vitals;
 }
 
 function paint(blocks, active, state) {
   const cards = el('div', 'cards');
   blocks.forEach((b) => {
-    const node = b.kind === 'component' ? b.build() : card(b.title, b.rows.map((r) => row(r.label, r.value)));
+    const node = b.kind === 'component'
+      ? b.build()
+      : card(b.title, b.rows.map((r) => row(tf(r.key, r.label, r.arg), r.value)));
     node.dataset.section = b.section;
     if (b.status) node.dataset.status = b.status;
     cards.append(node);

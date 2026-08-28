@@ -179,6 +179,10 @@ body {
 .card-aligned-preview { grid-row: span 4; }
 .card-aligned-preview > .log-pre { grid-row: 4; }
 .row { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; }
+.field-note { text-align: left; }
+.row > span:first-child { flex-shrink: 0; }
+.row-value { min-width: 0; }
+.row > span:first-child, .tile-label, .field label { word-break: keep-all; }
 .row-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .pill {
   display: inline-block;
@@ -268,6 +272,7 @@ a.btn { display: inline-block; text-decoration: none; }
   color: var(--text);
 }
 .field input[type="checkbox"] { width: auto; justify-self: start; accent-color: var(--accent); }
+.field > .btn { width: 100%; }
 .field input[type="file"]::file-selector-button {
   font-family: inherit;
   font-size: var(--font-size-sm);
@@ -459,7 +464,9 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 :root[data-skin="legacy"] .settings-panel > h3 + .settings-subsection { border-top: 0; }
 :root[data-skin="legacy"] .field { grid-template-columns: 1fr 1.5fr; gap: var(--block-gap); }
-:root[data-skin="legacy"] .field input, :root[data-skin="legacy"] .field select { max-width: var(--field-max-width); }
+:root[data-skin="legacy"] .field input,
+:root[data-skin="legacy"] .field select,
+:root[data-skin="legacy"] .field > .btn { max-width: var(--field-max-width); }
 :root[data-skin="legacy"] .navbuttons {
   max-width: var(--content-max-width);
   margin: var(--space-3) auto;

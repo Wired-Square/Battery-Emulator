@@ -53,11 +53,11 @@ static constexpr float MS_PER_SECOND = 1000.0f;
 static constexpr int BYD_AUTOCAL_DRIFT_MIN = 1;
 static constexpr int BYD_AUTOCAL_DRIFT_MAX = 20;
 
-static char web_ui_shell_name[kMaxUiShellNameLen + 1] = "";
+static char web_ui_shell_name[kMaxAssetNameLen + 1] = "";
 
 static void refresh_web_ui_shell(BatteryEmulatorSettingsStore& store) {
   const String stored = store.getString("WEBUI", kDefaultUiShell);
-  const size_t len = stored.length() < kMaxUiShellNameLen ? stored.length() : kMaxUiShellNameLen;
+  const size_t len = stored.length() < kMaxAssetNameLen ? stored.length() : kMaxAssetNameLen;
   memcpy(web_ui_shell_name, stored.c_str(), len);
   web_ui_shell_name[len] = '\0';
 }
@@ -379,8 +379,9 @@ void init_webserver() {
     ota_active = false;
     const AsyncWebParameter* requested = request->getParam("ui");
     const char* asset =
-        resolve_ui_shell_asset(default_ui_shell_table(),
-                               requested != nullptr ? requested->value().c_str() : nullptr, web_ui_shell_name);
+        resolve_named_asset(default_web_asset_table(), kUiShellSpec,
+                            requested != nullptr ? requested->value().c_str() : nullptr, web_ui_shell_name,
+                            kDefaultUiShell);
     if (asset == nullptr) {
       return request->send(HTTP_STATUS_INTERNAL_SERVER_ERROR, "text/plain", "Missing asset");
     }
@@ -492,7 +493,15 @@ void init_webserver() {
     BatteryEmulatorSettingsStore settings;
     SettingsApplyResult result = apply_settings_json(settings, doc.as<JsonObjectConst>());
     if (!result.ok) {
-      return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", result.error);
+      JsonDocument failure;
+      failure["error"] = result.error;
+      if (result.error_key != nullptr) {
+        failure["error_key"] = result.error_key;
+        if (result.error_arg.length() > 0) {
+          failure["error_arg"] = result.error_arg;
+        }
+      }
+      return request->send(HTTP_STATUS_BAD_REQUEST, CONTENT_TYPE_JSON, serialise_doc(failure));
     }
     settingsUpdated |= result.changed;
     refresh_web_ui_shell(settings);
@@ -1036,6 +1045,7 @@ static void add_state_events(JsonObject events) {
   events["active"] = active;
   if (newest != EVENT_NOF_EVENTS) {
     events["latest"] = get_event_message_string(newest);
+    events["latest_type"] = get_event_enum_string(newest);
   }
 }
 

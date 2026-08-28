@@ -1447,3 +1447,63 @@ TEST_F(SettingsApiTest, BootFieldStillRequiresReboot) {
   ASSERT_TRUE(result.ok) << result.error.c_str();
   EXPECT_TRUE(result.reboot_required);
 }
+
+
+
+
+
+
+
+TEST_F(SettingsApiTest, RejectionCarriesKeyForPasswordMismatch) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["HTTPPASS"] = "correct-horse";
+  doc["values"]["HTTPPASSCONFIRM"] = "battery-staple";
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  ASSERT_FALSE(result.ok);
+  EXPECT_STREQ(result.error_key, "error.webauth_password_mismatch");
+  EXPECT_STREQ(result.error_arg.c_str(), "");
+}
+
+TEST_F(SettingsApiTest, RejectionCarriesKeyAndArgForWrongType) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["SSID"] = 42;
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  ASSERT_FALSE(result.ok);
+  EXPECT_STREQ(result.error_key, "error.setting_invalid_type");
+  EXPECT_STREQ(result.error_arg.c_str(), "SSID");
+}
+
+TEST_F(SettingsApiTest, RejectionCarriesKeyAndArgForOutOfRange) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["WIFICHANNEL"] = 99;
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  ASSERT_FALSE(result.ok);
+  EXPECT_STREQ(result.error_key, "error.setting_out_of_range");
+  EXPECT_STREQ(result.error_arg.c_str(), "WIFICHANNEL");
+}
+
+TEST_F(SettingsApiTest, RejectionCarriesKeyForUnknownBatterySlot) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["dynamic"]["batteries"][0]["slot"] = kMaxBatterySlots;
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  ASSERT_FALSE(result.ok);
+  EXPECT_STREQ(result.error_key, "error.battery_slot_unknown");
+}
+
+TEST_F(SettingsApiTest, AcceptedApplyCarriesNoErrorKey) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument doc;
+  doc["values"]["SSID"] = "bench";
+  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  ASSERT_TRUE(result.ok) << result.error.c_str();
+  EXPECT_EQ(result.error_key, nullptr);
+}

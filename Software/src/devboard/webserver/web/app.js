@@ -3,12 +3,181 @@ const STALE_AFTER_MS = 5000;
 // Slack for the reboot gap check: covers RTT, poll jitter, and uptime_s truncation.
 const REBOOT_GAP_SLACK_MS = 2000;
 const THEME_KEY = 'be-theme';
+const LANG_KEY = 'be-lang';
+const PACK_KEY_PREFIX = 'be-i18n-';
+const REVISION_KEY = 'be-translations-revision';
+const SOURCE_LANGUAGE = 'en';
+const I18N_INDEX_URL = 'https://wired-square.github.io/battery-emulator-i18n/index.json';
+const MAX_PACK_BYTES = 262144;
+const MAX_LANGUAGES = 64;
 
 export const skinName = document.documentElement.dataset.skin ?? 'modern';
 
 let capabilities = {};
 export function deviceCapabilities() {
   return capabilities;
+}
+
+let dictionary = {};
+
+const PINNED_KEYS = new Set([
+  'ui.open_contactors', 'ui.close_contactors',
+  'ui.confirm_open_contactors', 'ui.confirm_close_contactors',
+  'ui.confirm_pause', 'ui.confirm_reboot',
+]);
+
+export function t(key, fallback) {
+  if (PINNED_KEYS.has(key)) return fallback ?? key;
+  const translated = dictionary[key];
+  return typeof translated === 'string' && translated.length > 0 ? translated : (fallback ?? key);
+}
+
+export function tf(key, fallback, ...args) {
+  let text = t(key, fallback);
+  for (const arg of args) text = text.replace('{}', () => String(arg));
+  return text;
+}
+
+function readStored(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function currentLanguage() {
+  return readStored(LANG_KEY) ?? SOURCE_LANGUAGE;
+}
+
+function usableStrings(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const strings = {};
+  for (const [key, text] of Object.entries(value)) {
+    if (typeof text === 'string') strings[key] = text;
+  }
+  return Object.keys(strings).length > 0 ? strings : null;
+}
+
+function storedPack(lang) {
+  const raw = readStored(PACK_KEY_PREFIX + lang);
+  if (!raw) return null;
+  try {
+    const pack = JSON.parse(raw);
+    return pack && typeof pack.name === 'string' && pack.strings ? pack : null;
+  } catch {
+    return null;
+  }
+}
+
+export function cachedLanguages() {
+  const codes = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(PACK_KEY_PREFIX)) codes.push(key.slice(PACK_KEY_PREFIX.length));
+    }
+  } catch {
+    /* ignored */
+  }
+  return codes.sort().map((code) => ({ code, name: storedPack(code)?.name ?? code }));
+}
+
+function applyLanguage(lang) {
+  document.documentElement.lang = lang;
+  dictionary = lang === SOURCE_LANGUAGE ? {} : (storedPack(lang)?.strings ?? {});
+  translateShell();
+}
+
+async function fetchLanguageIndex() {
+  const res = await fetchWithTimeout(I18N_INDEX_URL, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`${I18N_INDEX_URL} -> ${res.status}`);
+  const index = await res.json();
+  const languages = Array.isArray(index?.languages) ? index.languages : [];
+  return {
+    revision: typeof index?.revision === 'string' ? index.revision : '',
+    languages: languages.filter((entry) => typeof entry?.code === 'string' && typeof entry?.path === 'string'),
+  };
+}
+
+async function downloadLanguage(entry) {
+  const url = new URL(entry.path, I18N_INDEX_URL);
+  if (url.origin !== new URL(I18N_INDEX_URL).origin) throw new Error('pack is off-origin');
+  const res = await fetchWithTimeout(url.href, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`${entry.path} -> ${res.status}`);
+  const body = await res.text();
+  if (body.length > MAX_PACK_BYTES) throw new Error('pack too large');
+  const strings = usableStrings(JSON.parse(body));
+  if (!strings) throw new Error('pack has no usable strings');
+  const stored = JSON.stringify({ name: entry.name ?? entry.code, strings });
+  const changed = stored !== readStored(PACK_KEY_PREFIX + entry.code);
+  if (!writeStored(PACK_KEY_PREFIX + entry.code, stored)) {
+    throw new Error('no room to store this pack');
+  }
+  return changed;
+}
+
+// Deliberately never reloads: a refresh mid-edit would discard unsaved settings.
+async function syncTranslations() {
+  let index;
+  try {
+    index = await fetchLanguageIndex();
+  } catch {
+    return;
+  }
+  if (index.revision && index.revision === readStored(REVISION_KEY)) {
+    return;
+  }
+  let complete = true;
+  for (const entry of index.languages.slice(0, MAX_LANGUAGES)) {
+    try {
+      await downloadLanguage(entry);
+    } catch {
+      complete = false;
+    }
+  }
+  if (complete && index.languages.length <= MAX_LANGUAGES) {
+    writeStored(REVISION_KEY, index.revision);
+  }
+  window.dispatchEvent(new CustomEvent('be-languages-changed'));
+}
+
+export function setLanguage(lang) {
+  if (writeStored(LANG_KEY, lang)) {
+    location.reload();
+  }
+}
+
+function translateShell() {
+  for (const node of document.querySelectorAll('[data-i18n]')) {
+    node.textContent = t(node.dataset.i18n, node.textContent);
+  }
+  for (const node of document.querySelectorAll('[data-i18n-attr]')) {
+    const [attr, key] = node.dataset.i18nAttr.split(':');
+    node.setAttribute(attr, t(key, node.getAttribute(attr)));
+  }
+}
+
+const SECONDS_PER_MINUTE = 60;
+const SECONDS_PER_HOUR = 3600;
+const SECONDS_PER_DAY = 86400;
+
+export function uptimeText(seconds) {
+  if (typeof seconds !== 'number') return null;
+  return tf('time.uptime', '{} days, {} hours, {} minutes, {} seconds',
+            Math.floor(seconds / SECONDS_PER_DAY),
+            Math.floor((seconds % SECONDS_PER_DAY) / SECONDS_PER_HOUR),
+            Math.floor((seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE),
+            seconds % SECONDS_PER_MINUTE);
 }
 
 const routes = {
@@ -104,7 +273,7 @@ function markHeartbeat(ok) {
   el.classList.toggle('live', !stale);
   el.classList.toggle('stale', stale);
   // Colour alone is not a status for anyone using a screen reader.
-  el.setAttribute('aria-label', stale ? 'Device not responding' : 'Live');
+  el.setAttribute('aria-label', stale ? t('ui.device_not_responding', 'Device not responding') : t('ui.live', 'Live'));
 }
 
 // Routes repaint from any state document, whether it came from the poll or
@@ -155,7 +324,7 @@ async function poll() {
 function showRouteError() {
   const content = document.getElementById('content');
   content.replaceChildren();
-  content.textContent = 'This view failed to load.';
+  content.textContent = t('ui.view_failed', 'This view failed to load.');
   for (const item of document.querySelectorAll('[data-route]')) {
     item.removeAttribute('aria-current');
   }
@@ -268,6 +437,8 @@ function navigate() {
   return navChain;
 }
 window.addEventListener('hashchange', navigate);
+applyLanguage(currentLanguage());
 navigate();
 initIdentity();
 setInterval(poll, POLL_INTERVAL_MS);
+syncTranslations();

@@ -1,5 +1,5 @@
 #include "web_ui_selection.h"
 
-UiShellTable default_ui_shell_table() {
-  return UiShellTable{kWebAssets, kWebAssetCount};
+WebAssetTable default_web_asset_table() {
+  return WebAssetTable{kWebAssets, kWebAssetCount};
 }

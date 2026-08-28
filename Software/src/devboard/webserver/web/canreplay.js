@@ -1,4 +1,4 @@
-import { getJson, postJson, fetchWithTimeout } from '/app.js';
+import { getJson, postJson, fetchWithTimeout, t } from '/app.js';
 
 const REFRESH_MS = 2000;
 const IMPORT_URL = '/import_can_log';
@@ -41,7 +41,7 @@ function applyRunState(data) {
   hasLog = data.has_log;
   startBtn.disabled = data.running || !hasLog;
   stopBtn.disabled = !data.running;
-  statusPill.textContent = data.running ? 'Running' : 'Stopped';
+  statusPill.textContent = data.running ? t('ui.running', 'Running') : t('ui.stopped', 'Stopped');
   statusPill.className = `pill ${data.running ? 'pill-on' : 'pill-off'}`;
 }
 
@@ -51,7 +51,7 @@ async function refresh() {
 
 function interfaceSection(data) {
   const section = el('div', 'card card-rows card-aligned');
-  section.append(cardHead('Playback interface'));
+  section.append(cardHead(t('ui.playback_interface', 'Playback interface')));
 
   const select = el('select');
   data.interfaces.forEach((iface) => {
@@ -62,19 +62,19 @@ function interfaceSection(data) {
   });
   const none = !data.interfaces.length;
   if (none) {
-    select.append(el('option', null, 'No CAN interface available'));
+    select.append(el('option', null, t('ui.no_can_interface', 'No CAN interface available')));
     select.disabled = true;
   }
-  section.append(field('CAN interface', select));
+  section.append(field(t('ui.can_interface', 'CAN interface'), select));
 
-  const apply = el('button', 'btn', 'Apply');
+  const apply = el('button', 'btn', t('ui.apply', 'Apply'));
   apply.type = 'button';
   apply.disabled = none;
   apply.addEventListener('click', async () => {
     try {
       applyRunState(await postJson('/api/canreplay/interface', { interface: Number(select.value) }));
     } catch {
-      window.alert('Could not select the interface.');
+      window.alert(t('ui.interface_select_failed', 'Could not select the interface.'));
     }
   });
   const bar = el('div', 'action-row');
@@ -85,7 +85,7 @@ function interfaceSection(data) {
 
 function uploadSection() {
   const section = el('div', 'card card-rows card-aligned');
-  section.append(cardHead('Log file'));
+  section.append(cardHead(t('ui.log_file', 'Log file')));
 
   const input = el('input');
   input.type = 'file';
@@ -93,16 +93,16 @@ function uploadSection() {
   input.addEventListener('change', () => {
     selectedFile = input.files[0] ?? null;
   });
-  section.append(field('CANdump .txt', input));
+  section.append(field(t('ui.candump_txt', 'CANdump .txt'), input));
 
   const preview = el('pre', 'log-pre');
   preview.hidden = true;
 
-  const upload = el('button', 'btn', 'Upload');
+  const upload = el('button', 'btn', t('ui.upload', 'Upload'));
   upload.type = 'button';
   upload.addEventListener('click', async () => {
     if (!selectedFile) {
-      window.alert('Select a .txt log file first.');
+      window.alert(t('ui.select_txt_first', 'Select a .txt log file first.'));
       return;
     }
     const body = new FormData();
@@ -111,7 +111,7 @@ function uploadSection() {
       const res = await fetchWithTimeout(IMPORT_URL, { method: 'POST', body });
       if (!res.ok) throw new Error();
     } catch {
-      window.alert('Upload failed.');
+      window.alert(t('ui.upload_failed', 'Upload failed.'));
       return;
     }
     preview.textContent = await selectedFile.text();
@@ -128,31 +128,31 @@ function uploadSection() {
 function playbackSection(data) {
   const section = el('div', 'card card-rows card-aligned');
 
-  statusPill = el('span', 'pill pill-off', 'Stopped');
-  section.append(cardHead('Playback', statusPill));
+  statusPill = el('span', 'pill pill-off', t('ui.stopped', 'Stopped'));
+  section.append(cardHead(t('ui.playback', 'Playback'), statusPill));
 
   const loop = el('input');
   loop.type = 'checkbox';
   loop.checked = data.loop;
-  section.append(field('Loop', loop));
+  section.append(field(t('ui.loop', 'Loop'), loop));
 
-  startBtn = el('button', 'btn btn-ok', 'Start');
+  startBtn = el('button', 'btn btn-ok', t('ui.start', 'Start'));
   startBtn.type = 'button';
   startBtn.addEventListener('click', async () => {
     try {
       applyRunState(await postJson('/api/canreplay/start', { loop: loop.checked }));
     } catch {
-      window.alert('Could not start replay (already running?).');
+      window.alert(t('ui.replay_start_failed', 'Could not start replay (already running?).'));
     }
   });
 
-  stopBtn = el('button', 'btn btn-fault', 'Stop');
+  stopBtn = el('button', 'btn btn-fault', t('ui.stop', 'Stop'));
   stopBtn.type = 'button';
   stopBtn.addEventListener('click', async () => {
     try {
       applyRunState(await postJson('/api/canreplay/stop', {}));
     } catch {
-      window.alert('Could not stop replay.');
+      window.alert(t('ui.replay_stop_failed', 'Could not stop replay.'));
     }
   });
 
@@ -165,7 +165,7 @@ function playbackSection(data) {
 function paint(data) {
   const cards = el('div', 'cards');
   cards.append(interfaceSection(data), uploadSection(), playbackSection(data));
-  root.replaceChildren(el('h1', 'page-title', 'CAN replay'), cards);
+  root.replaceChildren(el('h1', 'page-title', t('ui.can_replay', 'CAN replay')), cards);
   applyRunState(data);
 }
 

@@ -1,4 +1,4 @@
-import { getJson, postJson, fetchWithTimeout } from '/app.js';
+import { getJson, postJson, fetchWithTimeout, t, tf } from '/app.js';
 
 // user_selected_CAN_ID_cutoff_filter is a uint16_t on the device.
 const CAN_ID_CUTOFF_MIN = 0;
@@ -15,46 +15,47 @@ let root = null;
 
 function actionBar(data, reload) {
   const bar = el('div', 'action-row');
-  const refresh = el('button', 'btn', 'Refresh');
+  const refresh = el('button', 'btn', t('ui.refresh', 'Refresh'));
   refresh.type = 'button';
-  refresh.addEventListener('click', () => reload().catch(() => window.alert('Could not refresh the CAN log.')));
+  refresh.addEventListener('click', () => reload().catch(() => window.alert(t('ui.canlog_refresh_failed', 'Could not refresh the CAN log.'))));
 
-  const cutoff = el('button', 'btn', `Edit CAN-ID cutoff (${data.cutoff})`);
+  const cutoff = el('button', 'btn', tf('ui.edit_canid_cutoff', 'Edit CAN-ID cutoff ({})', data.cutoff));
   cutoff.type = 'button';
   cutoff.addEventListener('click', async () => {
     const entry = window.prompt(
-      `Ignore CAN IDs at or below (${CAN_ID_CUTOFF_MIN}-${CAN_ID_CUTOFF_MAX}):`,
+      tf('ui.canid_cutoff_prompt', 'Ignore CAN IDs at or below ({}-{}):', CAN_ID_CUTOFF_MIN, CAN_ID_CUTOFF_MAX),
       String(data.cutoff),
     );
     if (entry === null) return;
     const value = Number(entry);
     if (!Number.isInteger(value) || value < CAN_ID_CUTOFF_MIN || value > CAN_ID_CUTOFF_MAX) {
-      window.alert(`Enter a whole number between ${CAN_ID_CUTOFF_MIN} and ${CAN_ID_CUTOFF_MAX}.`);
+      window.alert(tf('ui.canid_cutoff_range', 'Enter a whole number between {} and {}.',
+                      CAN_ID_CUTOFF_MIN, CAN_ID_CUTOFF_MAX));
       return;
     }
     try {
       await postJson('/api/canidcutoff', { cutoff: value });
     } catch {
-      window.alert('Could not update the CAN-ID cutoff.');
+      window.alert(t('ui.canid_cutoff_failed', 'Could not update the CAN-ID cutoff.'));
       return;
     }
     reload();
   });
 
-  const exportLink = el('a', 'btn', 'Export to .txt');
+  const exportLink = el('a', 'btn', t('ui.export_txt', 'Export to .txt'));
   exportLink.href = '/export_can_log';
 
   bar.append(refresh, cutoff, exportLink);
   if (data.sd) {
-    const del = el('button', 'btn btn-fault', 'Delete log file');
+    const del = el('button', 'btn btn-fault', t('ui.delete_log_file', 'Delete log file'));
     del.type = 'button';
     del.addEventListener('click', async () => {
-      if (!window.confirm('Delete the CAN log file on the SD card?')) return;
+      if (!window.confirm(t('ui.confirm_delete_canlog', 'Delete the CAN log file on the SD card?'))) return;
       try {
         const res = await fetchWithTimeout('/delete_can_log');
         if (!res.ok) throw new Error();
       } catch {
-        window.alert('Could not delete the CAN log file.');
+        window.alert(t('ui.canlog_delete_failed', 'Could not delete the CAN log file.'));
         return;
       }
       reload();
@@ -66,10 +67,10 @@ function actionBar(data, reload) {
 
 function paint(data, reload) {
   const wrap = el('div');
-  wrap.append(el('h1', 'page-title', 'CAN log'));
+  wrap.append(el('h1', 'page-title', t('ui.can_log', 'CAN log')));
   wrap.append(actionBar(data, reload));
   const list = el('div', 'log-list');
-  if (data.lines.length === 0) list.append(el('div', 'muted', 'No messages logged yet.'));
+  if (data.lines.length === 0) list.append(el('div', 'muted', t('ui.no_messages_logged', 'No messages logged yet.')));
   else data.lines.forEach((line) => list.append(el('div', 'can-message', line)));
   wrap.append(list);
   root.replaceChildren(wrap);

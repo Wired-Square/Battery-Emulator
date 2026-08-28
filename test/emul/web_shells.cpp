@@ -12,6 +12,6 @@ const WebAsset kFixtureAssets[] = {
 
 }  // namespace
 
-UiShellTable default_ui_shell_table() {
-  return UiShellTable{kFixtureAssets, 3};
+WebAssetTable default_web_asset_table() {
+  return WebAssetTable{kFixtureAssets, 3};
 }

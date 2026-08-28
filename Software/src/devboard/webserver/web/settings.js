@@ -1,4 +1,6 @@
-import { getJson, postJson, skinName } from '/app.js';
+import {
+  getJson, postJson, skinName, t, tf, currentLanguage, cachedLanguages, setLanguage,
+} from '/app.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -8,15 +10,15 @@ const el = (tag, cls, text) => {
 };
 
 const CATEGORIES = [
-  ['network', 'Network'],
-  ['webauth', 'Web access'],
-  ['battery', 'Battery'],
-  ['inverter', 'Inverter'],
-  ['optional', 'Optional'],
-  ['hardware', 'Hardware'],
-  ['connectivity', 'Connectivity'],
-  ['debug', 'Debug'],
-  ['interface', 'Interface'],
+  ['network', t('category.network', 'Network')],
+  ['webauth', t('category.webauth', 'Web access')],
+  ['battery', t('category.battery', 'Battery')],
+  ['inverter', t('category.inverter', 'Inverter')],
+  ['optional', t('category.optional', 'Optional')],
+  ['hardware', t('category.hardware', 'Hardware')],
+  ['connectivity', t('category.connectivity', 'Connectivity')],
+  ['debug', t('category.debug', 'Debug')],
+  ['interface', t('category.interface', 'Interface')],
 ];
 
 // Ordered by id, matching the server's emission (e.g. pack is 50/74/62/100, not by capacity).
@@ -192,14 +194,14 @@ const LABELS = {
 // natively, so optional blank fields (unset IPs, hostname, anonymous MQTT) still save.
 const IPV4_PATTERN = '((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)';
 const HELP = {
-  HADISC:
-    'Publish the discovery configs once after the next restart. Clears itself once they have been published.',
-  HADISCFWU:
-    'Publish the discovery configs once after every firmware update. They carry the software version and can gain or change entities between releases.',
-  HADISCTOPIC: "MQTT auto discovery base topic (letters, numbers, '_', '-')",
-  ESPNOWENABLED: 'Send battery telemetry to nearby devices over ESP-NOW',
-  ESPNOWMACS:
-    'Comma separated list of receiver MAC addresses, e.g. AA:BB:CC:DD:EE:FF, 11:22:33:44:55:66 (max 8). Leave empty to broadcast to every device. Takes effect after a restart.',
+  HADISC: t('help.HADISC',
+    'Publish the discovery configs once after the next restart. Clears itself once they have been published.'),
+  HADISCFWU: t('help.HADISCFWU',
+    'Publish the discovery configs once after every firmware update. They carry the software version and can gain or change entities between releases.'),
+  HADISCTOPIC: t('help.HADISCTOPIC', "MQTT auto discovery base topic (letters, numbers, '_', '-')"),
+  ESPNOWENABLED: t('help.ESPNOWENABLED', 'Send battery telemetry to nearby devices over ESP-NOW'),
+  ESPNOWMACS: t('help.ESPNOWMACS',
+    'Comma separated list of receiver MAC addresses, e.g. AA:BB:CC:DD:EE:FF, 11:22:33:44:55:66 (max 8). Leave empty to broadcast to every device. Takes effect after a restart.'),
 };
 
 const PATTERNS = {
@@ -222,6 +224,8 @@ const PATTERNS = {
   APPASSWORD: '[ -~]{8,63}',
   PASSWORD: '[ -~]{8,63}',
 };
+
+const RELOAD_ON_CHANGE = ['WEBUI'];
 
 const PASSWORD_KEYS = new Set(['PASSWORD', 'HTTPPASS', 'HTTPPASSCONFIRM', 'APPASSWORD', 'MQTTPASSWORD']);
 // Stored secrets that can be explicitly cleared (sent as JSON null). HTTPPASSCONFIRM is not stored.
@@ -346,7 +350,7 @@ const NUMERIC_TYPES = new Set(['uint', 'int', 'float', 'seconds']);
 const prettify = (key) =>
   key.trim().replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
-const labelFor = (field) => field.label ?? LABELS[field.key] ?? prettify(field.key);
+const labelFor = (field) => t(`setting.${field.key}`, field.label ?? LABELS[field.key] ?? prettify(field.key));
 
 // Live controls apply on the device immediately, unlike the reboot-gated schema categories.
 const SETTINGS_SKINS = {
@@ -359,112 +363,120 @@ const skin = SETTINGS_SKINS[skinName] ?? SETTINGS_SKINS.modern;
 const LIVE_CATEGORY = 'live';
 
 const DYNAMIC_CATEGORY = 'hardware';
+const INTERFACE_CATEGORY = 'interface';
+const SOURCE_LANGUAGE = 'en';
 const BATTERY_CATEGORY = 'battery';
-const BATTERIES_TITLE = 'Batteries';
+const BATTERIES_TITLE = t('ui.batteries', 'Batteries');
 const MAX_BATTERY_SLOTS = 3;
-const TERMINATION_TITLE = 'Bus termination';
-const LOAD_SWITCH_TITLE = 'Load switch';
-const LOAD_SWITCH_NOTE = 'Role changes take effect after reboot; duty and divisor apply immediately on save.';
+const TERMINATION_TITLE = t('ui.bus_termination', 'Bus termination');
+const LOAD_SWITCH_TITLE = t('ui.load_switch', 'Load switch');
+const LOAD_SWITCH_NOTE =
+  t('ui.load_switch_note',
+    'Role changes take effect after reboot; duty and divisor apply immediately on save.');
 
 // Each control POSTs only its own key (absent fields preserve on the device).
 const LIVE_SECTIONS = [
   {
     key: 'chargelimits',
-    title: 'Charge limits',
+    title: t('live.chargelimits', 'Charge limits'),
     endpoint: '/api/chargelimits',
     fields: [
-      { key: 'battery_wh_max', label: 'Battery capacity (Wh)', type: 'uint' },
-      { key: 'use_scaled_soc', label: 'Use scaled SOC', type: 'bool' },
-      { key: 'soc_max', label: 'Maximum SOC (%)', type: 'float' },
-      { key: 'soc_min', label: 'Minimum SOC (%)', type: 'float' },
-      { key: 'charge_a', label: 'Maximum charge current (A)', type: 'float' },
-      { key: 'discharge_a', label: 'Maximum discharge current (A)', type: 'float' },
-      { key: 'use_volt_limits', label: 'Use voltage limits', type: 'bool' },
-      { key: 'target_ch_v', label: 'Maximum charge voltage (V)', type: 'float' },
-      { key: 'target_disch_v', label: 'Minimum discharge voltage (V)', type: 'float' },
-      { key: 'bms_reset_duration', label: 'BMS reset duration (s)', type: 'float' },
+      { key: 'battery_wh_max', label: t('live.chargelimits.battery_wh_max', 'Battery capacity (Wh)'), type: 'uint' },
+      { key: 'use_scaled_soc', label: t('live.chargelimits.use_scaled_soc', 'Use scaled SOC'), type: 'bool' },
+      { key: 'soc_max', label: t('live.chargelimits.soc_max', 'Maximum SOC (%)'), type: 'float' },
+      { key: 'soc_min', label: t('live.chargelimits.soc_min', 'Minimum SOC (%)'), type: 'float' },
+      { key: 'charge_a', label: t('live.chargelimits.charge_a', 'Maximum charge current (A)'), type: 'float' },
+      { key: 'discharge_a', label: t('live.chargelimits.discharge_a', 'Maximum discharge current (A)'), type: 'float' },
+      { key: 'use_volt_limits', label: t('live.chargelimits.use_volt_limits', 'Use voltage limits'), type: 'bool' },
+      { key: 'target_ch_v', label: t('live.chargelimits.target_ch_v', 'Maximum charge voltage (V)'), type: 'float' },
+      { key: 'target_disch_v', label: t('live.chargelimits.target_disch_v', 'Minimum discharge voltage (V)'), type: 'float' },
+      { key: 'bms_reset_duration', label: t('live.chargelimits.bms_reset_duration', 'BMS reset duration (s)'), type: 'float' },
     ],
   },
   {
     key: 'charger',
-    title: 'Charger',
+    title: t('live.charger', 'Charger'),
     endpoint: '/api/charger',
     visibleWhen: (s) => Number(s.charger) !== 0,
     fields: [
-      { key: 'hv_enabled', label: 'HV charging enabled', type: 'bool' },
-      { key: 'aux12v_enabled', label: 'Aux 12V charging enabled', type: 'bool' },
-      { key: 'setpoint_v', label: 'Charge voltage setpoint (V)', type: 'float' },
-      { key: 'setpoint_a', label: 'Charge current setpoint (A)', type: 'float' },
-      { key: 'end_a', label: 'Charge termination current (A)', type: 'float' },
+      { key: 'hv_enabled', label: t('live.charger.hv_enabled', 'HV charging enabled'), type: 'bool' },
+      { key: 'aux12v_enabled', label: t('live.charger.aux12v_enabled', 'Aux 12V charging enabled'), type: 'bool' },
+      { key: 'setpoint_v', label: t('live.charger.setpoint_v', 'Charge voltage setpoint (V)'), type: 'float' },
+      { key: 'setpoint_a', label: t('live.charger.setpoint_a', 'Charge current setpoint (A)'), type: 'float' },
+      { key: 'end_a', label: t('live.charger.end_a', 'Charge termination current (A)'), type: 'float' },
     ],
   },
   {
     key: 'bydautocal',
-    title: 'BYD auto-calibration',
+    title: t('live.bydautocal', 'BYD auto-calibration'),
     endpoint: '/api/bydautocal',
     fields: [
-      { key: 'enabled', label: 'Auto-calibrate SOC (battery 1)', type: 'bool' },
-      { key: 'drift', label: 'Drift (%) (battery 1)', type: 'uint' },
-      { key: 'enabled2', label: 'Auto-calibrate SOC (battery 2)', type: 'bool' },
-      { key: 'drift2', label: 'Drift (%) (battery 2)', type: 'uint' },
-      { key: 'cal_target_soc', label: 'Calibration target SOC (battery 1)', type: 'float' },
-      { key: 'cal_target_ah', label: 'Calibration target Ah (battery 1)', type: 'float' },
-      { key: 'cal_target_soc2', label: 'Calibration target SOC (battery 2)', type: 'float' },
-      { key: 'cal_target_ah2', label: 'Calibration target Ah (battery 2)', type: 'float' },
+      { key: 'enabled', label: t('live.bydautocal.enabled', 'Auto-calibrate SOC (battery 1)'), type: 'bool' },
+      { key: 'drift', label: t('live.bydautocal.drift', 'Drift (%) (battery 1)'), type: 'uint' },
+      { key: 'enabled2', label: t('live.bydautocal.enabled2', 'Auto-calibrate SOC (battery 2)'), type: 'bool' },
+      { key: 'drift2', label: t('live.bydautocal.drift2', 'Drift (%) (battery 2)'), type: 'uint' },
+      { key: 'cal_target_soc', label: t('live.bydautocal.cal_target_soc', 'Calibration target SOC (battery 1)'), type: 'float' },
+      { key: 'cal_target_ah', label: t('live.bydautocal.cal_target_ah', 'Calibration target Ah (battery 1)'), type: 'float' },
+      { key: 'cal_target_soc2', label: t('live.bydautocal.cal_target_soc2', 'Calibration target SOC (battery 2)'), type: 'float' },
+      { key: 'cal_target_ah2', label: t('live.bydautocal.cal_target_ah2', 'Calibration target Ah (battery 2)'), type: 'float' },
     ],
   },
   {
     key: 'recoverymode',
-    title: 'Recovery mode',
+    title: t('live.recoverymode', 'Recovery mode'),
     endpoint: '/api/recoverymode',
     fields: [
       // The endpoint reads {on}; the ack reports {recovery_mode}.
-      { key: 'recovery_mode', label: 'Undercharged recovery mode', type: 'bool', postKey: 'on' },
+      { key: 'recovery_mode', label: t('live.recoverymode.recovery_mode', 'Undercharged recovery mode'), type: 'bool', postKey: 'on' },
     ],
   },
   {
     key: 'canidcutoff',
-    title: 'CAN ID cutoff',
+    title: t('live.canidcutoff', 'CAN ID cutoff'),
     endpoint: '/api/canidcutoff',
-    fields: [{ key: 'cutoff', label: 'CAN ID logging cutoff', type: 'uint' }],
+    fields: [{ key: 'cutoff', label: t('live.canidcutoff.cutoff', 'CAN ID logging cutoff'), type: 'uint' }],
   },
   {
     key: 'balancing',
-    title: 'Balancing',
+    title: t('live.balancing', 'Balancing'),
     endpoint: '/api/balancing',
     // BMW-PHEV-specific: its BMS exposes a user-configurable balancing time limit; other batteries do not.
     visibleWhen: (s) => inList(BAT.BMWPHEV, s.battery),
-    fields: [{ key: 'max_time_min', label: 'Balancing max time (min)', type: 'float' }],
+    fields: [{ key: 'max_time_min', label: t('live.balancing.max_time_min', 'Balancing max time (min)'), type: 'float' }],
   },
   {
     key: 'balancing_tesla',
-    title: 'Balancing',
+    title: t('live.balancing_tesla', 'Balancing'),
     endpoint: '/api/balancing',
     multiSlot: true,
     // 3/Y only: the driver's forced-balancing override never runs on S/X.
     // Bounds live server-side (maxima depend on each pack's detected chemistry).
     visibleWhen: (s) => inList(BAT.TESLA, s.battery) && Number(s.GTWCHASSIS) >= TESLA_CHASSIS_MODEL_3,
     fields: [
-      { key: 'max_time_min', label: 'Balancing max time (min)', type: 'float' },
-      { key: 'max_cell_mv', label: 'Max cell voltage (mV)', type: 'uint' },
-      { key: 'max_dev_mv', label: 'Max cell deviation (mV)', type: 'uint' },
-      { key: 'max_pack_v', label: 'Max pack voltage (V)', type: 'float' },
-      { key: 'float_power_w', label: 'Float power (W)', type: 'uint' },
+      { key: 'max_time_min', label: t('live.balancing_tesla.max_time_min', 'Balancing max time (min)'), type: 'float' },
+      { key: 'max_cell_mv', label: t('live.balancing_tesla.max_cell_mv', 'Max cell voltage (mV)'), type: 'uint' },
+      { key: 'max_dev_mv', label: t('live.balancing_tesla.max_dev_mv', 'Max cell deviation (mV)'), type: 'uint' },
+      { key: 'max_pack_v', label: t('live.balancing_tesla.max_pack_v', 'Max pack voltage (V)'), type: 'float' },
+      { key: 'float_power_w', label: t('live.balancing_tesla.float_power_w', 'Float power (W)'), type: 'uint' },
     ],
   },
 ];
 
 const REBOOT_TO_APPLY =
-  'Settings saved. Reboot now to apply them? If the emulator is handling contactors, they will open during reboot.';
+  t('ui.reboot_to_apply',
+    'Settings saved. Reboot now to apply them? If the emulator is handling contactors, they will open during reboot.');
 const FACTORY_RESET_CONFIRM =
-  'Erase ALL saved settings and restore factory defaults? This cannot be undone. The device must reboot afterwards to load the defaults.';
+  t('ui.factory_reset_confirm',
+    'Erase ALL saved settings and restore factory defaults? This cannot be undone. The device must reboot afterwards to load the defaults.');
 const FACTORY_RESET_REBOOT =
-  'Factory defaults restored. Reboot now to load them? If the emulator is handling contactors, they will open during reboot.';
-const FACTORY_RESET_FAILED = 'The device could not perform a factory reset.';
-const PASSWORD_MISMATCH = 'Web interface passwords do not match.';
-const INVALID_FIELD = 'A field is out of range or invalid — correct the highlighted field.';
-const SAVE_UNREACHABLE = 'Could not reach the device to save settings.';
-const SAVE_FAILED = 'The device could not save these settings.';
+  t('ui.factory_reset_reboot',
+    'Factory defaults restored. Reboot now to load them? If the emulator is handling contactors, they will open during reboot.');
+const FACTORY_RESET_FAILED = t('ui.factory_reset_failed', 'The device could not perform a factory reset.');
+const PASSWORD_MISMATCH = t('error.webauth_password_mismatch', 'Web interface passwords do not match.');
+const INVALID_FIELD =
+  t('ui.invalid_field', 'A field is out of range or invalid — correct the highlighted field.');
+const SAVE_UNREACHABLE = t('ui.save_unreachable', 'Could not reach the device to save settings.');
+const SAVE_FAILED = t('ui.save_failed', 'The device could not save these settings.');
 const HTTP_BAD_REQUEST = 400;
 
 let root = null;
@@ -487,13 +499,14 @@ function controlValue(type, control) {
   return control.value;
 }
 
-function selectFrom(key, type, options) {
+function selectFrom(key, type, options, ns) {
   const sel = el('select');
   sel.name = key;
   const current = String(state[key]);
   (options ?? []).forEach((opt) => {
     const value = type === 'interface' ? opt.id : opt.v;
-    const o = el('option', null, type === 'interface' ? opt.name : (opt.n ?? prettify(String(opt.v))));
+    const o = el('option', null,
+                 type === 'interface' ? opt.name : t(`${ns}.${opt.v}`, opt.n ?? prettify(String(opt.v))));
     o.value = String(value);
     if (String(value) === current) o.selected = true;
     sel.append(o);
@@ -513,8 +526,8 @@ function control(field) {
   if (type === 'interface') return selectFrom(key, type, data.interfaces);
   if (options) {
     const opts = data.options?.[options] ?? CLIENT_OPTIONS[options];
-    if (!opts) return el('span', 'settings-error', `Missing options: ${options}`);
-    return selectFrom(key, type, opts);
+    if (!opts) return el('span', 'settings-error', tf('ui.missing_options', 'Missing options: {}', options));
+    return selectFrom(key, type, opts, options);
   }
 
   const input = el('input');
@@ -572,7 +585,7 @@ function passwordCell(field, input) {
     }
     refreshSaveBar();
   });
-  clear.append(cb, el('span', null, 'Clear'));
+  clear.append(cb, el('span', null, t('ui.clear', 'Clear')));
   cell.append(input, clear);
   return cell;
 }
@@ -618,15 +631,46 @@ function buildPanel(category) {
       }
     });
   if (category === DYNAMIC_CATEGORY) appendDynamicControls(panel);
+  if (category === INTERFACE_CATEGORY) appendLanguageControl(panel);
   applyVisibility(panel);
   return panel;
 }
 
-function dynSelectRow(label, options, current, onSet) {
+function appendLanguageControl(panel) {
+  const row = el('div', 'field');
+  const sel = el('select');
+  sel.id = 'LANGUAGE';
+  const label = el('label', null, t('ui.language', 'Language'));
+  label.htmlFor = sel.id;
+  const populate = () => {
+    const active = currentLanguage();
+    sel.replaceChildren();
+    for (const entry of [{ code: SOURCE_LANGUAGE, name: 'English' }, ...cachedLanguages()]) {
+      const option = el('option', null, entry.name);
+      option.value = entry.code;
+      if (entry.code === active) option.selected = true;
+      sel.append(option);
+    }
+  };
+  populate();
+  sel.addEventListener('change', () => setLanguage(sel.value));
+  window.addEventListener('be-languages-changed', () => {
+    if (sel.isConnected) populate();
+  });
+  row.append(label, sel);
+
+  const note = el('div', 'field');
+  note.append(el('span'),
+              el('span', 'muted field-note',
+                 t('ui.language_note', 'Languages download automatically when this browser is online.')));
+  panel.append(row, note);
+}
+
+function dynSelectRow(label, options, current, onSet, ns) {
   const row = el('div', 'field');
   const sel = el('select');
   (options ?? []).forEach((opt) => {
-    const o = el('option', null, opt.n);
+    const o = el('option', null, ns ? t(`${ns}.${opt.v}`, opt.n) : opt.n);
     o.value = String(opt.v);
     if (Number(opt.v) === Number(current)) o.selected = true;
     sel.append(o);
@@ -679,15 +723,17 @@ function buildBatteriesSection() {
     const prev = i > 0 ? dynamicState.batteries[i - 1] : null;
     if (i > 0 && b.type === 0 && (!prev || prev.type === 0)) return;
     const card = el('div', 'settings-channel-config');
-    card.append(el('h4', null, `Battery ${b.slot + 1}`));
+    card.append(el('h4', null, tf('ui.battery_n', 'Battery {}', b.slot + 1)));
     const slotTypes = types.filter((t) => t.v === 0 || (t.s ?? MAX_BATTERY_SLOTS) > b.slot);
-    card.append(dynSelectRow('Type', slotTypes, b.type, (v) => {
+    card.append(dynSelectRow(t('ui.type', 'Type'), slotTypes, b.type, (v) => {
       b.type = v;
       if (v === 0) b.contactor_control = false;
       onBatterySlotChange();
     }));
     if (b.type !== 0) {
-      if (interfaces.length) card.append(dynSelectRow('Interface', interfaces, b.comm, (v) => { b.comm = v; }));
+      if (interfaces.length) {
+        card.append(dynSelectRow(t('ui.interface', 'Interface'), interfaces, b.comm, (v) => { b.comm = v; }));
+      }
       const row = el('div', 'field');
       const cb = el('input');
       cb.type = 'checkbox';
@@ -696,7 +742,7 @@ function buildBatteriesSection() {
         b.contactor_control = cb.checked;
         onBatterySlotChange();
       });
-      row.append(el('label', null, 'Contactor control via GPIO'), cb);
+      row.append(el('label', null, t('ui.contactor_control_gpio', 'Contactor control via GPIO')), cb);
       card.append(row);
     }
     wrap.append(card);
@@ -712,12 +758,12 @@ function buildTerminationSection() {
     const cb = el('input');
     cb.type = 'checkbox';
     cb.checked = entry.enabled === true;
-    cb.title = 'Switch the 120 Ω termination resistor onto the bus';
+    cb.title = t('ui.termination_help', 'Switch the 120 Ω termination resistor onto the bus');
     cb.addEventListener('change', () => {
       entry.enabled = cb.checked;
       refreshSaveBar();
     });
-    row.append(el('label', null, `${entry.name} termination`), cb);
+    row.append(el('label', null, tf('ui.interface_termination', '{} termination', entry.name)), cb);
     wrap.append(row);
   });
   return wrap;
@@ -732,9 +778,9 @@ function buildLoadSwitchSection() {
     const group = el('div', 'settings-channel-config');
     group.append(el('h4', null, `SW${ch.channel}`));
     group.append(
-      dynSelectRow('Role', roles, ch.role, (v) => { ch.role = v; }),
-      dynNumberRow('Steady-state duty (%)', ch.duty, (v) => { ch.duty = v; }),
-      dynSelectRow('PWM divisor', divisors, ch.divisor, (v) => { ch.divisor = v; }),
+      dynSelectRow(t('ui.role', 'Role'), roles, ch.role, (v) => { ch.role = v; }, 'loadswitchrole'),
+      dynNumberRow(t('ui.steady_state_duty', 'Steady-state duty (%)'), ch.duty, (v) => { ch.duty = v; }),
+      dynSelectRow(t('ui.pwm_divisor', 'PWM divisor'), divisors, ch.divisor, (v) => { ch.divisor = v; }),
     );
     wrap.append(group);
   });
@@ -831,7 +877,7 @@ function navChip(id, name) {
 function buildNav() {
   const nav = el('div', 'settings-nav');
   CATEGORIES.forEach(([id, name]) => nav.append(navChip(id, name)));
-  nav.append(navChip(LIVE_CATEGORY, 'Live controls'));
+  nav.append(navChip(LIVE_CATEGORY, t('category.live', 'Live controls')));
   return nav;
 }
 
@@ -849,7 +895,7 @@ function liveControl(field, current) {
   return input;
 }
 
-const LIVE_REJECTED = 'The device rejected this value.';
+const LIVE_REJECTED = t('ui.live_rejected', 'The device rejected this value.');
 
 // Repaints only this section from the returned ack: the UI must reflect what
 // the device applied, not what was typed.
@@ -913,7 +959,7 @@ function liveCardInstances() {
       slot,
       arrayKey: section.key,
       key: slot === 0 ? section.key : `${section.key}:${slot}`,
-      title: slot === 0 ? section.title : `${section.title} (battery ${slot + 1})`,
+      title: slot === 0 ? section.title : tf('ui.section_for_battery', '{} (battery {})', section.title, slot + 1),
     }));
   });
 }
@@ -936,9 +982,9 @@ function buildLiveSection(section) {
 
 function buildLivePanel() {
   const panel = el('div', 'settings-panel settings-live');
-  panel.append(el('div', 'settings-live-note', 'These controls apply immediately — no reboot required.'));
+  panel.append(el('div', 'settings-live-note', t('ui.live_controls_note', 'These controls apply immediately — no reboot required.')));
   if (editcardsError || !editcards) {
-    panel.append(el('div', 'settings-error', 'Could not load live control values. The device may be busy — try again.'));
+    panel.append(el('div', 'settings-error', t('ui.live_load_failed', 'Could not load live control values. The device may be busy — try again.')));
     return panel;
   }
   liveCardInstances().forEach((card) => panel.append(buildLiveSection(card)));
@@ -1032,7 +1078,8 @@ async function onSave() {
   // error, not reject silently and leave the bar dirty with no explanation.
   try {
     if (res.status === HTTP_BAD_REQUEST) {
-      setSaveError(await res.text());
+      const failure = await res.json();
+      setSaveError(tf(failure.error_key, failure.error, failure.error_arg));
       return;
     }
     if (!res.ok) {
@@ -1040,6 +1087,7 @@ async function onSave() {
       return;
     }
     const result = await res.json();
+    const rebuilt = RELOAD_ON_CHANGE.some((key) => data?.values?.[key] !== result.values?.[key]);
     data = result;
     seedState(result.values);
     seedDynamic(result.dynamic);
@@ -1048,7 +1096,9 @@ async function onSave() {
     renderShell();
     if (result.meta?.reboot_required === true && window.confirm(REBOOT_TO_APPLY)) {
       fetch('/reboot');
+      return;
     }
+    if (rebuilt) location.reload();
   } catch {
     setSaveError(SAVE_FAILED);
   }
@@ -1060,8 +1110,8 @@ function buildSaveBar() {
   const err = el('div', 'settings-savebar-error');
   err.textContent = saveError ?? '';
   err.classList.toggle('hidden', !saveError);
-  const message = el('span', 'settings-savebar-msg', 'Unsaved changes');
-  const save = el('button', 'btn', 'Save & apply');
+  const message = el('span', 'settings-savebar-msg', t('ui.unsaved_changes', 'Unsaved changes'));
+  const save = el('button', 'btn', t('ui.save_and_apply', 'Save & apply'));
   save.type = 'button';
   save.addEventListener('click', onSave);
   bar.append(err, message, save);
@@ -1074,7 +1124,7 @@ function buildDangerZone() {
   const zone = el('div', 'settings-danger-zone');
   const err = el('div', 'settings-error');
   err.hidden = true;
-  const btn = el('button', 'btn btn-fault', 'Factory reset');
+  const btn = el('button', 'btn btn-fault', t('ui.factory_reset', 'Factory reset'));
   btn.type = 'button';
   btn.addEventListener('click', async () => {
     if (!window.confirm(FACTORY_RESET_CONFIRM)) return;
@@ -1119,7 +1169,7 @@ function titledPanel(category, name) {
 function renderShell() {
   if (skin.contiguous) {
     const form = el('div', 'settings-form');
-    [...CATEGORIES, [LIVE_CATEGORY, 'Live controls']].forEach(([id, name]) => form.append(titledPanel(id, name)));
+    [...CATEGORIES, [LIVE_CATEGORY, t('category.live', 'Live controls')]].forEach(([id, name]) => form.append(titledPanel(id, name)));
     root.replaceChildren(form, buildSaveBar(), buildDangerZone());
     return;
   }
@@ -1131,7 +1181,7 @@ export async function mount(container) {
   try {
     data = await getJson('/api/settings');
   } catch {
-    root.replaceChildren(el('div', 'settings-error', 'Could not load settings. The device may be busy — try again.'));
+    root.replaceChildren(el('div', 'settings-error', t('ui.settings_load_failed', 'Could not load settings. The device may be busy — try again.')));
     return;
   }
   seedState(data.values);

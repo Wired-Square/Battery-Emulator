@@ -6,22 +6,31 @@
 
 #include "generated/web_assets.h"
 
-constexpr const char* kUiShellPathPrefix = "/shell-";
-constexpr const char* kUiShellPathSuffix = ".html";
-constexpr const char* kDefaultUiShell = "legacy";
-constexpr size_t kMaxUiShellNameLen = 31;
+struct AssetNameSpec {
+  const char* prefix;
+  const char* suffix;
+};
 
-struct UiShellTable {
+constexpr AssetNameSpec kUiShellSpec{"/shell-", ".html"};
+
+constexpr const char* kDefaultUiShell = "legacy";
+constexpr size_t kMaxAssetNameLen = 31;
+
+struct WebAssetTable {
   const WebAsset* assets;
   uint32_t count;
 };
 
-UiShellTable default_ui_shell_table();
+WebAssetTable default_web_asset_table();
 
-size_t ui_shell_count(UiShellTable table);
+size_t web_asset_name_count(WebAssetTable table, AssetNameSpec spec);
 
-bool ui_shell_name_at(UiShellTable table, size_t index, char* out, size_t out_len);
+bool web_asset_name_at(WebAssetTable table, AssetNameSpec spec, size_t index, char* out, size_t out_len);
 
-const char* resolve_ui_shell_asset(UiShellTable table, const char* requested, const char* stored);
+const char* web_asset_path_for_name(WebAssetTable table, AssetNameSpec spec, const char* name);
+
+const char* resolve_named_asset(WebAssetTable table, AssetNameSpec spec, const char* requested, const char* stored,
+                                const char* fallback);
+
 
 #endif

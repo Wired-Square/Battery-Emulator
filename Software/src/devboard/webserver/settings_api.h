@@ -64,6 +64,8 @@ struct SettingsApplyResult {
   String error;
   bool changed;
   bool reboot_required;
+  const char* error_key = nullptr;
+  String error_arg;
 };
 
 // Applies a POSTed settings document back to NVS through kSettingFields (the same

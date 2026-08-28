@@ -1,4 +1,4 @@
-import { getJson, postJson } from '/app.js';
+import { getJson, postJson, t, tf } from '/app.js';
 
 const REFRESH_MS = 5000;
 
@@ -24,12 +24,12 @@ const HOURS_PER_DAY = 24;
 
 function agoText(ms) {
   const s = Math.floor(ms / MS_PER_SECOND);
-  if (s < SECONDS_PER_MINUTE) return `${s}s ago`;
+  if (s < SECONDS_PER_MINUTE) return tf('time.seconds_ago', '{}s ago', s);
   const m = Math.floor(s / SECONDS_PER_MINUTE);
-  if (m < MINUTES_PER_HOUR) return `${m}m ago`;
+  if (m < MINUTES_PER_HOUR) return tf('time.minutes_ago', '{}m ago', m);
   const h = Math.floor(m / MINUTES_PER_HOUR);
-  if (h < HOURS_PER_DAY) return `${h}h ago`;
-  return `${Math.floor(h / HOURS_PER_DAY)}d ago`;
+  if (h < HOURS_PER_DAY) return tf('time.hours_ago', '{}h ago', h);
+  return tf('time.days_ago', '{}d ago', Math.floor(h / HOURS_PER_DAY));
 }
 
 let root = null;
@@ -37,20 +37,22 @@ let timer = null;
 
 function paint(data) {
   const wrap = el('div');
-  wrap.append(el('h1', 'page-title', 'Events'));
+  wrap.append(el('h1', 'page-title', t('ui.events', 'Events')));
 
   const bar = el('div', 'action-row');
-  const refresh = el('button', 'btn', 'Refresh');
+  const refresh = el('button', 'btn', t('ui.refresh', 'Refresh'));
   refresh.type = 'button';
-  refresh.addEventListener('click', () => reload().catch(() => window.alert('Could not refresh events.')));
-  const clear = el('button', 'btn btn-fault', 'Clear all events');
+  refresh.addEventListener('click',
+                            () => reload().catch(() => window.alert(t('ui.events_refresh_failed',
+                                                                   'Could not refresh events.'))));
+  const clear = el('button', 'btn btn-fault', t('ui.clear_all_events', 'Clear all events'));
   clear.type = 'button';
   clear.addEventListener('click', async () => {
-    if (!window.confirm('Clear all events?')) return;
+    if (!window.confirm(t('ui.confirm_clear_events', 'Clear all events?'))) return;
     try {
       await postJson('/api/events/clear', {});
     } catch {
-      window.alert('Could not clear events.');
+      window.alert(t('ui.events_clear_failed', 'Could not clear events.'));
       return;
     }
     reload();
@@ -59,14 +61,16 @@ function paint(data) {
   wrap.append(bar);
 
   if (!data.events.length) {
-    wrap.append(el('div', 'muted', 'No events recorded.'));
+    wrap.append(el('div', 'muted', t('ui.no_events', 'No events recorded.')));
     root.replaceChildren(wrap);
     return;
   }
 
   const table = el('table', 'data-table');
   const headRow = el('tr');
-  ['Event', 'Severity', 'Last seen', 'Count', 'Data', 'Message'].forEach((h) => headRow.append(el('th', null, h)));
+  [t('ui.col_event', 'Event'), t('ui.col_severity', 'Severity'), t('ui.col_last_seen', 'Last seen'),
+   t('ui.col_count', 'Count'), t('ui.col_data', 'Data'), t('ui.col_message', 'Message')]
+    .forEach((h) => headRow.append(el('th', null, h)));
   const thead = el('thead');
   thead.append(headRow);
   table.append(thead);
@@ -80,7 +84,7 @@ function paint(data) {
     tr.append(el('td', null, agoText(ev.millis_ago)));
     tr.append(el('td', 'num', String(ev.count)));
     tr.append(el('td', 'num', String(ev.data)));
-    tr.append(el('td', null, ev.message));
+    tr.append(el('td', null, t(`event.${ev.type}`, ev.message)));
     body.append(tr);
   });
   table.append(body);

@@ -1,4 +1,4 @@
-import { getJson } from '/app.js';
+import { getJson, t, tf } from '/app.js';
 
 const REFRESH_MS = 2000;
 const BAR_TRACK_PX = 200;
@@ -17,16 +17,16 @@ let timer = null;
 
 function batterySection(battery, index, multi) {
   const section = el('div', 'card');
-  if (multi) section.append(el('h3', null, `Battery ${(battery.slot ?? index) + 1}`));
+  if (multi) section.append(el('h3', null, tf('ui.battery_n', 'Battery {}', (battery.slot ?? index) + 1)));
 
   if (!battery.cells.length) {
-    section.append(el('div', 'muted', 'No cell voltages read yet.'));
+    section.append(el('div', 'muted', t('ui.no_cell_voltages', 'No cell voltages read yet.')));
     return section;
   }
 
   const min = Math.min(...battery.cells);
   const max = Math.max(...battery.cells);
-  section.append(el('div', 'muted', `Max ${max} mV · Min ${min} mV · Deviation ${max - min} mV`));
+  section.append(el('div', 'muted', tf('ui.cell_summary', 'Max {} mV · Min {} mV · Deviation {} mV', max, min, max - min)));
   if (battery.balancing_active || battery.balancing_pending) {
     section.append(el('span', 'pill pill-pending', battery.balancing_pending ? 'Pending' : 'Balancing'));
   }
@@ -50,7 +50,7 @@ function batterySection(battery, index, multi) {
     const bar = el('div', 'cell-bar');
     bar.style.height = `${BAR_FLOOR_PX + ((mv - lo) / span) * (BAR_TRACK_PX - BAR_FLOOR_PX)}px`;
     if (battery.balancing[i]) bar.classList.add('cell-bar-bal');
-    bar.title = `Cell ${i + 1}: ${mv} mV`;
+    bar.title = tf('ui.cell_tooltip', 'Cell {}: {} mV', i + 1, mv);
     bars.append(bar);
   });
   section.append(bars);
@@ -59,9 +59,9 @@ function batterySection(battery, index, multi) {
 
 function paint(data) {
   const wrap = el('div');
-  wrap.append(el('h1', 'page-title', 'Cells'));
+  wrap.append(el('h1', 'page-title', t('ui.cells', 'Cells')));
   if (!data.batteries.length) {
-    wrap.append(el('div', 'muted', 'No battery configured.'));
+    wrap.append(el('div', 'muted', t('ui.no_battery_configured', 'No battery configured.')));
   } else {
     const multi = data.batteries.length > 1;
     data.batteries.forEach((b, i) => wrap.append(batterySection(b, i, multi)));

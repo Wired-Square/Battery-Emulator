@@ -312,6 +312,19 @@ bool value_matches_option(SettingType type, JsonVariantConst value, JsonVariantC
   return value.as<uint32_t>() == option.as<uint32_t>();
 }
 
+void emit_asset_name_options(JsonObject options, const char* options_key, AssetNameSpec spec) {
+  JsonArray names = options[options_key].to<JsonArray>();
+  const WebAssetTable table = default_web_asset_table();
+  const size_t total = web_asset_name_count(table, spec);
+  for (size_t i = 0; i < total; i++) {
+    char name[kMaxAssetNameLen + 1];
+    if (!web_asset_name_at(table, spec, i, name, sizeof(name))) {
+      continue;
+    }
+    names.add<JsonObject>()["v"] = name;
+  }
+}
+
 void emit_all_options(JsonObject options) {
   const BatteryType battery_none = BatteryType::None;
   emit_enum_options(
@@ -360,16 +373,7 @@ void emit_all_options(JsonObject options) {
   }
 #endif
 
-  JsonArray shells = options["webui"].to<JsonArray>();
-  const UiShellTable table = default_ui_shell_table();
-  const size_t shell_total = ui_shell_count(table);
-  for (size_t i = 0; i < shell_total; i++) {
-    char name[kMaxUiShellNameLen + 1];
-    if (!ui_shell_name_at(table, i, name, sizeof(name))) {
-      continue;
-    }
-    shells.add<JsonObject>()["v"] = name;
-  }
+  emit_asset_name_options(options, "webui", kUiShellSpec);
 }
 
 }  // namespace
@@ -621,11 +625,13 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   if (!(http_pass == http_pass_confirm)) {
     result.ok = false;
     result.error = "Web interface passwords do not match.";
+    result.error_key = "error.webauth_password_mismatch";
     return result;
   }
   if (webauth_effective && (http_user.length() == 0 || http_pass.length() == 0)) {
     result.ok = false;
     result.error = "Set a username and password before enabling web interface password protection.";
+    result.error_key = "error.webauth_credentials_required";
     return result;
   }
 
@@ -643,6 +649,8 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     if (!value_matches_type(field.type, value)) {
       result.ok = false;
       result.error = String("Invalid type for setting ") + field.json_key;
+      result.error_key = "error.setting_invalid_type";
+      result.error_arg = field.json_key;
       return result;
     }
     // as<double>() is safe: bounds sit only on numeric rows, already type-checked above.
@@ -653,6 +661,8 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       if ((has_min && numeric < field.min_value) || (has_max && numeric > field.max_value)) {
         result.ok = false;
         result.error = String("Setting ") + field.json_key + " is out of range";
+        result.error_key = "error.setting_out_of_range";
+        result.error_arg = field.json_key;
         return result;
       }
     }
@@ -672,6 +682,8 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       if (!found) {
         result.ok = false;
         result.error = String("Setting ") + field.json_key + " is not an available option";
+        result.error_key = "error.setting_not_an_option";
+        result.error_arg = field.json_key;
         return result;
       }
     }
@@ -687,6 +699,7 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     if (!entry["slot"].is<uint8_t>() || entry["slot"].as<uint8_t>() >= kMaxBatterySlots) {
       result.ok = false;
       result.error = "Unknown battery slot";
+      result.error_key = "error.battery_slot_unknown";
       return result;
     }
     const uint8_t slot = entry["slot"].as<uint8_t>();
@@ -695,12 +708,15 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       if (!type_value.is<uint32_t>()) {
         result.ok = false;
         result.error = "Invalid type for battery slot";
+        result.error_key = "error.battery_slot_invalid_type";
         return result;
       }
       const BatteryType type = static_cast<BatteryType>(type_value.as<uint32_t>());
       if (!battery_type_allowed_in_slot(type, slot)) {
         result.ok = false;
         result.error = String("Battery ") + (slot + 1) + " cannot run the selected battery type on this hardware";
+        result.error_key = "error.battery_type_unsupported";
+        result.error_arg = String(slot + 1);
         return result;
       }
       effective_types[slot] = type;
@@ -708,11 +724,13 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     if (!entry["comm"].isNull() && !entry["comm"].is<uint32_t>()) {
       result.ok = false;
       result.error = "Invalid interface for battery slot";
+      result.error_key = "error.battery_slot_invalid_interface";
       return result;
     }
     if (!entry["contactor_control"].isNull() && !entry["contactor_control"].is<bool>()) {
       result.ok = false;
       result.error = "Invalid contactor control value for battery slot";
+      result.error_key = "error.battery_slot_invalid_contactor";
       return result;
     }
   }
@@ -720,6 +738,7 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       (effective_types[1] != BatteryType::None || effective_types[2] != BatteryType::None)) {
     result.ok = false;
     result.error = "Configure the primary battery before adding extra batteries.";
+    result.error_key = "error.battery_primary_required";
     return result;
   }
 
@@ -730,6 +749,8 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       if (!value.isNull() && !value.is<uint32_t>()) {
         result.ok = false;
         result.error = String("Invalid type for setting ") + catalog.groups[g].nvs_key;
+        result.error_key = "error.setting_invalid_type";
+        result.error_arg = catalog.groups[g].nvs_key;
         return result;
       }
     }
