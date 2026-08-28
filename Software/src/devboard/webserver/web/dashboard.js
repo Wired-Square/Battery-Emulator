@@ -63,6 +63,34 @@ function channelPill(ch) {
             ch.on ? t('ui.on', 'On') : t('ui.off', 'Off'));
 }
 
+// Indexed by role_id: ch.role is device English and no pack translates it.
+const LOAD_SWITCH_ROLE_LABELS = [
+  () => t('ui.role_disabled', 'Disabled'),
+  () => t('ui.role_positive_contactor', 'Positive contactor'),
+  () => t('ui.role_negative_contactor', 'Negative contactor'),
+  () => t('ui.role_precharge', 'Precharge'),
+  () => t('ui.role_bms_power', 'BMS power'),
+  () => t('ui.role_manual', 'Manual'),
+];
+
+// Indexed by status_id: sys.status is device English and no pack translates it.
+const PAUSE_STATUS_LABELS = [
+  () => t('ui.status_running', 'RUNNING'),
+  () => t('ui.status_pausing', 'PAUSING'),
+  () => t('ui.status_paused', 'PAUSED'),
+  () => t('ui.status_resuming', 'RESUMING'),
+];
+
+function statusText(sys) {
+  const label = PAUSE_STATUS_LABELS[sys.status_id];
+  return label ? label() : sys.status;
+}
+
+function roleText(ch) {
+  const label = LOAD_SWITCH_ROLE_LABELS[ch.role_id];
+  return label ? label() : ch.role;
+}
+
 function loadSwitchCard(ls) {
   const c = el('div', 'card');
   c.append(el('h2', null, t('ui.load_switch', 'Load switch')));
@@ -73,7 +101,7 @@ function loadSwitchCard(ls) {
   ls.channels.forEach((ch, i) => {
     const line = el('div', 'channel');
     const meta = el('div', 'channel-meta');
-    meta.append(el('strong', null, `CH${i} · ${ch.role}`),
+    meta.append(el('strong', null, `CH${i} · ${roleText(ch)}`),
                 el('span', 'muted', `${ch.current_mA} mA`));
     const actions = el('div', 'channel-actions');
     actions.append(channelPill(ch));
@@ -164,6 +192,11 @@ const ROW = {
   system: (sys) => [
     { key: 'row.uptime', label: 'Uptime', value: uptimeText(sys.uptime_s) ?? sys.uptime },
     { key: 'row.free_heap', label: 'Free heap', value: present(sys.free_heap) ? `${sys.free_heap} B` : null },
+    // Absent means the measurement is switched off, not momentarily unavailable,
+    // so the row goes rather than showing a dash forever.
+    ...(present(sys.cpu_temp)
+      ? [{ key: 'row.cpu_temp', label: 'CPU temperature', value: `${sys.cpu_temp.toFixed(1)} °C` }]
+      : []),
   ],
   wifi: (wifi) => [
     { key: 'row.ssid', label: 'SSID', value: wifi.ssid },
@@ -180,7 +213,7 @@ const ROW = {
        { key: 'row.ap_ip', label: 'Access point IP', value: wifi.ap_ip }]
     : []),
   power: (sys) => [
-    { key: 'row.power_status', label: 'Power status', value: sys.status },
+    { key: 'row.power_status', label: 'Power status', value: statusText(sys) },
     { key: 'row.contactors', label: 'Contactors',
       value: sys.equipment_stop === true ? t('ui.contactors_open_estop', 'Open (equipment stop)')
                                          : t('ui.contactors_closed', 'Closed') },
@@ -243,7 +276,7 @@ function modelModern(state) {
   const blocks = [
     { id: 'actions', section: 'actions', kind: 'component', build: () => actionsCard(sys) },
     { id: 'system', section: 'system', title: t('ui.system', 'System'),
-      kind: 'rows', rows: [{ key: 'row.system_status', label: 'Status', value: sys.status }, ...ROW.system(sys)] },
+      kind: 'rows', rows: [{ key: 'row.system_status', label: 'Status', value: statusText(sys) }, ...ROW.system(sys)] },
     { id: 'wifi', section: 'wifi', title: t('ui.wifi_network', 'Wi-Fi network'), kind: 'rows', rows: ROW.wifi(wifi) },
   ];
   if (wifi.ap_active) {

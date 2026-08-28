@@ -20,14 +20,7 @@ export function deviceCapabilities() {
 
 let dictionary = {};
 
-const PINNED_KEYS = new Set([
-  'ui.open_contactors', 'ui.close_contactors',
-  'ui.confirm_open_contactors', 'ui.confirm_close_contactors',
-  'ui.confirm_pause', 'ui.confirm_reboot',
-]);
-
 export function t(key, fallback) {
-  if (PINNED_KEYS.has(key)) return fallback ?? key;
   const translated = dictionary[key];
   return typeof translated === 'string' && translated.length > 0 ? translated : (fallback ?? key);
 }

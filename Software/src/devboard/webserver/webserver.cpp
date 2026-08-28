@@ -1054,11 +1054,15 @@ String state_json() {
 
   JsonObject sys = doc["system"].to<JsonObject>();
   sys["status"] = String(get_emulator_pause_status().c_str());
+  sys["status_id"] = static_cast<uint32_t>(emulator_pause_status);
   sys["emulator_status"] = get_emulator_status_string(get_emulator_status());
   sys["uptime"] = format_ms_string(millis64());
   // Numeric seconds for the SPA to detect a reboot (resets to 0) and reload.
   sys["uptime_s"] = static_cast<uint32_t>(millis64() / static_cast<uint64_t>(MS_PER_SECOND));
   sys["free_heap"] = ESP.getFreeHeap();
+  if (datalayer.system.info.CPU_measurement_enabled) {
+    sys["cpu_temp"] = datalayer.system.info.CPU_temperature;
+  }
   sys["paused"] = emulator_pause_request_ON;
   sys["equipment_stop"] = datalayer.system.info.equipment_stop_active;
   sys["auth"] = webserver_auth;
@@ -1130,6 +1134,7 @@ String state_json() {
     for (uint8_t ch = 0; ch < ls_status.channel_count; ch++) {
       const LoadSwitchChannelStatus& channel = ls_status.channels[ch];
       JsonObject entry = channels.add<JsonObject>();
+      entry["role_id"] = static_cast<uint32_t>(channel.role);
       entry["role"] = name_for_load_switch_role(channel.role);
       entry["manual"] = channel.role == LoadSwitchRole::Manual;
       entry["on"] = channel.on;
