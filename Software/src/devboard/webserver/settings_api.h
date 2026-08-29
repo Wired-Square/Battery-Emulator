@@ -6,8 +6,8 @@
 #include <cstdint>
 
 #include "../../battery/balancing_bounds.h"
-#include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "../utils/types.h"
+#include "document_reader.h"
 #include "response_writer.h"
 #include "setting_options.h"
 #include "settings_field.h"
@@ -47,20 +47,21 @@ struct SettingsApplyResult {
 };
 
 // Applies a POSTed settings document back to NVS through kSettingFields (the same
-// descriptors write_settings reads, so the two directions cannot drift). root
-// carries "values" (scalar map) and optional "dynamic" (batteries + termination +
-// load switch). A field absent from "values" — or present as JSON null — is
+// descriptors write_settings reads, so the two directions cannot drift). The
+// reader's scalar map is "values"; "dynamic" carries batteries, balancing,
+// termination and load switch. A field absent from the map — or present as null — is
 // preserved, never wiped. Wrong-type scalars and any invalid batteries entry
 // (bad slot, disallowed type, empty primary with occupied extras) reject the
 // whole POST before anything is written; termination and load-switch entries
 // apply best-effort per entry (presence-gated, bounds-checked, type-skipped),
 // matching the legacy handler, and are not atomic with the scalar pass.
-SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, JsonObjectConst root);
+SettingsApplyResult apply_settings(BatteryEmulatorSettingsStore& store, const DocumentReader& body);
 
 // Returns nullptr when the value is absent, or well-formed and in range for its
 // key, else the message for the 400 response. Ceilings mirror the driver's
 // chemistry mapping (LFP, else NCM); the driver clamps again at apply time, so
 // this layer is user feedback, not the safety boundary.
-const char* validate_balancing_field(battery_chemistry_enum chemistry, const char* key, JsonVariantConst value);
+const char* validate_balancing_field(battery_chemistry_enum chemistry, const char* key,
+                                     const DocumentValue& value);
 
 #endif

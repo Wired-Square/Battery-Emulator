@@ -11,12 +11,18 @@
 #include "../Software/src/inverter/INVERTERS.h"
 #include "../Software/src/battery/battery_slots.h"
 #include "../Software/src/devboard/webserver/settings_api.h"
+#include "../Software/src/devboard/webserver/json_document_reader.h"
 #include "../Software/src/devboard/webserver/json_response_writer.h"
+
+static SettingsApplyResult apply_settings_body(BatteryEmulatorSettingsStore& store, const JsonDocument& body) {
+  JsonDocumentReader reader(body.as<JsonVariantConst>(), "values");
+  return apply_settings(store, reader);
+}
 
 static String settings_json(BatteryEmulatorSettingsStore& store, bool reboot_required = false) {
   return render_json([&](ResponseWriter& out) { write_settings(out, store, reboot_required); });
 }
-#include "../Software/src/devboard/webserver/web_json.h"
+#include "../Software/src/devboard/webserver/battery_slot_api.h"
 #include "../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "emul/Preferences.h"
 
@@ -330,7 +336,7 @@ TEST_F(SettingsApiTest, BatterySlotsRoundTripThroughTheDynamicSection) {
   entry["slot"] = 1;
   entry["type"] = (uint32_t)BatteryType::NissanLeaf;
   entry["contactor_control"] = true;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_TRUE(r.reboot_required);
@@ -340,7 +346,7 @@ TEST_F(SettingsApiTest, BatterySlotsRoundTripThroughTheDynamicSection) {
   EXPECT_EQ(store.getUInt("BATT3TYPE", 999), (uint32_t)BatteryType::NissanLeaf)
       << "an absent slot entry preserves the stored slot, never wipes it";
 
-  const auto again = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto again = apply_settings_body(store, body);
   EXPECT_TRUE(again.ok) << again.error.c_str();
   EXPECT_FALSE(again.reboot_required) << "re-posting identical slot values must not demand a reboot";
 }
@@ -350,7 +356,7 @@ TEST_F(SettingsApiTest, PostWithoutBatterySectionLeavesStoredBadShapeAlone) {
   store.saveUInt("BATT2TYPE", (uint32_t)BatteryType::NissanLeaf);
   JsonDocument body;
   body["values"]["MQTTENABLED"] = true;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << "a POST that does not touch the battery section cannot create the bad shape, and rejecting it "
                        "would lock every unrelated setting on a box whose boot already latched the config fault";
@@ -522,7 +528,7 @@ TEST_F(SettingsApiTest, MissingBoolKeyIsPreservedNotWiped) {
 
   JsonDocument body;
   body["values"]["WEBENABLED"] = true;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_TRUE(store.getBool("MQTTENABLED", false));
@@ -535,7 +541,7 @@ TEST_F(SettingsApiTest, PresentFalseBoolIsWrittenFalse) {
 
   JsonDocument body;
   body["values"]["MQTTCELLV"] = false;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_FALSE(store.getBool("MQTTCELLV", true));
@@ -548,7 +554,7 @@ TEST_F(SettingsApiTest, ExtraSlotRejectsTypeBeyondItsSlotCap) {
   JsonObject entry = body["dynamic"]["batteries"].add<JsonObject>();
   entry["slot"] = 2;
   entry["type"] = (uint32_t)BatteryType::TeslaModel3Y;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok) << "Tesla supports two packs at most; slot 3 must be refused at save time, not left to boot as "
                         "a silent no-start that strands the BMS-reset SOC walk";
@@ -563,7 +569,7 @@ TEST_F(SettingsApiTest, EmptyPrimaryWithStoredExtraBatteryIsRejected) {
   JsonObject entry = body["dynamic"]["batteries"].add<JsonObject>();
   entry["slot"] = 0;
   entry["type"] = 0;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok) << "the combined view and parallel safety join from pack 0, so an empty primary with a live "
                         "extra pack must be refused even when the extra slot arrives from storage, not the POST";
@@ -574,7 +580,7 @@ TEST_F(SettingsApiTest, ApplyAcceptsTheNvsKey) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["INVTYPE"] = 3;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_EQ(store.getUInt("INVTYPE", 0), 3u);
@@ -585,7 +591,7 @@ TEST_F(SettingsApiTest, SecondsToMsTransformOnApply) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["MQTTPUBLISHMS"] = 5;  // seconds in JSON
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_EQ(store.getUInt("MQTTPUBLISHMS", 0), 5000u);
@@ -595,7 +601,7 @@ TEST_F(SettingsApiTest, FloatX10TransformOnApply) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["BATTPVMAX"] = 400.5;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_EQ(store.getUInt("BATTPVMAX", 0), 4005u);
@@ -605,7 +611,7 @@ TEST_F(SettingsApiTest, FloatStringApplyKeepsSign) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["CTOFFSET"] = "-1.5";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("CTOFFSET", "").c_str(), "-1.5");
@@ -617,7 +623,7 @@ TEST_F(SettingsApiTest, PasswordMismatchRejectedNothingWritten) {
   body["values"]["HTTPPASS"] = "one";
   body["values"]["HTTPPASSCONFIRM"] = "two";
   body["values"]["MQTTPORT"] = 9000;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok);
   EXPECT_FALSE(store.settingExists("HTTPPASS"));
@@ -630,7 +636,7 @@ TEST_F(SettingsApiTest, WebauthWithEmptyPasswordRejected) {
   body["values"]["WEBAUTH"] = true;
   body["values"]["HTTPUSER"] = "admin";
   body["values"]["HTTPPASS"] = "";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok);
   EXPECT_NE(std::string(r.error.c_str()).find("password"), std::string::npos) << r.error.c_str();
@@ -641,7 +647,7 @@ TEST_F(SettingsApiTest, MatchingPasswordAccepted) {
   JsonDocument body;
   body["values"]["HTTPPASS"] = "secret";
   body["values"]["HTTPPASSCONFIRM"] = "secret";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("HTTPPASS", "").c_str(), "secret");
@@ -682,7 +688,7 @@ TEST_F(SettingsApiTest, EmptyPasswordPreservesStored) {
   body["values"]["MQTTPASSWORD"] = "";
   body["values"]["PASSWORD"] = "";
   body["values"]["APPASSWORD"] = "";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_FALSE(r.reboot_required);
@@ -698,7 +704,7 @@ TEST_F(SettingsApiTest, NonEmptyPasswordOverwritesStored) {
 
   JsonDocument body;
   body["values"]["MQTTPASSWORD"] = "new";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("MQTTPASSWORD", "").c_str(), "new");
@@ -711,7 +717,7 @@ TEST_F(SettingsApiTest, BlankConfirmAcceptsNewPassword) {
   JsonDocument body;
   body["values"]["HTTPPASS"] = "fresh";
   body["values"]["HTTPPASSCONFIRM"] = "";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("HTTPPASS", "").c_str(), "fresh");
@@ -726,7 +732,7 @@ TEST_F(SettingsApiTest, WebauthEmptyPasswordAcceptedWhenStored) {
   body["values"]["WEBAUTH"] = true;
   body["values"]["HTTPUSER"] = "admin";
   body["values"]["HTTPPASS"] = "";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("HTTPPASS", "").c_str(), "stored");
@@ -740,7 +746,7 @@ TEST_F(SettingsApiTest, NullPasswordClearsStored) {
 
   JsonDocument body;
   ASSERT_FALSE(deserializeJson(body, R"({"values":{"MQTTPASSWORD":null}})"));
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_TRUE(r.reboot_required);
@@ -754,7 +760,7 @@ TEST_F(SettingsApiTest, AbsentPasswordPreservedNotCleared) {
 
   JsonDocument body;
   body["values"]["WEBENABLED"] = true;  // MQTTPASSWORD absent, not null
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("MQTTPASSWORD", "").c_str(), "kept");
@@ -768,7 +774,7 @@ TEST_F(SettingsApiTest, ClearHttpPassWhileWebauthRejected) {
 
   JsonDocument body;
   ASSERT_FALSE(deserializeJson(body, R"({"values":{"WEBAUTH":true,"HTTPUSER":"admin","HTTPPASS":null}})"));
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok);
   EXPECT_NE(std::string(r.error.c_str()).find("password"), std::string::npos) << r.error.c_str();
@@ -784,7 +790,7 @@ TEST_F(SettingsApiTest, ClearHttpPassWithWebauthStoredButOmittedRejected) {
 
   JsonDocument body;
   ASSERT_FALSE(deserializeJson(body, R"({"values":{"HTTPPASS":null}})"));
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok);
   EXPECT_NE(std::string(r.error.c_str()).find("password"), std::string::npos) << r.error.c_str();
@@ -798,7 +804,7 @@ TEST_F(SettingsApiTest, NonPasswordNullPreserved) {
 
   JsonDocument body;
   ASSERT_FALSE(deserializeJson(body, R"({"values":{"MQTTSERVER":null}})"));
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("MQTTSERVER", "").c_str(), "broker.local");
@@ -812,7 +818,7 @@ TEST_F(SettingsApiTest, ClearWifiPasswordRefreshesGlobal) {
 
   JsonDocument body;
   ASSERT_FALSE(deserializeJson(body, R"({"values":{"PASSWORD":null}})"));
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("PASSWORD", "sentinel").c_str(), "");
@@ -827,7 +833,7 @@ TEST_F(SettingsApiTest, StaticIpStoredAsDottedQuadString) {
     body["values"]["GATEWAY"] = "192.168.1.1";
     body["values"]["SUBNET"] = "255.255.255.0";
     body["values"]["DNS"] = "1.1.1.1";
-    const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+    const auto r = apply_settings_body(store, body);
 
     EXPECT_TRUE(r.ok) << r.error.c_str();
     EXPECT_STREQ(store.getString("LOCALIP", "").c_str(), "192.168.1.50");
@@ -853,7 +859,7 @@ TEST_F(SettingsApiTest, WrongTypeRejectedNothingWritten) {
   JsonDocument body;
   body["values"]["MQTTPORT"] = 5678;
   body["values"]["WEBENABLED"] = "yes";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok);
   EXPECT_NE(std::string(r.error.c_str()).find("WEBENABLED"), std::string::npos) << r.error.c_str();
@@ -868,7 +874,7 @@ TEST_F(SettingsApiTest, NoRebootWhenSavingDisplayedDefaults) {
   body["values"]["WIFIAPENABLED"] = true;  // default true
   body["values"]["PYLONBAUD"] = 500;       // default 500
   body["values"]["MQTTPORT"] = 1883;       // default 1883
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_FALSE(r.reboot_required);
@@ -879,7 +885,7 @@ TEST_F(SettingsApiTest, UnknownKeyIgnored) {
   JsonDocument body;
   body["values"]["NOTAREALKEY"] = 42;
   body["values"]["MQTTPORT"] = 8080;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_EQ(store.getUInt("MQTTPORT", 0), 8080u);
@@ -908,7 +914,7 @@ TEST_F(SettingsApiTest, RetiredKeysAbsentFromSchemaAndIgnoredOnApply) {
   for (const char* key : retired) {
     body["values"][key] = "leftover";
   }
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
   EXPECT_TRUE(r.ok) << r.error.c_str();
   for (const char* key : retired) {
     EXPECT_STREQ(store.getString(key, "").c_str(), "") << key << " persisted on apply";
@@ -923,7 +929,7 @@ TEST_F(SettingsApiTest, InternalIfschemaKeyUntouchedByApply) {
   JsonDocument body;
   body["values"]["MQTTPORT"] = 1883;
   body["values"]["WEBENABLED"] = true;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_EQ(store.getUInt("IFSCHEMA", 0), 7u);
@@ -933,7 +939,7 @@ TEST_F(SettingsApiTest, RebootRequiredWhenBootFieldChanges) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["MQTTPORT"] = 9000;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_TRUE(r.changed);
@@ -947,7 +953,7 @@ TEST_F(SettingsApiTest, NoChangeNoRebootWhenValueMatchesStored) {
   BatteryEmulatorSettingsStore fresh;
   JsonDocument body;
   body["values"]["MQTTPORT"] = 9000;
-  const auto r = apply_settings_json(fresh, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(fresh, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_FALSE(r.changed);
@@ -971,7 +977,7 @@ TEST_F(SettingsApiTest, ChargeTaperApplyWrites) {
   body["values"]["CHGTAPERSOC"] = true;
   body["values"]["CHGTAPERSTART"] = 90;
   body["values"]["CHGTAPERFLOOR"] = 250;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_TRUE(store.getBool("CHGTAPERSOC", false));
@@ -994,7 +1000,7 @@ TEST_F(SettingsApiTest, FoxessDefaultsEmittedAndApplyWrites) {
   body["values"]["FOXESSTYPE"] = 2;
   body["values"]["FOXESSSUBTYPE"] = 1;
   body["values"]["FOXESSMODULES"] = 4;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_EQ(store.getUInt("FOXESSTYPE", 99), 2u);
@@ -1012,7 +1018,7 @@ TEST_F(SettingsApiTest, HaDiscoveryTopicDefaultAndApply) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["HADISCTOPIC"] = "hass";
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_STREQ(store.getString("HADISCTOPIC", "").c_str(), "hass");
@@ -1031,7 +1037,7 @@ TEST_F(SettingsApiTest, HaDiscoveryTriggersDefaultFalseAndApply) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["HADISCFWU"] = true;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_TRUE(store.getBool("HADISCFWU", false));
@@ -1056,7 +1062,7 @@ TEST_F(SettingsApiTest, SyslogFieldsPresentWithDefaultsAndApply) {
   body["values"]["SYSLOGIP"] = "192.168.1.10";
   body["values"]["SYSLOGPORT"] = 1514;
   body["values"]["SYSLOGFAC"] = 16;
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_TRUE(store.getBool("SYSLOGEN", false));
@@ -1093,7 +1099,7 @@ TEST_F(SettingsApiTest, AboveMaxRejectedAtomically) {
   JsonDocument body;
   body["values"]["CHGTAPERFLOOR"] = 500;  // valid, earlier in table order
   body["values"]["MQTTPORT"] = 70000;     // max is 65535, later in table order
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok);
   EXPECT_NE(std::string(r.error.c_str()).find("MQTTPORT"), std::string::npos) << r.error.c_str();
@@ -1104,7 +1110,7 @@ TEST_F(SettingsApiTest, BelowMinRejected) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["MQTTPORT"] = 0;  // min is 1
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok);
   EXPECT_NE(std::string(r.error.c_str()).find("MQTTPORT"), std::string::npos) << r.error.c_str();
@@ -1116,7 +1122,7 @@ TEST_F(SettingsApiTest, InclusiveBoundariesAndSecondsDomainAccepted) {
   JsonDocument body;
   body["values"]["CHGTAPERSTART"] = 99;   // inclusive max
   body["values"]["MQTTPUBLISHMS"] = 300;  // seconds-domain max, stored as ms
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_EQ(store.getUInt("CHGTAPERSTART", 0), 99u);
@@ -1127,7 +1133,7 @@ TEST_F(SettingsApiTest, SecondsToMsAboveSecondsBoundRejected) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["MQTTPUBLISHMS"] = 301;  // max 300 s
-  const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+  const auto r = apply_settings_body(store, body);
 
   EXPECT_FALSE(r.ok);
   EXPECT_NE(std::string(r.error.c_str()).find("MQTTPUBLISHMS"), std::string::npos) << r.error.c_str();
@@ -1211,7 +1217,7 @@ TEST_F(SettingsApiTest, GpioOptionApplyClampsUnknownValueToDefault) {
     BatteryEmulatorSettingsStore store;
     JsonDocument body;
     body["values"]["GPIOOPT9"] = 7;  // no such choice -> clamp to default 0
-    const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+    const auto r = apply_settings_body(store, body);
     EXPECT_TRUE(r.ok) << r.error.c_str();
     EXPECT_EQ(store.getUInt("GPIOOPT9", 99), 0u);
   }
@@ -1219,7 +1225,7 @@ TEST_F(SettingsApiTest, GpioOptionApplyClampsUnknownValueToDefault) {
     BatteryEmulatorSettingsStore store;
     JsonDocument body;
     body["values"]["GPIOOPT9"] = 1;  // valid choice -> stored verbatim
-    const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+    const auto r = apply_settings_body(store, body);
     EXPECT_TRUE(r.ok) << r.error.c_str();
     EXPECT_EQ(store.getUInt("GPIOOPT9", 99), 1u);
   }
@@ -1228,7 +1234,7 @@ TEST_F(SettingsApiTest, GpioOptionApplyClampsUnknownValueToDefault) {
     BatteryEmulatorSettingsStore store;
     JsonDocument body;
     body["values"]["GPIOOPT9"] = 257;
-    const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
+    const auto r = apply_settings_body(store, body);
     EXPECT_TRUE(r.ok) << r.error.c_str();
     EXPECT_EQ(store.getUInt("GPIOOPT9", 99), 0u);
   }
@@ -1242,9 +1248,15 @@ static JsonDocument balancing_body(const char* json) {
   return doc;
 }
 
+static const char* battery_slot_of(const JsonDocument& body, uint8_t& slot) {
+  JsonDocumentReader reader(body.as<JsonVariantConst>());
+  return validate_battery_slot(reader, slot);
+}
+
 static const char* validate_balancing_update(battery_chemistry_enum chemistry, const JsonDocument& doc) {
+  JsonDocumentReader reader(doc.as<JsonVariantConst>());
   for (const char* key : {"max_cell_mv", "max_dev_mv", "float_power_w", "max_pack_v", "max_time_min"}) {
-    if (const char* error = validate_balancing_field(chemistry, key, doc[key])) {
+    if (const char* error = validate_balancing_field(chemistry, key, reader.value(key))) {
       return error;
     }
   }
@@ -1276,32 +1288,32 @@ class BatterySlotResolutionTest : public testing::Test {
 
 TEST_F(BatterySlotResolutionTest, AbsentFieldMeansPrimary) {
   uint8_t slot = 99;
-  EXPECT_EQ(validate_battery_slot(balancing_body("{}"), slot), nullptr);
+  EXPECT_EQ(battery_slot_of(balancing_body("{}"), slot), nullptr);
   EXPECT_EQ(slot, 0);
 }
 
 TEST_F(BatterySlotResolutionTest, RejectsNonIntegerField) {
   uint8_t slot = 0;
-  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":"0"})"), slot), "Bad Request");
-  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":1.5})"), slot), "Bad Request");
+  EXPECT_STREQ(battery_slot_of(balancing_body(R"({"battery":"0"})"), slot), "Bad Request");
+  EXPECT_STREQ(battery_slot_of(balancing_body(R"({"battery":1.5})"), slot), "Bad Request");
 }
 
 TEST_F(BatterySlotResolutionTest, RejectsOutOfRangeSlots) {
   uint8_t slot = 0;
-  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":-1})"), slot), "Invalid battery");
-  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":3})"), slot), "Invalid battery");
+  EXPECT_STREQ(battery_slot_of(balancing_body(R"({"battery":-1})"), slot), "Invalid battery");
+  EXPECT_STREQ(battery_slot_of(balancing_body(R"({"battery":3})"), slot), "Invalid battery");
 }
 
 TEST_F(BatterySlotResolutionTest, RejectsUnconfiguredSecondarySlot) {
   uint8_t slot = 0;
-  EXPECT_STREQ(validate_battery_slot(balancing_body(R"({"battery":1})"), slot), "Invalid battery");
+  EXPECT_STREQ(battery_slot_of(balancing_body(R"({"battery":1})"), slot), "Invalid battery");
 }
 
 // Deliberate: settings can be staged before a battery type is selected.
 TEST_F(BatterySlotResolutionTest, PrimaryAcceptedWithNoDriverConfigured) {
   batteries[0] = nullptr;
   uint8_t slot = 99;
-  EXPECT_EQ(validate_battery_slot(balancing_body(R"({"battery":0})"), slot), nullptr);
+  EXPECT_EQ(battery_slot_of(balancing_body(R"({"battery":0})"), slot), nullptr);
   EXPECT_EQ(slot, 0);
 }
 
@@ -1320,11 +1332,11 @@ TEST_F(BatterySlotResolutionTest, AddressablePredicateMatchesResolverRules) {
 
 TEST_F(BatterySlotResolutionTest, ResolvesConfiguredSlots) {
   uint8_t slot = 99;
-  EXPECT_EQ(validate_battery_slot(balancing_body(R"({"battery":0})"), slot), nullptr);
+  EXPECT_EQ(battery_slot_of(balancing_body(R"({"battery":0})"), slot), nullptr);
   EXPECT_EQ(slot, 0);
 
   batteries[1] = batteries[0];
-  EXPECT_EQ(validate_battery_slot(balancing_body(R"({"battery":1})"), slot), nullptr);
+  EXPECT_EQ(battery_slot_of(balancing_body(R"({"battery":1})"), slot), nullptr);
   EXPECT_EQ(slot, 1);
 }
 
@@ -1430,7 +1442,7 @@ static SettingsApplyResult apply_balancing(BatteryEmulatorSettingsStore& store, 
   const std::string body = std::string(R"({"dynamic":{"balancing":[)") + entry_json + "]}}";
   JsonDocument doc;
   EXPECT_FALSE(deserializeJson(doc, body));
-  return apply_settings_json(store, doc.as<JsonObjectConst>());
+  return apply_settings_body(store, doc);
 }
 
 TEST_F(SettingsApiTest, BalancingWritesEveryPresentFieldWithUnitConversion) {
@@ -1498,7 +1510,7 @@ TEST_F(SettingsApiTest, RejectsValueAbsentFromItsOptionList) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["BATTCHEM"] = 9999;
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   EXPECT_FALSE(result.ok);
   EXPECT_NE(std::string(result.error.c_str()).find("BATTCHEM"), std::string::npos);
 }
@@ -1510,7 +1522,7 @@ TEST_F(SettingsApiTest, AcceptsAValueFromAClientOwnedOptionList) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["GTWCOUNTRY"] = 16725;
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   EXPECT_TRUE(result.ok) << result.error.c_str();
 }
 
@@ -1541,7 +1553,7 @@ TEST_F(SettingsApiTest, AcceptsValuePresentInItsOptionList) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["BATTCHEM"] = 1;
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   EXPECT_TRUE(result.ok) << result.error.c_str();
 }
 
@@ -1550,7 +1562,7 @@ TEST_F(SettingsApiTest, LeavesFieldsWithoutOptionsUnchecked) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["SOFAR_ID"] = 5;
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   EXPECT_TRUE(result.ok) << result.error.c_str();
 }
 
@@ -1595,7 +1607,7 @@ TEST_F(SettingsApiTest, RejectsUnknownShellName) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["WEBUI"] = "nosuchskin";
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   EXPECT_FALSE(result.ok);
 }
 
@@ -1604,7 +1616,7 @@ TEST_F(SettingsApiTest, AcceptsShippedShellName) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["WEBUI"] = "modern";
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   EXPECT_TRUE(result.ok) << result.error.c_str();
   EXPECT_EQ(store.getString("WEBUI", ""), String("modern"));
 }
@@ -1614,7 +1626,7 @@ TEST_F(SettingsApiTest, LiveFieldDoesNotRequireReboot) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["WEBUI"] = "modern";
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   ASSERT_TRUE(result.ok) << result.error.c_str();
   EXPECT_TRUE(result.changed);
   EXPECT_FALSE(result.reboot_required);
@@ -1625,7 +1637,7 @@ TEST_F(SettingsApiTest, BootFieldStillRequiresReboot) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["SOFAR_ID"] = 7;
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   ASSERT_TRUE(result.ok) << result.error.c_str();
   EXPECT_TRUE(result.reboot_required);
 }
@@ -1642,7 +1654,7 @@ TEST_F(SettingsApiTest, RejectionCarriesKeyForPasswordMismatch) {
   JsonDocument doc;
   doc["values"]["HTTPPASS"] = "correct-horse";
   doc["values"]["HTTPPASSCONFIRM"] = "battery-staple";
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   ASSERT_FALSE(result.ok);
   EXPECT_STREQ(result.error_key, "error.webauth_password_mismatch");
   EXPECT_STREQ(result.error_arg.c_str(), "");
@@ -1653,7 +1665,7 @@ TEST_F(SettingsApiTest, RejectionCarriesKeyAndArgForWrongType) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["SSID"] = 42;
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   ASSERT_FALSE(result.ok);
   EXPECT_STREQ(result.error_key, "error.setting_invalid_type");
   EXPECT_STREQ(result.error_arg.c_str(), "SSID");
@@ -1664,7 +1676,7 @@ TEST_F(SettingsApiTest, RejectionCarriesKeyAndArgForOutOfRange) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["WIFICHANNEL"] = 99;
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   ASSERT_FALSE(result.ok);
   EXPECT_STREQ(result.error_key, "error.setting_out_of_range");
   EXPECT_STREQ(result.error_arg.c_str(), "WIFICHANNEL");
@@ -1675,7 +1687,7 @@ TEST_F(SettingsApiTest, RejectionCarriesKeyForUnknownBatterySlot) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["dynamic"]["batteries"][0]["slot"] = kMaxBatterySlots;
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   ASSERT_FALSE(result.ok);
   EXPECT_STREQ(result.error_key, "error.battery_slot_unknown");
 }
@@ -1685,7 +1697,7 @@ TEST_F(SettingsApiTest, AcceptedApplyCarriesNoErrorKey) {
   BatteryEmulatorSettingsStore store;
   JsonDocument doc;
   doc["values"]["SSID"] = "bench";
-  const SettingsApplyResult result = apply_settings_json(store, doc.as<JsonObjectConst>());
+  const SettingsApplyResult result = apply_settings_body(store, doc);
   ASSERT_TRUE(result.ok) << result.error.c_str();
   EXPECT_EQ(result.error_key, nullptr);
 }

@@ -11,11 +11,10 @@
 #include "../../datalayer/datalayer.h"
 #include "../../datalayer/datalayer_extended.h"
 #include "../../inverter/INVERTERS.h"
-#include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "../hal/hal.h"
 #include "../utils/types.h"
 #include "../wifi/wifi.h"
-#include "web_json.h"
+#include "battery_slot_api.h"
 
 #include <cmath>
 #include <cstring>
@@ -87,20 +86,20 @@ void seed_slot_capacities(uint8_t) {
   }
 }
 
-const char* check_charger_field(const SettingField& field, uint8_t, JsonObjectConst fields) {
+const char* check_charger_field(const SettingField& field, uint8_t, const ValueSource& fields) {
   if (charger == nullptr) {
     return "No charger configured";
   }
   if (std::strcmp(field.key, "setpoint_v") == 0) {
-    const float volts = fields[field.key].as<float>();
+    const float volts = static_cast<float>(fields.value(field.key).as_number());
     if (volts < CHARGER_MIN_HV || volts > CHARGER_MAX_HV) {
       return "Invalid value";
     }
   } else if (std::strcmp(field.key, "setpoint_a") == 0) {
-    const float amps = fields[field.key].as<float>();
-    JsonVariantConst requested_volts = fields["setpoint_v"];
-    const float volts =
-        requested_volts.isNull() ? datalayer.charger.charger_setpoint_HV_VDC : requested_volts.as<float>();
+    const float amps = static_cast<float>(fields.value(field.key).as_number());
+    const DocumentValue requested_volts = fields.value("setpoint_v");
+    const float volts = requested_volts.missing() ? datalayer.charger.charger_setpoint_HV_VDC
+                                                  : static_cast<float>(requested_volts.as_number());
     if (amps < 0 || amps > CHARGER_MAX_A || amps * kDeciPerUnit > datalayer.battery.settings.max_user_set_charge_dA ||
         amps * volts > CHARGER_MAX_POWER) {
       return "Invalid value";
@@ -109,11 +108,11 @@ const char* check_charger_field(const SettingField& field, uint8_t, JsonObjectCo
   return nullptr;
 }
 
-const char* check_balancing_field(const SettingField& field, uint8_t slot, JsonObjectConst fields) {
-  return validate_balancing_field(datalayer.battery_slot(slot).info.chemistry, field.key, fields[field.key]);
+const char* check_balancing_field(const SettingField& field, uint8_t slot, const ValueSource& fields) {
+  return validate_balancing_field(datalayer.battery_slot(slot).info.chemistry, field.key, fields.value(field.key));
 }
 
-const char* check_field(const SettingField& field, uint8_t slot, JsonObjectConst fields) {
+const char* check_field(const SettingField& field, uint8_t slot, const ValueSource& fields) {
   if (field.section == kSecCharger) {
     return check_charger_field(field, slot, fields);
   }
@@ -129,6 +128,11 @@ struct BatterySlotKeys {
   const char* comm_key;
   const char* contactor_key;
 };
+constexpr const char* kBatteriesPath = "dynamic.batteries";
+constexpr const char* kBalancingPath = "dynamic.balancing";
+constexpr const char* kTerminationPath = "dynamic.termination";
+constexpr const char* kLoadSwitchChannelsPath = "dynamic.loadswitch.channels";
+
 constexpr BatterySlotKeys kBatterySlotKeys[kMaxBatterySlots] = {
     {0, "BATTTYPE", "BATTCOMM", "CNTCTRL"},
     {1, "BATT2TYPE", "BATT2COMM", "CNTCTRLDBL"},
@@ -1252,51 +1256,51 @@ class OptionMembershipSink : public SettingOptionSink {
   const char* key_ = "";
 };
 
-bool value_matches_type(SettingType type, JsonVariantConst value) {
+bool value_matches_type(SettingType type, const DocumentValue& value) {
   switch (type) {
     case ST::Bool:
-      return value.is<bool>();
+      return value.is_bool();
     case ST::Uint:
     case ST::EnumUint:
     case ST::InterfacePacked:
     case ST::SecondsToMs:
-      return value.is<uint32_t>();
+      return value.is_integer_in(0, UINT32_MAX);
     case ST::Int:
-      return value.is<int32_t>();
+      return value.is_integer_in(INT32_MIN, INT32_MAX);
     case ST::StringVal:
     case ST::FloatString:
-      return value.is<const char*>();
+      return value.is_string();
     case ST::FloatX10:
     case ST::SignedFloatX10:
     case ST::Float:
-      return value.is<float>();
+      return value.is_number();
   }
   return false;
 }
 }  // namespace
 
-SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, JsonObjectConst root) {
+SettingsApplyResult apply_settings(BatteryEmulatorSettingsStore& store, const DocumentReader& body) {
   SettingsApplyResult result{true, String(), false, false};
-  JsonObjectConst values = root["values"];
 
   // Guard on the effective webauth state, not just whether this payload enables it: otherwise a
   // request that clears HTTPPASS while omitting WEBAUTH would leave auth on with no password (lockout).
-  const bool webauth_effective =
-      values["WEBAUTH"].is<bool>() ? values["WEBAUTH"].as<bool>() : store.getBool("WEBAUTH", false);
-  const String http_user = values["HTTPUSER"].is<const char*>() ? String(values["HTTPUSER"].as<const char*>())
-                                                                : store.getString("HTTPUSER", "admin");
+  const DocumentValue webauth = body.value("WEBAUTH");
+  const bool webauth_effective = webauth.is_bool() ? webauth.as_bool() : store.getBool("WEBAUTH", false);
+  const DocumentValue user_value = body.value("HTTPUSER");
+  const String http_user =
+      user_value.is_string() ? String(user_value.as_text()) : store.getString("HTTPUSER", "admin");
   // Blank keeps the stored password; an explicit null clears it. Resolve to "" on a clear so the
   // webauth guard below treats a cleared password as "none".
-  const bool http_pass_clear = values["HTTPPASS"].isNull() && values.containsKey("HTTPPASS");
-  const bool http_pass_present =
-      values["HTTPPASS"].is<const char*>() && std::strlen(values["HTTPPASS"].as<const char*>()) > 0;
+  const DocumentValue pass_value = body.value("HTTPPASS");
+  const bool http_pass_clear = pass_value.cleared();
+  const bool http_pass_present = pass_value.is_string() && std::strlen(pass_value.as_text()) > 0;
   const String http_pass = http_pass_clear     ? String("")
-                           : http_pass_present ? String(values["HTTPPASS"].as<const char*>())
+                           : http_pass_present ? String(pass_value.as_text())
                                                : store.getString("HTTPPASS");
-  const bool http_pass_confirm_present =
-      values["HTTPPASSCONFIRM"].is<const char*>() && std::strlen(values["HTTPPASSCONFIRM"].as<const char*>()) > 0;
+  const DocumentValue confirm_value = body.value("HTTPPASSCONFIRM");
+  const bool http_pass_confirm_present = confirm_value.is_string() && std::strlen(confirm_value.as_text()) > 0;
   const String http_pass_confirm =
-      http_pass_confirm_present ? String(values["HTTPPASSCONFIRM"].as<const char*>()) : http_pass;
+      http_pass_confirm_present ? String(confirm_value.as_text()) : http_pass;
   if (!(http_pass == http_pass_confirm)) {
     result.ok = false;
     result.error = "Web interface passwords do not match.";
@@ -1319,13 +1323,13 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     if (field.options_key == nullptr || field.live.scope == SCP::BatterySlot) {
       continue;
     }
-    JsonVariantConst value = values[field.key];
-    if (value.isNull() || !value_matches_type(field.type, value)) {
+    const DocumentValue value = body.value(field.key);
+    if (value.missing() || !value_matches_type(field.type, value)) {
       continue;
     }
     const bool text = field.type == ST::StringVal;
-    option_checks.push_back({field.options_key, text, text ? 0u : value.as<uint32_t>(),
-                             text ? value.as<const char*>() : nullptr});
+    option_checks.push_back({field.options_key, text, text ? 0u : static_cast<uint32_t>(value.integer),
+                             text ? value.as_text() : nullptr});
   }
   if (!option_checks.empty()) {
     OptionMembershipSink membership(option_checks);
@@ -1337,8 +1341,8 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     if (field.live.scope == SCP::BatterySlot) {
       continue;
     }
-    JsonVariantConst value = values[field.key];
-    if (value.isNull()) {
+    const DocumentValue value = body.value(field.key);
+    if (value.missing()) {
       continue;
     }
     if (!value_matches_type(field.type, value)) {
@@ -1348,11 +1352,11 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       result.error_arg = field.key;
       return result;
     }
-    // as<double>() is safe: bounds sit only on numeric rows, already type-checked above.
+    // as_number() is safe: bounds sit only on numeric rows, already type-checked above.
     const bool has_min = field.min_value != kNoMin;
     const bool has_max = field.max_value != kNoMax;
     if (has_min || has_max) {
-      const double numeric = value.as<double>();
+      const double numeric = value.as_number();
       if ((has_min && numeric < field.min_value) || (has_max && numeric > field.max_value)) {
         result.ok = false;
         result.error = String("Setting ") + field.key + " is out of range";
@@ -1374,28 +1378,32 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
         return result;
       }
     }
-    if (const char* error = check_field(field, 0, values)) {
+    if (const char* error = check_field(field, 0, body)) {
       result.ok = false;
       result.error = error;
       return result;
     }
   }
 
-  for (JsonObjectConst entry : root["dynamic"]["balancing"].as<JsonArrayConst>()) {
-    if (!entry["slot"].is<uint8_t>() || !battery_slot_addressable(entry["slot"].as<uint8_t>())) {
+  const size_t balancing_rows = body.rows(kBalancingPath);
+  for (size_t row = 0; row < balancing_rows; row++) {
+    const DocumentRow entry(body, kBalancingPath, row);
+    const DocumentValue slot_value = entry.value("slot");
+    if (!slot_value.is_integer_in(0, UINT8_MAX) ||
+        !battery_slot_addressable(static_cast<uint8_t>(slot_value.integer))) {
       result.ok = false;
       result.error = "Unknown battery slot";
       result.error_key = "error.battery_slot_unknown";
       return result;
     }
-    const uint8_t slot = entry["slot"].as<uint8_t>();
+    const uint8_t slot = static_cast<uint8_t>(slot_value.integer);
     for (size_t i = 0; i < total_settings; i++) {
       const SettingField& field = *setting_at(i).field;
       if (field.live.scope != SCP::BatterySlot) {
         continue;
       }
-      JsonVariantConst value = entry[field.key];
-      if (value.isNull()) {
+      const DocumentValue value = entry.value(field.key);
+      if (value.missing()) {
         continue;
       }
       if (!value_matches_type(field.type, value)) {
@@ -1413,29 +1421,31 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     }
   }
 
-  JsonArrayConst battery_section = root["dynamic"]["batteries"].as<JsonArrayConst>();
+  const size_t battery_rows = body.rows(kBatteriesPath);
   BatteryType effective_types[kMaxBatterySlots];
   for (const BatterySlotKeys& keys : kBatterySlotKeys) {
     effective_types[keys.slot] =
         static_cast<BatteryType>(store.getUInt(keys.type_key, static_cast<uint32_t>(BatteryType::None)));
   }
-  for (JsonObjectConst entry : battery_section) {
-    if (!entry["slot"].is<uint8_t>() || entry["slot"].as<uint8_t>() >= kMaxBatterySlots) {
+  for (size_t row = 0; row < battery_rows; row++) {
+    const DocumentRow entry(body, kBatteriesPath, row);
+    const DocumentValue slot_value = entry.value("slot");
+    if (!slot_value.is_integer_in(0, UINT8_MAX) || slot_value.integer >= kMaxBatterySlots) {
       result.ok = false;
       result.error = "Unknown battery slot";
       result.error_key = "error.battery_slot_unknown";
       return result;
     }
-    const uint8_t slot = entry["slot"].as<uint8_t>();
-    JsonVariantConst type_value = entry["type"];
-    if (!type_value.isNull()) {
-      if (!type_value.is<uint32_t>()) {
+    const uint8_t slot = static_cast<uint8_t>(slot_value.integer);
+    const DocumentValue type_value = entry.value("type");
+    if (!type_value.missing()) {
+      if (!type_value.is_integer_in(0, UINT32_MAX)) {
         result.ok = false;
         result.error = "Invalid type for battery slot";
         result.error_key = "error.battery_slot_invalid_type";
         return result;
       }
-      const BatteryType type = static_cast<BatteryType>(type_value.as<uint32_t>());
+      const BatteryType type = static_cast<BatteryType>(static_cast<uint32_t>(type_value.integer));
       if (!battery_type_allowed_in_slot(type, slot)) {
         result.ok = false;
         result.error = String("Battery ") + (slot + 1) + " cannot run the selected battery type on this hardware";
@@ -1445,20 +1455,22 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       }
       effective_types[slot] = type;
     }
-    if (!entry["comm"].isNull() && !entry["comm"].is<uint32_t>()) {
+    const DocumentValue comm_value = entry.value("comm");
+    if (!comm_value.missing() && !comm_value.is_integer_in(0, UINT32_MAX)) {
       result.ok = false;
       result.error = "Invalid interface for battery slot";
       result.error_key = "error.battery_slot_invalid_interface";
       return result;
     }
-    if (!entry["contactor_control"].isNull() && !entry["contactor_control"].is<bool>()) {
+    const DocumentValue contactor_value = entry.value("contactor_control");
+    if (!contactor_value.missing() && !contactor_value.is_bool()) {
       result.ok = false;
       result.error = "Invalid contactor control value for battery slot";
       result.error_key = "error.battery_slot_invalid_contactor";
       return result;
     }
   }
-  if (!battery_section.isNull() && effective_types[0] == BatteryType::None &&
+  if (body.has_rows(kBatteriesPath) && effective_types[0] == BatteryType::None &&
       (effective_types[1] != BatteryType::None || effective_types[2] != BatteryType::None)) {
     result.ok = false;
     result.error = "Configure the primary battery before adding extra batteries.";
@@ -1469,8 +1481,8 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   if (esp32hal != nullptr) {
     GpioOptionCatalog catalog = esp32hal->gpio_options();
     for (size_t g = 0; g < catalog.group_count; g++) {
-      JsonVariantConst value = values[catalog.groups[g].nvs_key];
-      if (!value.isNull() && !value.is<uint32_t>()) {
+      const DocumentValue value = body.value(catalog.groups[g].nvs_key);
+      if (!value.missing() && !value.is_integer_in(0, UINT32_MAX)) {
         result.ok = false;
         result.error = String("Invalid type for setting ") + catalog.groups[g].nvs_key;
         result.error_key = "error.setting_invalid_type";
@@ -1487,11 +1499,11 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     if (field.live.scope == SCP::BatterySlot) {
       continue;
     }
-    JsonVariantConst value = values[field.key];
-    if (value.isNull()) {
+    const DocumentValue value = body.value(field.key);
+    if (value.missing()) {
       // Explicit JSON null on a present password key clears the secret; an absent key — or
       // null on any non-password key — preserves the stored value (the bool-wipe invariant).
-      if (is_password_key(field.key) && values.containsKey(field.key)) {
+      if (is_password_key(field.key) && value.cleared()) {
         reboot_required |= gates_reboot && (store.getString(field.key, "").length() > 0);
         store.saveString(field.key, "");
         if (std::strcmp(field.key, "PASSWORD") == 0) {
@@ -1501,14 +1513,14 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       continue;
     }
     if (field.live.kind != SR::None) {
-      write_live(field, 0, field.type == ST::Bool ? (value.as<bool>() ? 1.0 : 0.0) : value.as<double>());
+      write_live(field, 0, field.type == ST::Bool ? (value.as_bool() ? 1.0 : 0.0) : value.as_number());
     }
     if (field.storage == SS::Volatile) {
       continue;
     }
     switch (field.type) {
       case ST::Bool: {
-        const bool new_value = value.as<bool>();
+        const bool new_value = value.as_bool();
         reboot_required |= gates_reboot && (store.getBool(field.key, field.default_int != 0) != new_value);
         store.saveBool(field.key, new_value);
         break;
@@ -1516,20 +1528,20 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       case ST::Uint:
       case ST::EnumUint:
       case ST::InterfacePacked: {
-        const uint32_t new_value = value.as<uint32_t>();
+        const uint32_t new_value = static_cast<uint32_t>(value.integer);
         reboot_required |=
             gates_reboot && (store.getUInt(field.key, static_cast<uint32_t>(field.default_int)) != new_value);
         store.saveUInt(field.key, new_value);
         break;
       }
       case ST::Int: {
-        const int32_t new_value = value.as<int32_t>();
+        const int32_t new_value = static_cast<int32_t>(value.integer);
         reboot_required |= gates_reboot && (store.getInt(field.key, field.default_int) != new_value);
         store.saveInt(field.key, new_value);
         break;
       }
       case ST::SecondsToMs: {
-        const uint32_t new_value = value.as<uint32_t>() * kMillisecondsPerSecond;
+        const uint32_t new_value = static_cast<uint32_t>(value.integer) * kMillisecondsPerSecond;
         reboot_required |=
             gates_reboot &&
             (store.getUInt(field.key, static_cast<uint32_t>(field.default_int) * kMillisecondsPerSecond) != new_value);
@@ -1537,14 +1549,16 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
         break;
       }
       case ST::FloatX10: {
-        const uint32_t new_value = static_cast<uint32_t>(std::lround(value.as<float>() * kDeciUnitsPerUnit));
+        const uint32_t new_value =
+            static_cast<uint32_t>(std::lround(static_cast<float>(value.as_number()) * kDeciUnitsPerUnit));
         reboot_required |=
             gates_reboot && (store.getUInt(field.key, static_cast<uint32_t>(field.default_int)) != new_value);
         store.saveUInt(field.key, new_value);
         break;
       }
       case ST::SignedFloatX10: {
-        const int32_t new_value = static_cast<int32_t>(std::lround(value.as<float>() * kDeciUnitsPerUnit));
+        const int32_t new_value =
+            static_cast<int32_t>(std::lround(static_cast<float>(value.as_number()) * kDeciUnitsPerUnit));
         reboot_required |= gates_reboot && (store.getInt(field.key, field.default_int) != new_value);
         store.saveInt(field.key, new_value);
         break;
@@ -1553,7 +1567,7 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
         break;
       case ST::StringVal:
       case ST::FloatString: {
-        const char* new_value = value.as<const char*>();
+        const char* new_value = value.as_text();
         if (is_password_key(field.key) && (new_value == nullptr || new_value[0] == '\0')) {
           break;  // blank keeps the stored secret — skip the write and the live-global refresh
         }
@@ -1576,35 +1590,39 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
     GpioOptionCatalog catalog = esp32hal->gpio_options();
     for (size_t g = 0; g < catalog.group_count; g++) {
       const GpioOptionGroup& group = catalog.groups[g];
-      JsonVariantConst value = values[group.nvs_key];
-      if (value.isNull()) {
+      const DocumentValue value = body.value(group.nvs_key);
+      if (value.missing()) {
         continue;
       }
-      const uint32_t requested = value.as<uint32_t>();
+      const uint32_t requested = static_cast<uint32_t>(value.integer);
       const uint32_t applied = find_gpio_option_choice(group, requested) != nullptr ? requested : group.default_value;
       reboot_required |= store.getUInt(group.nvs_key, group.default_value) != applied;
       store.saveUInt(group.nvs_key, applied);
     }
   }
 
-  for (JsonObjectConst entry : root["dynamic"]["batteries"].as<JsonArrayConst>()) {
-    const uint8_t slot = entry["slot"].as<uint8_t>();
-    if (slot >= kMaxBatterySlots) {
+  for (size_t row = 0; row < battery_rows; row++) {
+    const DocumentRow entry(body, kBatteriesPath, row);
+    const int64_t slot = entry.value("slot").integer;
+    if (slot < 0 || slot >= kMaxBatterySlots) {
       continue;
     }
     const BatterySlotKeys& keys = kBatterySlotKeys[slot];
-    if (entry["type"].is<uint32_t>()) {
-      const uint32_t type = entry["type"].as<uint32_t>();
+    const DocumentValue type_value = entry.value("type");
+    if (type_value.is_integer_in(0, UINT32_MAX)) {
+      const uint32_t type = static_cast<uint32_t>(type_value.integer);
       reboot_required |= store.getUInt(keys.type_key, static_cast<uint32_t>(BatteryType::None)) != type;
       store.saveUInt(keys.type_key, type);
     }
-    if (entry["comm"].is<uint32_t>()) {
-      const uint32_t comm = entry["comm"].as<uint32_t>();
+    const DocumentValue comm_value = entry.value("comm");
+    if (comm_value.is_integer_in(0, UINT32_MAX)) {
+      const uint32_t comm = static_cast<uint32_t>(comm_value.integer);
       reboot_required |= store.getUInt(keys.comm_key, 0) != comm;
       store.saveUInt(keys.comm_key, comm);
     }
-    if (entry["contactor_control"].is<bool>()) {
-      const bool contactor = entry["contactor_control"].as<bool>();
+    const DocumentValue contactor_value = entry.value("contactor_control");
+    if (contactor_value.is_bool()) {
+      const bool contactor = contactor_value.as_bool();
       reboot_required |= store.getBool(keys.contactor_key, false) != contactor;
       store.saveBool(keys.contactor_key, contactor);
     }
@@ -1612,14 +1630,17 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
 
 #ifdef BOARD_HAS_INTERFACE_TERMINATION
   if (esp32hal != nullptr) {
-    for (JsonObjectConst entry : root["dynamic"]["termination"].as<JsonArrayConst>()) {
-      const size_t index = entry["index"].as<size_t>();
+    const size_t termination_rows = body.rows(kTerminationPath);
+    for (size_t row = 0; row < termination_rows; row++) {
+      const DocumentRow entry(body, kTerminationPath, row);
+      const size_t index = static_cast<size_t>(entry.value("index").integer);
       // Omitted/non-bool enabled must preserve, never wipe (bool-wipe fix); an
       // index the HAL cannot terminate would otherwise write a garbage NVS key.
-      if (!entry["enabled"].is<bool>() || !esp32hal->supports_interface_termination(index)) {
+      const DocumentValue enabled_value = entry.value("enabled");
+      if (!enabled_value.is_bool() || !esp32hal->supports_interface_termination(index)) {
         continue;
       }
-      const bool enabled = entry["enabled"].as<bool>();
+      const bool enabled = enabled_value.as_bool();
       const String key = interface_termination_key(index);
       if (store.getBool(key.c_str(), false) != enabled) {
         store.saveBool(key.c_str(), enabled);
@@ -1632,23 +1653,27 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
 #ifdef BOARD_HAS_LOAD_SWITCH
   if (esp32hal != nullptr) {
     if (LoadSwitch* load_switch = esp32hal->load_switch()) {
-      for (JsonObjectConst channel : root["dynamic"]["loadswitch"]["channels"].as<JsonArrayConst>()) {
-        const uint8_t ch = channel["channel"].as<uint8_t>();
+      const size_t channel_rows = body.rows(kLoadSwitchChannelsPath);
+      for (size_t row = 0; row < channel_rows; row++) {
+        const DocumentRow channel(body, kLoadSwitchChannelsPath, row);
+        const uint8_t ch = static_cast<uint8_t>(channel.value("channel").integer);
         // A phantom channel would write out-of-range LSROLE/LSDUTY keys and set
         // reboot_required before the HAL rejects the request.
         if (ch >= kLoadSwitchConfigChannels) {
           continue;
         }
-        if (!channel["role"].isNull()) {
-          const uint32_t role = channel["role"].as<uint32_t>();
+        const DocumentValue role_value = channel.value("role");
+        if (!role_value.missing()) {
+          const uint32_t role = static_cast<uint32_t>(role_value.integer);
           if (role < static_cast<uint32_t>(LoadSwitchRole::Highest)) {
             reboot_required |= store.getUInt(load_switch_role_key(ch).c_str(),
                                              static_cast<uint32_t>(LoadSwitchRole::Disabled)) != role;
             store.saveUInt(load_switch_role_key(ch).c_str(), role);
           }
         }
-        if (!channel["duty"].isNull()) {
-          uint32_t duty_pct = channel["duty"].as<uint32_t>();
+        const DocumentValue duty_value = channel.value("duty");
+        if (!duty_value.missing()) {
+          uint32_t duty_pct = static_cast<uint32_t>(duty_value.integer);
           if (duty_pct > kPercentMax) {
             duty_pct = kPercentMax;
           }
@@ -1658,8 +1683,9 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
             load_switch->request_duty(ch, static_cast<uint16_t>(duty));
           }
         }
-        if (!channel["divisor"].isNull()) {
-          uint32_t divisor = channel["divisor"].as<uint32_t>();
+        const DocumentValue divisor_value = channel.value("divisor");
+        if (!divisor_value.missing()) {
+          uint32_t divisor = static_cast<uint32_t>(divisor_value.integer);
           if (divisor >= kLoadSwitchDivisorCodes) {
             divisor = 0;
           }
@@ -1673,16 +1699,17 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   }
 #endif
 
-  for (JsonObjectConst entry : root["dynamic"]["balancing"].as<JsonArrayConst>()) {
-    const uint8_t slot = entry["slot"].as<uint8_t>();
+  for (size_t row = 0; row < balancing_rows; row++) {
+    const DocumentRow entry(body, kBalancingPath, row);
+    const uint8_t slot = static_cast<uint8_t>(entry.value("slot").integer);
     for (size_t i = 0; i < total_settings; i++) {
       const SettingField& field = *setting_at(i).field;
       if (field.live.scope != SCP::BatterySlot) {
         continue;
       }
-      JsonVariantConst value = entry[field.key];
-      if (!value.isNull()) {
-        write_live(field, slot, field.type == ST::Bool ? (value.as<bool>() ? 1.0 : 0.0) : value.as<double>());
+      const DocumentValue value = entry.value(field.key);
+      if (!value.missing()) {
+        write_live(field, slot, field.type == ST::Bool ? (value.as_bool() ? 1.0 : 0.0) : value.as_number());
       }
     }
   }
@@ -1694,46 +1721,47 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
 
 static constexpr float DECI_PER_UNIT = 10.0f;
 
-const char* validate_balancing_field(battery_chemistry_enum chemistry, const char* key, JsonVariantConst value) {
-  if (value.isNull()) {
+const char* validate_balancing_field(battery_chemistry_enum chemistry, const char* key,
+                                     const DocumentValue& value) {
+  if (value.missing()) {
     return nullptr;
   }
   const bool lfp = chemistry == battery_chemistry_enum::LFP;
 
   if (std::strcmp(key, "max_cell_mv") == 0) {
-    if (!value.is<uint16_t>()) {
+    if (!value.is_integer_in(0, UINT16_MAX)) {
       return "Bad Request";
     }
-    const uint16_t mv = value.as<uint16_t>();
+    const uint16_t mv = static_cast<uint16_t>(value.integer);
     const uint16_t cell_max_mV = lfp ? BALANCING_CELL_MAX_LFP_MV : BALANCING_CELL_MAX_NCM_MV;
     return (mv < BALANCING_CELL_MIN_MV || mv > cell_max_mV) ? "Cell voltage out of range" : nullptr;
   }
   if (std::strcmp(key, "max_dev_mv") == 0) {
-    if (!value.is<uint16_t>()) {
+    if (!value.is_integer_in(0, UINT16_MAX)) {
       return "Bad Request";
     }
-    const uint16_t mv = value.as<uint16_t>();
+    const uint16_t mv = static_cast<uint16_t>(value.integer);
     const uint16_t deviation_max_mV = lfp ? BALANCING_DEVIATION_MAX_LFP_MV : BALANCING_DEVIATION_MAX_NCM_MV;
     return (mv < BALANCING_DEVIATION_MIN_MV || mv > deviation_max_mV) ? "Cell deviation out of range" : nullptr;
   }
   if (std::strcmp(key, "float_power_w") == 0) {
-    if (!value.is<uint16_t>()) {
+    if (!value.is_integer_in(0, UINT16_MAX)) {
       return "Bad Request";
     }
-    const uint16_t watts = value.as<uint16_t>();
+    const uint16_t watts = static_cast<uint16_t>(value.integer);
     return (watts < BALANCING_FLOAT_POWER_MIN_W || watts > BALANCING_FLOAT_POWER_MAX_W) ? "Float power out of range"
                                                                                         : nullptr;
   }
   if (std::strcmp(key, "max_pack_v") == 0) {
-    if (!value.is<float>()) {
+    if (!value.is_number()) {
       return "Bad Request";
     }
     const uint16_t pack_max_dV =
         (lfp ? BALANCING_PACK_MAX_LFP_DV : BALANCING_PACK_MAX_NCM_DV) + BALANCING_PACK_HEADROOM_DV;
-    const long dv = lroundf(value.as<float>() * DECI_PER_UNIT);
+    const long dv = lroundf(static_cast<float>(value.as_number()) * DECI_PER_UNIT);
     return (dv < BALANCING_PACK_MIN_DV || dv > pack_max_dV) ? "Pack voltage out of range" : nullptr;
   }
-  if (std::strcmp(key, "max_time_min") == 0 && !value.is<float>()) {
+  if (std::strcmp(key, "max_time_min") == 0 && !value.is_number()) {
     return "Bad Request";
   }
   return nullptr;

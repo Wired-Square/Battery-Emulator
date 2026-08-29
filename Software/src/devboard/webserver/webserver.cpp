@@ -70,8 +70,9 @@ unsigned long ota_progress_millis = 0;
 #include "events_api.h"
 #include "logging_api.h"
 #include "settings_api.h"
+#include "json_document_reader.h"
 #include "json_response_writer.h"
-#include "web_json.h"
+#include "battery_slot_api.h"
 
 MyTimer ota_timeout_timer = MyTimer(15000);
 bool ota_active = false;
@@ -227,10 +228,11 @@ static AsyncWebServerRequest* json_post_owner = nullptr;
 // after the body callback has already seen the payload, so these handlers repeat
 // the auth check themselves rather than rely on web_auth_middleware.
 static void def_json_post_with_auth(const char* uri,
-                                    std::function<void(AsyncWebServerRequest*, JsonDocument&)> handler) {
+                                    std::function<void(AsyncWebServerRequest*, const DocumentReader&)> handler,
+                                    const char* scalar_map = nullptr) {
   server.on(
       uri, HTTP_POST, [](AsyncWebServerRequest*) {}, nullptr,
-      [handler](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      [handler, scalar_map](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
         if (index == 0) {
           if (webserver_auth_is_ready() && !request->authenticate(http_username.c_str(), http_password.c_str())) {
             return request->requestAuthentication(AsyncAuthType::AUTH_BASIC, WEB_AUTH_REALM);
@@ -266,7 +268,8 @@ static void def_json_post_with_auth(const char* uri,
           json_post_owner = nullptr;
           return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad JSON");
         }
-        handler(request, doc);
+        JsonDocumentReader reader(doc.as<JsonVariantConst>(), scalar_map);
+        handler(request, reader);
         json_post_owner = nullptr;
       });
 }
@@ -350,11 +353,12 @@ void init_webserver() {
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, canreplay_state_json());
   });
 
-  def_json_post_with_auth("/api/canreplay/interface", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    if (!doc["interface"].is<int>()) {
+  def_json_post_with_auth("/api/canreplay/interface", [](AsyncWebServerRequest* request, const DocumentReader& body) {
+    const DocumentValue requested = body.value("interface");
+    if (!requested.is_integer_in(INT32_MIN, INT32_MAX)) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Error: updating interface failed");
     }
-    int interfaceValue = doc["interface"].as<int>();
+    int interfaceValue = static_cast<int>(requested.integer);
     InterfaceList list = esp32hal->interfaces();
     if (interfaceValue < 0 || (size_t)interfaceValue >= list.count || list.data[interfaceValue].can_bus == nullptr) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Error: updating interface failed");
@@ -363,37 +367,39 @@ void init_webserver() {
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, canreplay_state_json());
   });
 
-  def_json_post_with_auth("/api/canreplay/start", [](AsyncWebServerRequest* request, JsonDocument& doc) {
+  def_json_post_with_auth("/api/canreplay/start", [](AsyncWebServerRequest* request, const DocumentReader& body) {
     if (isReplayRunning) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Replay already running!");
     }
-    datalayer.system.info.loop_playback = doc["loop"].as<bool>();
+    datalayer.system.info.loop_playback = body.value("loop").as_bool();
     isReplayRunning = true;  // Set before task creation so a rapid second POST is rejected.
     xTaskCreatePinnedToCore(canReplayTask, "CAN_Replay", CAN_REPLAY_TASK_STACK_SIZE, NULL, 1, NULL,
                             esp32hal->CORE_FUNCTION_CORE());
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, canreplay_state_json());
   });
 
-  def_json_post_with_auth("/api/canreplay/stop", [](AsyncWebServerRequest* request, JsonDocument& doc) {
+  def_json_post_with_auth("/api/canreplay/stop", [](AsyncWebServerRequest* request, const DocumentReader& body) {
     datalayer.system.info.loop_playback = false;  // Ends looping; the in-progress pass finishes.
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, canreplay_state_json());
   });
 
-  def_json_post_with_auth("/api/pause", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    if (!doc["on"].is<bool>()) {
+  def_json_post_with_auth("/api/pause", [](AsyncWebServerRequest* request, const DocumentReader& body) {
+    const DocumentValue on = body.value("on");
+    if (!on.is_bool()) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
     }
-    setBatteryPause(doc["on"].as<bool>(), false);
+    setBatteryPause(on.as_bool(), false);
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
   });
 
   // The SPA's equipment stop. Mirrors /equipmentStop: on == contactors open, CAN
   // left running, and the state stored to flash so a reboot stays stopped.
-  def_json_post_with_auth("/api/equipmentstop", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    if (!doc["on"].is<bool>()) {
+  def_json_post_with_auth("/api/equipmentstop", [](AsyncWebServerRequest* request, const DocumentReader& body) {
+    const DocumentValue on = body.value("on");
+    if (!on.is_bool()) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
     }
-    bool stop = doc["on"].as<bool>();
+    bool stop = on.as_bool();
     setBatteryPause(stop, false, stop ? EquipmentStop::STOP : EquipmentStop::RESUME);
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
   });
@@ -406,9 +412,11 @@ void init_webserver() {
                   render_json([&settings](ResponseWriter& out) { write_settings(out, settings); }));
   });
 
-  def_json_post_with_auth("/api/settings", [](AsyncWebServerRequest* request, JsonDocument& doc) {
+  def_json_post_with_auth(
+      "/api/settings",
+      [](AsyncWebServerRequest* request, const DocumentReader& body) {
         BatteryEmulatorSettingsStore settings;
-        SettingsApplyResult result = apply_settings_json(settings, doc.as<JsonObjectConst>());
+        SettingsApplyResult result = apply_settings(settings, body);
         if (!result.ok) {
           return request->send(HTTP_STATUS_BAD_REQUEST, CONTENT_TYPE_JSON,
                                render_json([&result](ResponseWriter& out) {
@@ -429,22 +437,25 @@ void init_webserver() {
                       render_json([&settings, &result](ResponseWriter& out) {
                         write_settings(out, settings, result.reboot_required);
                       }));
-  });
+      },
+      "values");
 
 #ifdef BOARD_HAS_LOAD_SWITCH
-  def_json_post_with_auth("/api/loadswitch", [](AsyncWebServerRequest* request, JsonDocument& doc) {
+  def_json_post_with_auth("/api/loadswitch", [](AsyncWebServerRequest* request, const DocumentReader& body) {
     LoadSwitch* load_switch = esp32hal->load_switch();
-    if (load_switch == nullptr || !doc["channel"].is<int>() || !doc["on"].is<bool>()) {
+    const DocumentValue channel_value = body.value("channel");
+    const DocumentValue on = body.value("on");
+    if (load_switch == nullptr || !channel_value.is_integer_in(INT32_MIN, INT32_MAX) || !on.is_bool()) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
     }
-    int channel = doc["channel"].as<int>();
+    int channel = static_cast<int>(channel_value.integer);
     // channel_count, not kLoadSwitchMaxChannels: request_manual() would accept a
     // channel the tick never drains, stranding pending set forever.
     if (channel < 0 || channel >= load_switch->status().channel_count ||
         load_switch->status().channels[channel].role != LoadSwitchRole::Manual) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Invalid channel");
     }
-    load_switch->request_manual((uint8_t)channel, doc["on"].as<bool>());
+    load_switch->request_manual((uint8_t)channel, on.as_bool());
     // Answers with pending set: the tick has not run, so the client is told the
     // request is in flight rather than shown the value it asked for.
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
@@ -569,24 +580,24 @@ void init_webserver() {
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_events));
   });
 
-  def_json_post_with_auth("/api/advanced/command", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    if (!doc["id"].is<const char*>()) {
+  def_json_post_with_auth("/api/advanced/command", [](AsyncWebServerRequest* request, const DocumentReader& body) {
+    const DocumentValue id = body.value("id");
+    if (!id.is_string()) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
     }
     uint8_t slot = 0;
-    if (const char* error = validate_battery_slot(doc, slot)) {
+    if (const char* error = validate_battery_slot(body, slot)) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", error);
     }
     // A "value" that is present but unreadable as an int32 must not be mistaken for
     // one that was never sent, or it would slip past the arity check below.
-    auto raw_value = doc["value"];
-    const bool has_value = !raw_value.isNull();
-    if (has_value && !raw_value.is<int32_t>()) {
+    const DocumentValue raw_value = body.value("value");
+    const bool has_value = !raw_value.missing();
+    if (has_value && !raw_value.is_integer_in(INT32_MIN, INT32_MAX)) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
     }
-    const int32_t value = has_value ? raw_value.as<int32_t>() : 0;
-    bool ok = run_advanced_command(doc["id"].as<const char*>(), slot,
-                                   has_value ? &value : nullptr);
+    const int32_t value = has_value ? static_cast<int32_t>(raw_value.integer) : 0;
+    bool ok = run_advanced_command(id.as_text(), slot, has_value ? &value : nullptr);
     if (!ok) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Command rejected");
     }
