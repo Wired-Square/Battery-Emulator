@@ -71,6 +71,7 @@ unsigned long ota_progress_millis = 0;
 #include "logging_api.h"
 #include "settings_api.h"
 #include "json_document_reader.h"
+#include "streamed_response.h"
 #include "json_response_writer.h"
 #include "battery_slot_api.h"
 
@@ -207,8 +208,10 @@ void canReplayTask(void* param) {
   vTaskDelete(NULL);
 }
 
-static String canreplay_state_json() {
-  return render_json([](ResponseWriter& out) { write_canreplay(out, isReplayRunning, !importedLogs.isEmpty()); });
+static ResponseProducer canreplay_producer() {
+  const bool running = isReplayRunning;
+  const bool has_log = !importedLogs.isEmpty();
+  return [running, has_log](ResponseWriter& out) { write_canreplay(out, running, has_log); };
 }
 
 void def_route_with_auth(const char* uri, AsyncWebServer& serv, WebRequestMethodComposite method,
@@ -310,17 +313,17 @@ void init_webserver() {
 
   // Route for machine-readable board capabilities
   def_route_with_auth("/capabilities", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_capabilities));
+    send_streamed(request, CONTENT_TYPE_JSON, write_capabilities);
   });
 
   // Contract with the bundled OTA page: it reads `hardware` and `firmware` from here.
   def_route_with_auth("/GetFirmwareInfo", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_capabilities));
+    send_streamed(request, CONTENT_TYPE_JSON, write_capabilities);
   });
 
   // Route for live state polled by the SPA
   def_route_with_auth("/api/state", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
+    send_streamed(request, CONTENT_TYPE_JSON, write_state);
   });
 
   // Route for root / web page
@@ -346,11 +349,11 @@ void init_webserver() {
 
   // Route for going to advanced battery info web page
   def_route_with_auth("/api/advanced", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_advanced));
+    send_streamed(request, CONTENT_TYPE_JSON, write_advanced);
   });
 
   def_route_with_auth("/api/canreplay", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, canreplay_state_json());
+    send_streamed(request, CONTENT_TYPE_JSON, canreplay_producer());
   });
 
   def_json_post_with_auth("/api/canreplay/interface", [](AsyncWebServerRequest* request, const DocumentReader& body) {
@@ -364,7 +367,7 @@ void init_webserver() {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Error: updating interface failed");
     }
     datalayer.system.info.can_replay_interface = (uint8_t)interfaceValue;
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, canreplay_state_json());
+    send_streamed(request, CONTENT_TYPE_JSON, canreplay_producer());
   });
 
   def_json_post_with_auth("/api/canreplay/start", [](AsyncWebServerRequest* request, const DocumentReader& body) {
@@ -375,12 +378,12 @@ void init_webserver() {
     isReplayRunning = true;  // Set before task creation so a rapid second POST is rejected.
     xTaskCreatePinnedToCore(canReplayTask, "CAN_Replay", CAN_REPLAY_TASK_STACK_SIZE, NULL, 1, NULL,
                             esp32hal->CORE_FUNCTION_CORE());
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, canreplay_state_json());
+    send_streamed(request, CONTENT_TYPE_JSON, canreplay_producer());
   });
 
   def_json_post_with_auth("/api/canreplay/stop", [](AsyncWebServerRequest* request, const DocumentReader& body) {
     datalayer.system.info.loop_playback = false;  // Ends looping; the in-progress pass finishes.
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, canreplay_state_json());
+    send_streamed(request, CONTENT_TYPE_JSON, canreplay_producer());
   });
 
   def_json_post_with_auth("/api/pause", [](AsyncWebServerRequest* request, const DocumentReader& body) {
@@ -389,7 +392,7 @@ void init_webserver() {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
     }
     setBatteryPause(on.as_bool(), false);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
+    send_streamed(request, CONTENT_TYPE_JSON, write_state);
   });
 
   // The SPA's equipment stop. Mirrors /equipmentStop: on == contactors open, CAN
@@ -401,22 +404,29 @@ void init_webserver() {
     }
     bool stop = on.as_bool();
     setBatteryPause(stop, false, stop ? EquipmentStop::STOP : EquipmentStop::RESUME);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
+    send_streamed(request, CONTENT_TYPE_JSON, write_state);
   });
 
-  // Local store is safe because write_settings is synchronous — it does not
-  // outlive the request.
+  // The store is opened inside the producer: it runs after this handler has
+  // returned, so a store owned by the handler would already be closed.
   def_route_with_auth("/api/settings", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    BatteryEmulatorSettingsStore settings(true);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON,
-                  render_json([&settings](ResponseWriter& out) { write_settings(out, settings); }));
+    send_streamed(request, CONTENT_TYPE_JSON, [](ResponseWriter& out) {
+      BatteryEmulatorSettingsStore settings(true);
+      write_settings(out, settings);
+    });
   });
 
   def_json_post_with_auth(
       "/api/settings",
       [](AsyncWebServerRequest* request, const DocumentReader& body) {
-        BatteryEmulatorSettingsStore settings;
-        SettingsApplyResult result = apply_settings(settings, body);
+        SettingsApplyResult result;
+        {
+          BatteryEmulatorSettingsStore settings;
+          result = apply_settings(settings, body);
+          if (result.ok) {
+            refresh_web_ui_shell(settings);
+          }
+        }
         if (!result.ok) {
           return request->send(HTTP_STATUS_BAD_REQUEST, CONTENT_TYPE_JSON,
                                render_json([&result](ResponseWriter& out) {
@@ -432,11 +442,11 @@ void init_webserver() {
                                }));
         }
         settingsUpdated |= result.changed;
-        refresh_web_ui_shell(settings);
-        request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON,
-                      render_json([&settings, &result](ResponseWriter& out) {
-                        write_settings(out, settings, result.reboot_required);
-                      }));
+        const bool reboot_required = result.reboot_required;
+        send_streamed(request, CONTENT_TYPE_JSON, [reboot_required](ResponseWriter& out) {
+          BatteryEmulatorSettingsStore settings(true);
+          write_settings(out, settings, reboot_required);
+        });
       },
       "values");
 
@@ -458,7 +468,7 @@ void init_webserver() {
     load_switch->request_manual((uint8_t)channel, on.as_bool());
     // Answers with pending set: the tick has not run, so the client is told the
     // request is in flight rather than shown the value it asked for.
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
+    send_streamed(request, CONTENT_TYPE_JSON, write_state);
   });
 #endif
 
@@ -472,14 +482,14 @@ void init_webserver() {
       datalayer.system.info.logged_can_messages[0] = '\0';
     }
     datalayer.system.info.can_logging_active = true;
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_canlog));
+    send_streamed(request, CONTENT_TYPE_JSON, write_canlog);
   });
   def_route_with_auth("/api/canlog/stop", server, HTTP_POST, [](AsyncWebServerRequest* request) {
     datalayer.system.info.can_logging_active = false;
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, "{\"ok\":true}");
   });
   def_route_with_auth("/api/debug", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_debug));
+    send_streamed(request, CONTENT_TYPE_JSON, write_debug);
   });
 
   // Factory reset carries no body, so it uses the bodyless auth helper: a
@@ -568,16 +578,16 @@ void init_webserver() {
   }
 
   def_route_with_auth("/api/cellmonitor", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_cellmonitor));
+    send_streamed(request, CONTENT_TYPE_JSON, write_cellmonitor);
   });
 
   def_route_with_auth("/api/events", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_events));
+    send_streamed(request, CONTENT_TYPE_JSON, write_events);
   });
 
   def_route_with_auth("/api/events/clear", server, HTTP_POST, [](AsyncWebServerRequest* request) {
     reset_all_events();
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_events));
+    send_streamed(request, CONTENT_TYPE_JSON, write_events);
   });
 
   def_json_post_with_auth("/api/advanced/command", [](AsyncWebServerRequest* request, const DocumentReader& body) {
@@ -601,7 +611,7 @@ void init_webserver() {
     if (!ok) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Command rejected");
     }
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_advanced));
+    send_streamed(request, CONTENT_TYPE_JSON, write_advanced);
   });
 
   register_dump_can_route(server);
