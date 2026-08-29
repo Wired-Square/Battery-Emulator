@@ -101,28 +101,38 @@ struct BatteryTypeInfo {
   uint8_t max_slots;
   BusRequirement bus;
   Battery* (*make)(const BatterySlotContext&);  // null for None (no driver class)
+  DeviceSettingList (*settings)() = nullptr;
+  BatteryCapabilities capabilities = 0;
 };
 
 static constexpr BatteryTypeInfo kBatteryRegistry[] = {
     {BatteryType::None, "None", kSingleSlot, BusRequirement::None, nullptr},
     {BatteryType::BmwI3, "BMW i3", kDualSlot, BusRequirement::Can, &make<BmwI3Battery>},
-    {BatteryType::BmwIX, "BMW iX and i4-7 platform", kSingleSlot, BusRequirement::CanFd, &make<BmwIXBattery>},
+    {BatteryType::BmwIX, "BMW iX and i4-7 platform", kSingleSlot, BusRequirement::CanFd, &make<BmwIXBattery>,
+     nullptr, BatteryCapability::EstimatedLimits},
     {BatteryType::BoltAmpera, "Chevrolet Bolt EV/Opel Ampera-e", kDualSlot, BusRequirement::Can,
-     &make<BoltAmperaBattery>},
-    {BatteryType::BydAtto3, "BYD Atto 3/Seal/Dolphin", kDualSlot, BusRequirement::Can, &make<BydAttoBattery>},
-    {BatteryType::CellPowerBms, "Cellpower BMS", kSingleSlot, BusRequirement::Can, &make<CellPowerBms>},
+     &make<BoltAmperaBattery>,
+     nullptr, BatteryCapability::EstimatedLimits},
+    {BatteryType::BydAtto3, "BYD Atto 3/Seal/Dolphin", kDualSlot, BusRequirement::Can, &make<BydAttoBattery>,
+     &BydAttoBattery::settings, 0},
+    {BatteryType::CellPowerBms, "Cellpower BMS", kSingleSlot, BusRequirement::Can, &make<CellPowerBms>,
+     nullptr, BatteryCapability::DesignVoltages | BatteryCapability::EstimatedLimits},
     {BatteryType::Chademo, "Chademo V2X mode", kSingleSlot, BusRequirement::Can, &make<ChademoBattery>},
-    {BatteryType::CmfaEv, "CMFA platform, 27 kWh battery", kDualSlot, BusRequirement::Can, &make<CmfaEvBattery>},
+    {BatteryType::CmfaEv, "CMFA platform, 27 kWh battery", kDualSlot, BusRequirement::Can, &make<CmfaEvBattery>,
+     nullptr, BatteryCapability::EstimatedLimits | BatteryCapability::EstimatedChargeLimits},
     {BatteryType::Foxess, "FoxESS HV2600/ECS4100 OEM battery", kSingleSlot, BusRequirement::Can, &make<FoxessBattery>},
     {BatteryType::GeelyGeometryC, "Geely Geometry C", kSingleSlot, BusRequirement::Can, &make<GeelyGeometryCBattery>},
     {BatteryType::OrionBms, "DIY battery with Orion BMS (Victron setting)", kSingleSlot, BusRequirement::Can,
-     &make<OrionBms>},
+     &make<OrionBms>,
+     nullptr, BatteryCapability::DesignVoltages},
     {BatteryType::Sono, "Sono Motors Sion 64kWh LFP ", kSingleSlot, BusRequirement::Can, &make<SonoBattery>},
     {BatteryType::StellantisEcmp, "Stellantis ECMP battery", kMaxBatterySlots, BusRequirement::Can, &make<EcmpBattery>},
     {BatteryType::ImievCZeroIon, "I-Miev / C-Zero / Ion Triplet", kSingleSlot, BusRequirement::Can,
-     &make<ImievCZeroIonBattery>},
+     &make<ImievCZeroIonBattery>,
+     nullptr, BatteryCapability::EstimatedLimits},
     {BatteryType::JaguarIpace, "Jaguar I-PACE", kSingleSlot, BusRequirement::Can, &make<JaguarIpaceBattery>},
-    {BatteryType::KiaEGmp, "Kia/Hyundai EGMP platform", kSingleSlot, BusRequirement::CanFd, &make<KiaEGmpBattery>},
+    {BatteryType::KiaEGmp, "Kia/Hyundai EGMP platform", kSingleSlot, BusRequirement::CanFd, &make<KiaEGmpBattery>,
+     nullptr, BatteryCapability::EstimatedLimits | BatteryCapability::EstimatedSoc},
     {BatteryType::KiaHyundai64, "Kia/Hyundai 64/40kWh battery", kDualSlot, BusRequirement::Can,
      &make<KiaHyundai64Battery>},
     {BatteryType::KiaHyundaiHybrid, "Kia/Hyundai Hybrid", kSingleSlot, BusRequirement::Can,
@@ -132,21 +142,29 @@ static constexpr BatteryTypeInfo kBatteryRegistry[] = {
 #ifndef SMALL_FLASH_DEVICE
     {BatteryType::Mg5, "MG 5 battery", kSingleSlot, BusRequirement::Can, &make<Mg5Battery>},
 #endif
-    {BatteryType::NissanLeaf, "Nissan LEAF battery", kMaxBatterySlots, BusRequirement::Can, &make<NissanLeafBattery>},
-    {BatteryType::Pylon, "Pylon / Dyness compatible battery", kDualSlot, BusRequirement::Can, &make<PylonBattery>},
-    {BatteryType::DalyBms, "DALY RS485", kSingleSlot, BusRequirement::Rs485, &make<DalyBms>},
-    {BatteryType::RjxzsBms, "RJXZS BMS, DIY battery", kSingleSlot, BusRequirement::Can, &make<RjxzsBms>},
+    {BatteryType::NissanLeaf, "Nissan LEAF battery", kMaxBatterySlots, BusRequirement::Can, &make<NissanLeafBattery>,
+     &NissanLeafBattery::settings, 0},
+    {BatteryType::Pylon, "Pylon / Dyness compatible battery", kDualSlot, BusRequirement::Can, &make<PylonBattery>,
+     &PylonBattery::settings, BatteryCapability::DesignVoltages},
+    {BatteryType::DalyBms, "DALY RS485", kSingleSlot, BusRequirement::Rs485, &make<DalyBms>,
+     &DalyBms::settings, BatteryCapability::DesignVoltages},
+    {BatteryType::RjxzsBms, "RJXZS BMS, DIY battery", kSingleSlot, BusRequirement::Can, &make<RjxzsBms>,
+     nullptr, BatteryCapability::DesignVoltages | BatteryCapability::EstimatedLimits},
     {BatteryType::RangeRoverPhev, "Range Rover 13kWh PHEV battery (L494/L405)", kSingleSlot, BusRequirement::Can,
      &make<RangeRoverPhevBattery>},
-    {BatteryType::RenaultKangoo, "Renault Kangoo", kSingleSlot, BusRequirement::Can, &make<RenaultKangooBattery>},
+    {BatteryType::RenaultKangoo, "Renault Kangoo", kSingleSlot, BusRequirement::Can, &make<RenaultKangooBattery>,
+     nullptr, BatteryCapability::EstimatedLimits | BatteryCapability::EstimatedSoc | BatteryCapability::EstimatedChargeLimits},
     {BatteryType::RenaultTwizy, "Renault Twizy", kSingleSlot, BusRequirement::Can, &make<RenaultTwizyBattery>},
     {BatteryType::RenaultZoe1, "Renault Zoe Gen1 22/40kWh", kDualSlot, BusRequirement::Can,
      &make<RenaultZoeGen1Battery>},
     {BatteryType::RenaultZoe2, "Renault Zoe Gen2 50kWh", kDualSlot, BusRequirement::Can, &make<RenaultZoeGen2Battery>},
     {BatteryType::SantaFePhev, "Santa Fe PHEV", kDualSlot, BusRequirement::Can, &make<SantaFePhevBattery>},
-    {BatteryType::SimpBms, "SIMPBMS battery", kSingleSlot, BusRequirement::Can, &make<SimpBmsBattery>},
-    {BatteryType::TeslaModel3Y, "Tesla Model 3/Y", kDualSlot, BusRequirement::Can, &make<TeslaBattery>},
-    {BatteryType::TeslaModelSX, "Tesla Model S/X", kDualSlot, BusRequirement::Can, &make<TeslaBattery>},
+    {BatteryType::SimpBms, "SIMPBMS battery", kSingleSlot, BusRequirement::Can, &make<SimpBmsBattery>,
+     nullptr, BatteryCapability::DesignVoltages},
+    {BatteryType::TeslaModel3Y, "Tesla Model 3/Y", kDualSlot, BusRequirement::Can, &make<TeslaBattery>,
+     &TeslaBattery::settings, BatteryCapability::EstimatedLimits | BatteryCapability::ForcedBalancing},
+    {BatteryType::TeslaModelSX, "Tesla Model S/X", kDualSlot, BusRequirement::Can, &make<TeslaBattery>,
+     &TeslaBattery::settings, BatteryCapability::EstimatedLimits | BatteryCapability::ForcedBalancing},
     {BatteryType::TestFake, "Fake battery for testing purposes", kDualSlot, BusRequirement::Can,
      &make<TestFakeBattery>},
     {BatteryType::VolvoSpa, "Volvo / Polestar 69/78kWh SPA battery", kSingleSlot, BusRequirement::Can,
@@ -156,23 +174,31 @@ static constexpr BatteryTypeInfo kBatteryRegistry[] = {
     {BatteryType::SamsungSdiLv, "Samsung SDI LV Battery", kSingleSlot, BusRequirement::Can, &make<SamsungSdiLVBattery>},
     {BatteryType::HyundaiIoniq28, "Hyundai Ioniq Electric 28kWh", kSingleSlot, BusRequirement::Can,
      &make<HyundaiIoniq28Battery>},
-    {BatteryType::Kia64FD, "Kia 64kWh FD battery", kSingleSlot, BusRequirement::CanFd, &make<Kia64FDBattery>},
+    {BatteryType::Kia64FD, "Kia 64kWh FD battery", kSingleSlot, BusRequirement::CanFd, &make<Kia64FDBattery>,
+     nullptr, BatteryCapability::EstimatedLimits},
     {BatteryType::RelionBattery, "Relion LV protocol via 250kbps CAN", kMaxBatterySlots, BusRequirement::Can,
-     &make<RelionBattery>},
+     &make<RelionBattery>,
+     nullptr, BatteryCapability::DesignVoltages | BatteryCapability::EstimatedLimits | BatteryCapability::EstimatedSoc},
     {BatteryType::RivianBattery, "Rivian R1T large 135kWh battery", kSingleSlot, BusRequirement::Can,
-     &make<RivianBattery>},
-    {BatteryType::BmwPhev, "BMW PHEV Battery", kSingleSlot, BusRequirement::Can, &make<BmwPhevBattery>},
-    {BatteryType::FordMachE, "Ford Mustang Mach-E battery", kSingleSlot, BusRequirement::Can, &make<FordMachEBattery>},
+     &make<RivianBattery>,
+     nullptr, BatteryCapability::EstimatedSoc},
+    {BatteryType::BmwPhev, "BMW PHEV Battery", kSingleSlot, BusRequirement::Can, &make<BmwPhevBattery>,
+     nullptr, BatteryCapability::UserBalancing},
+    {BatteryType::FordMachE, "Ford Mustang Mach-E battery", kSingleSlot, BusRequirement::Can, &make<FordMachEBattery>,
+     nullptr, BatteryCapability::EstimatedLimits | BatteryCapability::EstimatedChargeLimits},
     {BatteryType::CmpSmartCar, "Stellantis CMP Smart Car Battery", kDualSlot, BusRequirement::Can,
      &make<CmpSmartCarBattery>},
     {BatteryType::ThinkCity, "Think City", kSingleSlot, BusRequirement::Can, &make<ThinkBattery>},
     {BatteryType::TeslaLegacy, "Tesla Model S/X 2012-2020", kSingleSlot, BusRequirement::Can,
      &make<TeslaLegacyBattery>},
     {BatteryType::GrowattHvArk, "Growatt HV ARK battery (battery-facing CAN)", kSingleSlot, BusRequirement::Can,
-     &make<GrowattHvArkBattery>},
-    {BatteryType::GeelySea, "Volvo/Zeekr/Geely SEA battery", kSingleSlot, BusRequirement::Can, &make<GeelySeaBattery>},
+     &make<GrowattHvArkBattery>,
+     nullptr, BatteryCapability::DesignVoltages},
+    {BatteryType::GeelySea, "Volvo/Zeekr/Geely SEA battery", kSingleSlot, BusRequirement::Can, &make<GeelySeaBattery>,
+     nullptr, BatteryCapability::EstimatedLimits},
     {BatteryType::ThunderstruckBMS, "Thunderstruck BMS", kSingleSlot, BusRequirement::Can, &make<ThunderstruckBMS>},
-    {BatteryType::EnnoidBMS, "ENNOID BMS via VESC, DIY battery", kSingleSlot, BusRequirement::Can, &make<EnnoidBms>},
+    {BatteryType::EnnoidBMS, "ENNOID BMS via VESC, DIY battery", kSingleSlot, BusRequirement::Can, &make<EnnoidBms>,
+     nullptr, BatteryCapability::DesignVoltages | BatteryCapability::EstimatedLimits},
     {BatteryType::StellantisSmallWide4x4, "Stellantis FCA Small Wide 4x4", kSingleSlot, BusRequirement::Can,
      &make<StellantisSmallWide4x4Battery>},
 #ifndef SMALL_FLASH_DEVICE
@@ -209,6 +235,15 @@ const char* name_for_battery_type(BatteryType type) {
 static BusRequirement bus_for_battery_type(BatteryType type) {
   const BatteryTypeInfo* info = find_battery_info(type);
   return info ? info->bus : BusRequirement::None;
+}
+
+size_t battery_type_settings_count() {
+  return std::size(kBatteryRegistry);
+}
+
+BatteryTypeSettings battery_type_settings_at(size_t index) {
+  const BatteryTypeInfo& info = kBatteryRegistry[index];
+  return {info.id, info.settings, info.capabilities};
 }
 
 bool board_supports_battery_type(BatteryType type) {
@@ -332,8 +367,6 @@ int user_selected_daly_power_at_0_degree_C = 800;
 bool user_selected_use_estimated_SOC = false;
 bool user_selected_use_estimated_charge_limits = false;
 uint16_t user_selected_pylon_baudrate = 500;
-/* For custom BMS which need rampdown. SOC% to start ramping down from max charge power towards 0 at 100.00%*/
-uint16_t user_set_rampdown_SOC = 9000;  //9000 = 90.00%
 // Use 0V for user selected cell/pack voltage defaults (On boot will be replaced with saved values from NVM)
 uint16_t user_selected_max_pack_voltage_dV = 0;
 uint16_t user_selected_min_pack_voltage_dV = 0;

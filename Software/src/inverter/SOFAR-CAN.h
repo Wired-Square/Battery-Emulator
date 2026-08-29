@@ -4,6 +4,8 @@
 
 class SofarInverter : public CanInverterProtocol {
  public:
+  static DeviceSettingList settings();
+
   bool setup() override;
   void update_values();
   void transmit_can(unsigned long currentMillis);

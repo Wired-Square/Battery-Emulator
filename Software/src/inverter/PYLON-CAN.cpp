@@ -255,3 +255,17 @@ bool PylonInverter::setup() {
   }
   return true;
 }
+
+namespace {
+const DeviceSetting kSettings[] = {
+    {{"PYLONSEND", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr}, "Pylon, send group (0-1)"},
+    {{"PYLONOFFSET", SettingType::Bool, kInverter, SettingApplies::Boot, 0, nullptr}, "Pylon, 30k offset"},
+    {{"PYLONORDER", SettingType::Bool, kInverter, SettingApplies::Boot, 0, nullptr}, "Pylon, invert byteorder"},
+    {{"PYLONBRAND", SettingType::EnumUint, kInverter, SettingApplies::Boot, 0, nullptr, "pylonbrand"},
+     "Pylon, manufacturer name"},
+};
+}  // namespace
+
+DeviceSettingList PylonInverter::settings() {
+  return device_settings(kSettings);
+}

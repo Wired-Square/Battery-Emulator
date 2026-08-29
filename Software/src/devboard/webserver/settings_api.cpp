@@ -10,7 +10,7 @@
 #include "../../communication/nvm/comm_nvm.h"
 #include "../../datalayer/datalayer.h"
 #include "../../datalayer/datalayer_extended.h"
-#include "../../inverter/InverterProtocol.h"
+#include "../../inverter/INVERTERS.h"
 #include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "../hal/hal.h"
 #include "../utils/types.h"
@@ -74,41 +74,17 @@ const char* name_for_button_type(STOP_BUTTON_BEHAVIOR behavior) {
   }
 }
 
-constexpr const char* kNetwork = "network";
-constexpr const char* kWebauth = "webauth";
-constexpr const char* kBattery = "battery";
-constexpr const char* kInverter = "inverter";
-constexpr const char* kOptional = "optional";
-constexpr const char* kHardware = "hardware";
-constexpr const char* kConnectivity = "connectivity";
-constexpr const char* kDebug = "debug";
-constexpr const char* kInterface = "interface";
-
 constexpr double kDeciUnitsPerUnit = 10.0;
 constexpr uint32_t kMillisecondsPerSecond = 1000;
 constexpr uint32_t kPercentMax = 100;
 constexpr int32_t kPptPerPercent = 100;
 constexpr int32_t kDeciPerUnit = 10;
 constexpr int32_t kMsPerMinute = 60000;
-constexpr int32_t kBydAutoCalDriftMin = 1;
-constexpr int32_t kBydAutoCalDriftMax = 20;
-
-constexpr const char* kLive = "live";
-constexpr const char* kSecChargeLimits = "chargelimits";
-constexpr const char* kSecCharger = "charger";
-constexpr const char* kSecBydCal = "bydautocal";
-constexpr const char* kSecRecovery = "recoverymode";
-constexpr const char* kSecCanIdCutoff = "canidcutoff";
-constexpr const char* kSecBalancing = "balancing";
 
 void seed_slot_capacities(uint8_t) {
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
     datalayer.battery_slot(slot).info.total_capacity_Wh = datalayer.battery.settings.user_set_total_capacity_Wh;
   }
-}
-
-void mirror_keep_iso_disabled(uint8_t) {
-  datalayer_extended.bydAtto3_2.keep_iso_disabled = datalayer_extended.bydAtto3.keep_iso_disabled;
 }
 
 const char* check_charger_field(const SettingField& field, uint8_t, JsonObjectConst fields) {
@@ -137,6 +113,16 @@ const char* check_balancing_field(const SettingField& field, uint8_t slot, JsonO
   return validate_balancing_field(datalayer.battery_slot(slot).info.chemistry, field.key, fields[field.key]);
 }
 
+const char* check_field(const SettingField& field, uint8_t slot, JsonObjectConst fields) {
+  if (field.section == kSecCharger) {
+    return check_charger_field(field, slot, fields);
+  }
+  if (field.section == kSecBalancing) {
+    return check_balancing_field(field, slot, fields);
+  }
+  return nullptr;
+}
+
 struct BatterySlotKeys {
   uint8_t slot;
   const char* type_key;
@@ -161,29 +147,6 @@ const SettingField kSettingFields[] = {
     {"PASSWORD", ST::StringVal, kNetwork, SA::Boot, 0, ""},
 
     {"BATTCHEM", ST::EnumUint, kBattery, SA::Boot, 1, nullptr, "chemistry"},
-    {"BATTPVMAX", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
-    {"BATTPVMIN", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
-    {"BATTCVMAX", ST::Uint, kBattery, SA::Boot, 0, nullptr},
-    {"BATTCVMIN", ST::Uint, kBattery, SA::Boot, 0, nullptr},
-    {"PYLONBAUD", ST::Uint, kBattery, SA::Boot, 500, nullptr},
-    {"INTERLOCKREQ", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-    {"SOCESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-    {"DALYPWRPCT", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
-    {"DALYPWRDV", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
-    {"DALYDVSTART", ST::Uint, kBattery, SA::Boot, 20, nullptr, nullptr, 1, 200},
-    {"DALYPWRDEG", ST::Uint, kBattery, SA::Boot, 60, nullptr, nullptr, 1, 10000},
-    {"DALYPWR0C", ST::Uint, kBattery, SA::Boot, 800, nullptr, nullptr, 0, 100000},
-    {"DIGITALHVIL", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-    {"GTWRHD", ST::Bool, kBattery, SA::Boot, kTeslaGtwRightHandDriveDefault, nullptr},
-    {"GTWCOUNTRY", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwCountryDefault, nullptr, "country"},
-    {"GTWMAPREG", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwMapRegionDefault, nullptr, "mapregion"},
-    {"GTWCHASSIS", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwChassisTypeDefault, nullptr, "chassis"},
-    {"GTWPACK", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwPackEnergyDefault, nullptr, "pack"},
-    {"CHGESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-    {"CHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
-    {"DCHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
-    {"RAMPDOWNSOC", ST::Uint, kBattery, SA::Boot, 9000, nullptr, nullptr, 7000, 9000},
-    {"SOFAR_ID", ST::Uint, kBattery, SA::Boot, 0, nullptr, nullptr, 0, 99},
 
     {"INVTYPE", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "inverter"},
     {"INVCOMM", ST::InterfacePacked, kInverter, SA::Boot, 0, nullptr},
@@ -194,23 +157,6 @@ const SettingField kSettingFields[] = {
     {"CHGTAPERSTART", ST::Uint, kInverter, SA::Boot, 95, nullptr, nullptr, 50, 99},
     {"CHGTAPERFLOOR", ST::Uint, kInverter, SA::Boot, 0, nullptr, nullptr, 0, 2000},
     {"SLOWCANINV", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"PYLONSEND", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"PYLONOFFSET", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"PYLONORDER", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"PYLONBRAND", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "pylonbrand"},
-    {"DEYEBYD", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"PRIMOGEN24", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"INVCELLS", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVMODULES", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVCELLSPER", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVVLEVEL", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVCAPACITY", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVBTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"INVSUNTYPE", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "sungrow"},
-    {"INVICNT", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "contactor"},
-    {"FOXESSTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"FOXESSSUBTYPE", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-    {"FOXESSMODULES", ST::Uint, kInverter, SA::Boot, 0, nullptr},
 
     // CTOFFSET is a string to keep its sign; CTATTEN uses the boot default 3, not the
     // form's 0, so an unsaved device's full-set POST leaves the attenuation unchanged.
@@ -422,8 +368,7 @@ const SettingField kSettingFields[] = {
      kNoMax,
      SS::Volatile,
      kSecCharger,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_HV_enabled; }, 1, SCP::Global, nullptr,
-      check_charger_field}},
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_HV_enabled; }}},
     {"aux12v_enabled",
      ST::Bool,
      kLive,
@@ -435,8 +380,7 @@ const SettingField kSettingFields[] = {
      kNoMax,
      SS::Volatile,
      kSecCharger,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_aux12V_enabled; }, 1, SCP::Global, nullptr,
-      check_charger_field}},
+     {SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_aux12V_enabled; }}},
     {"setpoint_v",
      ST::Float,
      kLive,
@@ -448,8 +392,7 @@ const SettingField kSettingFields[] = {
      kNoMax,
      SS::Volatile,
      kSecCharger,
-     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_VDC; }, 1, SCP::Global, nullptr,
-      check_charger_field}},
+     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_VDC; }}},
     {"setpoint_a",
      ST::Float,
      kLive,
@@ -461,8 +404,7 @@ const SettingField kSettingFields[] = {
      kNoMax,
      SS::Volatile,
      kSecCharger,
-     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC; }, 1, SCP::Global, nullptr,
-      check_charger_field}},
+     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC; }}},
     {"end_a",
      ST::Float,
      kLive,
@@ -474,118 +416,7 @@ const SettingField kSettingFields[] = {
      kNoMax,
      SS::Volatile,
      kSecCharger,
-     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC_END; }, 1, SCP::Global, nullptr,
-      check_charger_field}},
-
-    {"BYDAUTOCALEN",
-     ST::Bool,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecBydCal,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_enabled; }}},
-    {"BYDAUTOCALDRIFT",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kBydAutoCalDriftMin,
-     kBydAutoCalDriftMax,
-     SS::Nvs,
-     kSecBydCal,
-     {SR::U8, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_drift_percent; }}},
-    {"BYDAUTOCALEN2",
-     ST::Bool,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecBydCal,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_enabled; }}},
-    {"BYDAUTOCALDRFT2",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kBydAutoCalDriftMin,
-     kBydAutoCalDriftMax,
-     SS::Nvs,
-     kSecBydCal,
-     {SR::U8, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_drift_percent; }}},
-    {"BYDKEEPISOOFF",
-     ST::Bool,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecBydCal,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.keep_iso_disabled; }, 1, SCP::Global,
-      mirror_keep_iso_disabled}},
-    {"cal_target_soc",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBydCal,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetSOC; }}},
-    {"cal_target_ah",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBydCal,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetAH; }}},
-    {"cal_target_soc2",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBydCal,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetSOC; }}},
-    {"cal_target_ah2",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBydCal,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetAH; }}},
+     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC_END; }}},
 
     {"recovery_mode",
      ST::Bool,
@@ -613,79 +444,203 @@ const SettingField kSettingFields[] = {
      SS::Volatile,
      kSecCanIdCutoff,
      {SR::U16, [](uint8_t) -> void* { return &user_selected_CAN_ID_cutoff_filter; }}},
-
-    {"max_time_min",
-     ST::Float,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBalancing,
-     {SR::U32, [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_time_ms; },
-      kMsPerMinute, SCP::BatterySlot, nullptr, check_balancing_field}},
-    {"max_cell_mv",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBalancing,
-     {SR::U16,
-      [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_cell_voltage_mV; }, 1,
-      SCP::BatterySlot, nullptr, check_balancing_field}},
-    {"max_dev_mv",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBalancing,
-     {SR::U16,
-      [](uint8_t slot)
-          -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_deviation_cell_voltage_mV; },
-      1, SCP::BatterySlot, nullptr, check_balancing_field}},
-    {"max_pack_v",
-     ST::Float,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBalancing,
-     {SR::U16,
-      [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_pack_voltage_dV; },
-      kDeciPerUnit, SCP::BatterySlot, nullptr, check_balancing_field}},
-    {"float_power_w",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecBalancing,
-     {SR::U16, [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_float_power_W; }, 1,
-      SCP::BatterySlot, nullptr, check_balancing_field}},
 };
 
 const size_t kSettingFieldCount = sizeof(kSettingFields) / sizeof(kSettingFields[0]);
+
+namespace {
+const DeviceSetting kFamilySettingFields[] = {
+    {{"BATTPVMAX", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
+     "Battery max design voltage (V)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::DesignVoltages},
+    {{"BATTPVMIN", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
+     "Battery min design voltage (V)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::DesignVoltages},
+    {{"BATTCVMAX", ST::Uint, kBattery, SA::Boot, 0, nullptr},
+     "Cell max design voltage (mV)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::DesignVoltages},
+    {{"BATTCVMIN", ST::Uint, kBattery, SA::Boot, 0, nullptr},
+     "Cell min design voltage (mV)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::DesignVoltages},
+    {{"SOCESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
+     "Use estimated SOC",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::EstimatedSoc},
+    {{"CHGESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
+     "Use estimated charge/discharge limits",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::EstimatedChargeLimits},
+    {{"CHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
+     "Manual charging power, watt",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::EstimatedLimits},
+    {{"DCHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
+     "Manual discharge power, watt",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::EstimatedLimits},
+    {{"INVCELLS", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+     "Reported cell count (0 for default)",
+     kAnySlot,
+     SettingDomain::Inverter,
+     InverterCapability::PackGeometry},
+    {{"INVMODULES", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+     "Reported module count (0 for default)",
+     kAnySlot,
+     SettingDomain::Inverter,
+     InverterCapability::ModuleCount},
+    {{"INVCELLSPER", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+     "Reported cells per module (0 for default)",
+     kAnySlot,
+     SettingDomain::Inverter,
+     InverterCapability::PackGeometry},
+    {{"INVVLEVEL", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+     "Reported voltage level (0 for default)",
+     kAnySlot,
+     SettingDomain::Inverter,
+     InverterCapability::PackGeometry},
+    {{"INVCAPACITY", ST::Uint, kInverter, SA::Boot, 0, nullptr},
+     "Reported Ah capacity (0 for default)",
+     kAnySlot,
+     SettingDomain::Inverter,
+     InverterCapability::PackGeometry},
+    {{"INVICNT", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "contactor"},
+     "Inverter Contactor Workaround",
+     kAnySlot,
+     SettingDomain::Inverter,
+     InverterCapability::ContactorWorkaround},
+    {{"max_time_min", ST::Float, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
+      {SR::U32, [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_time_ms; },
+       kMsPerMinute, SCP::BatterySlot}},
+     "Balancing max time (min)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::ForcedBalancing | BatteryCapability::UserBalancing},
+    {{"max_cell_mv", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
+      {SR::U16,
+       [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_cell_voltage_mV; }, 1,
+       SCP::BatterySlot}},
+     "Max cell voltage (mV)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::ForcedBalancing},
+    {{"max_dev_mv", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
+      {SR::U16,
+       [](uint8_t slot)
+           -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_deviation_cell_voltage_mV; },
+       1, SCP::BatterySlot}},
+     "Max cell deviation (mV)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::ForcedBalancing},
+    {{"max_pack_v", ST::Float, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
+      {SR::U16,
+       [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_pack_voltage_dV; },
+       kDeciPerUnit, SCP::BatterySlot}},
+     "Max pack voltage (V)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::ForcedBalancing},
+    {{"float_power_w", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
+      {SR::U16, [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_float_power_W; }, 1,
+       SCP::BatterySlot}},
+     "Float power (W)",
+     kAnySlot,
+     SettingDomain::Battery,
+     BatteryCapability::ForcedBalancing},
+};
+
+constexpr size_t kFamilySettingFieldCount = sizeof(kFamilySettingFields) / sizeof(kFamilySettingFields[0]);
+
+DeviceSettingSource device_source_at(SettingDomain domain, size_t index) {
+  return domain == SettingDomain::Battery ? battery_type_settings_at(index).settings
+                                          : inverter_type_settings_at(index).settings;
+}
+
+size_t device_type_count(SettingDomain domain) {
+  return domain == SettingDomain::Battery ? battery_type_settings_count() : inverter_type_settings_count();
+}
+
+uint16_t device_capabilities_at(SettingDomain domain, size_t index) {
+  return domain == SettingDomain::Battery ? battery_type_settings_at(index).capabilities
+                                          : inverter_type_settings_at(index).capabilities;
+}
+
+uint32_t device_type_id_at(SettingDomain domain, size_t index) {
+  return domain == SettingDomain::Battery ? static_cast<uint32_t>(battery_type_settings_at(index).id)
+                                          : static_cast<uint32_t>(inverter_type_settings_at(index).id);
+}
+
+bool source_already_visited(SettingDomain domain, size_t upto, DeviceSettingSource source) {
+  for (size_t i = 0; i < upto; i++) {
+    if (device_source_at(domain, i) == source) {
+      return true;
+    }
+  }
+  return false;
+}
+
+size_t domain_row_count(SettingDomain domain) {
+  size_t total = 0;
+  const size_t type_count = device_type_count(domain);
+  for (size_t i = 0; i < type_count; i++) {
+    const DeviceSettingSource source = device_source_at(domain, i);
+    if (source != nullptr && !source_already_visited(domain, i, source)) {
+      total += source().count;
+    }
+  }
+  return total;
+}
+
+SettingRef domain_row_at(SettingDomain domain, size_t index) {
+  const size_t type_count = device_type_count(domain);
+  for (size_t i = 0; i < type_count; i++) {
+    const DeviceSettingSource source = device_source_at(domain, i);
+    if (source == nullptr || source_already_visited(domain, i, source)) {
+      continue;
+    }
+    const DeviceSettingList list = source();
+    if (index < list.count) {
+      return {&list.data[index].field, &list.data[index], source, domain};
+    }
+    index -= list.count;
+  }
+  return {nullptr, nullptr, nullptr, SettingDomain::None};
+}
+}  // namespace
+
+size_t setting_count() {
+  return kSettingFieldCount + kFamilySettingFieldCount + domain_row_count(SettingDomain::Battery) +
+         domain_row_count(SettingDomain::Inverter);
+}
+
+SettingRef setting_at(size_t index) {
+  if (index < kSettingFieldCount) {
+    return {&kSettingFields[index], nullptr, nullptr, SettingDomain::None};
+  }
+  index -= kSettingFieldCount;
+  if (index < kFamilySettingFieldCount) {
+    const DeviceSetting& row = kFamilySettingFields[index];
+    return {&row.field, &row, nullptr, row.domain};
+  }
+  index -= kFamilySettingFieldCount;
+  const size_t battery_rows = domain_row_count(SettingDomain::Battery);
+  if (index < battery_rows) {
+    return domain_row_at(SettingDomain::Battery, index);
+  }
+  return domain_row_at(SettingDomain::Inverter, index - battery_rows);
+}
 
 namespace {
 // The stored password keys (mirrors the client PASSWORD_KEYS set). HTTPPASSCONFIRM is
@@ -780,6 +735,39 @@ void emit_gpio_option_choices(JsonObject options, const GpioOptionGroup& group) 
     opt["v"] = static_cast<int>(next->value);
     opt["n"] = next->label;
     prev = next;
+  }
+}
+
+const char* domain_name(SettingDomain domain) {
+  switch (domain) {
+    case SettingDomain::Battery:
+      return "battery";
+    case SettingDomain::Inverter:
+      return "inverter";
+    case SettingDomain::None:
+      break;
+  }
+  return "";
+}
+
+void emit_device_ownership(JsonObject entry, const DeviceSetting& row, SettingDomain domain,
+                           DeviceSettingSource source) {
+  if (row.label != nullptr) {
+    entry["label"] = row.label;
+  }
+  if (row.slot != kAnySlot) {
+    entry["slot"] = row.slot;
+  }
+  entry["domain"] = domain_name(domain);
+  JsonArray owners = entry["owners"].to<JsonArray>();
+  const size_t type_count = device_type_count(domain);
+  for (size_t i = 0; i < type_count; i++) {
+    const bool owned = source != nullptr
+                           ? device_source_at(domain, i) == source
+                           : row.capability != 0 && (device_capabilities_at(domain, i) & row.capability) != 0;
+    if (owned) {
+      owners.add(device_type_id_at(domain, i));
+    }
   }
 }
 
@@ -956,8 +944,9 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
   JsonDocument doc;
   JsonObject values = doc["values"].to<JsonObject>();
 
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const SettingField& field = kSettingFields[i];
+  const size_t total_settings = setting_count();
+  for (size_t i = 0; i < total_settings; i++) {
+    const SettingField& field = *setting_at(i).field;
     if (field.live.kind != SR::None) {
       if (field.live.scope == SCP::Global) {
         emit_live_value(values, field, 0);
@@ -1025,8 +1014,9 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
   // Presentation (labels, visibility) lives client-side; schema carries only identity
   // and widget wiring.
   JsonArray schema = doc["schema"].to<JsonArray>();
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const SettingField& field = kSettingFields[i];
+  for (size_t i = 0; i < total_settings; i++) {
+    const SettingRef ref = setting_at(i);
+    const SettingField& field = *ref.field;
     JsonObject entry = schema.add<JsonObject>();
     entry["key"] = field.key;
     entry["category"] = field.category;
@@ -1045,6 +1035,9 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
     }
     if (field.max_value != kNoMax) {
       entry["max"] = field.max_value;
+    }
+    if (ref.device != nullptr) {
+      emit_device_ownership(entry, *ref.device, ref.domain, ref.source);
     }
   }
 
@@ -1089,8 +1082,9 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
     }
     JsonObject entry = balancing_slots.add<JsonObject>();
     entry["slot"] = slot;
-    for (size_t i = 0; i < kSettingFieldCount; i++) {
-      const SettingField& field = kSettingFields[i];
+    const size_t total_settings = setting_count();
+    for (size_t i = 0; i < total_settings; i++) {
+      const SettingField& field = *setting_at(i).field;
       if (field.live.scope == SCP::BatterySlot) {
         emit_live_value(entry, field, slot);
       }
@@ -1244,8 +1238,9 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   JsonDocument options_doc;
   JsonObject all_options = options_doc.to<JsonObject>();
   bool options_built = false;
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const SettingField& field = kSettingFields[i];
+  const size_t total_settings = setting_count();
+  for (size_t i = 0; i < total_settings; i++) {
+    const SettingField& field = *setting_at(i).field;
     if (field.live.scope == SCP::BatterySlot) {
       continue;
     }
@@ -1299,12 +1294,10 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
         }
       }
     }
-    if (field.live.check != nullptr) {
-      if (const char* error = field.live.check(field, 0, values)) {
-        result.ok = false;
-        result.error = error;
-        return result;
-      }
+    if (const char* error = check_field(field, 0, values)) {
+      result.ok = false;
+      result.error = error;
+      return result;
     }
   }
 
@@ -1316,8 +1309,9 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       return result;
     }
     const uint8_t slot = entry["slot"].as<uint8_t>();
-    for (size_t i = 0; i < kSettingFieldCount; i++) {
-      const SettingField& field = kSettingFields[i];
+    const size_t total_settings = setting_count();
+    for (size_t i = 0; i < total_settings; i++) {
+      const SettingField& field = *setting_at(i).field;
       if (field.live.scope != SCP::BatterySlot) {
         continue;
       }
@@ -1332,12 +1326,10 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
         result.error_arg = field.key;
         return result;
       }
-      if (field.live.check != nullptr) {
-        if (const char* error = field.live.check(field, slot, entry)) {
-          result.ok = false;
-          result.error = error;
-          return result;
-        }
+      if (const char* error = check_field(field, slot, entry)) {
+        result.ok = false;
+        result.error = error;
+        return result;
       }
     }
   }
@@ -1410,8 +1402,8 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
   }
 
   bool reboot_required = false;
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const SettingField& field = kSettingFields[i];
+  for (size_t i = 0; i < total_settings; i++) {
+    const SettingField& field = *setting_at(i).field;
     const bool gates_reboot = field.applies == SA::Boot;
     if (field.live.scope == SCP::BatterySlot) {
       continue;
@@ -1604,8 +1596,9 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
 
   for (JsonObjectConst entry : root["dynamic"]["balancing"].as<JsonArrayConst>()) {
     const uint8_t slot = entry["slot"].as<uint8_t>();
-    for (size_t i = 0; i < kSettingFieldCount; i++) {
-      const SettingField& field = kSettingFields[i];
+    const size_t total_settings = setting_count();
+    for (size_t i = 0; i < total_settings; i++) {
+      const SettingField& field = *setting_at(i).field;
       if (field.live.scope != SCP::BatterySlot) {
         continue;
       }

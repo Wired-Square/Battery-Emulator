@@ -6,6 +6,7 @@
 #include "../../Software/src/datalayer/datalayer_extended.h"
 #include "../../Software/src/devboard/webserver/cellmonitor_api.h"
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
+#include "../advanced_status_recorder.h"
 
 #include "Arduino.h"
 
@@ -272,4 +273,81 @@ TEST_F(BydAtto3BalanceTimeTest, PublishesTheReadingAsACellSeries) {
   ASSERT_EQ(series["values"].size(), 2u);
   EXPECT_EQ(series["values"][0].as<int>(), 420);
   EXPECT_TRUE(series["values"][1].isNull()) << "the refused cell must read as unknown, not as zero hours";
+}
+
+namespace {
+
+const RecordingWriter::Section* autocal_section(const RecordingWriter& out) {
+  for (const auto& section : out.sections) {
+    if (section.title == "Auto-calibration status") {
+      return &section;
+    }
+  }
+  return nullptr;
+}
+
+std::string autocal_field(const RecordingWriter& out, const std::string& label) {
+  const RecordingWriter::Section* section = autocal_section(out);
+  if (section == nullptr) {
+    return "";
+  }
+  for (const auto& field : section->fields) {
+    if (field.label == label) {
+      return field.value;
+    }
+  }
+  return "";
+}
+
+class BydAtto3AutoCalibrationTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    reset_byd_state();
+    datalayer_extended.bydAtto3 = DATALAYER_INFO_BYDATTO3{};
+    battery = new BydAttoBattery(battery_slot_context(0));
+  }
+
+  void TearDown() override { delete battery; }
+
+  RecordingWriter render() {
+    RecordingWriter out;
+    battery->write_advanced_status(out);
+    return out;
+  }
+
+  BydAttoBattery* battery = nullptr;
+};
+
+}  // namespace
+
+TEST_F(BydAtto3AutoCalibrationTest, DisplayedThresholdsComeFromTheEnforcedConstants) {
+  const std::string dwell_minutes = std::to_string(BydAttoBattery::kAutoCalDwellRequiredMs / 60000);
+  EXPECT_NE(autocal_field(render(), "Dwell time").find("/ " + dwell_minutes + "m"), std::string::npos)
+      << autocal_field(render(), "Dwell time");
+
+  datalayer_extended.bydAtto3.autocal_crit_taper = true;
+  datalayer_extended.bydAtto3.autocal_crit_low_current = false;
+  const std::string grace_seconds = std::to_string(BydAttoBattery::kAutoCalCurrentGraceMs / 1000);
+  EXPECT_NE(autocal_field(render(), "Current in range").find("/ " + grace_seconds + "s"), std::string::npos)
+      << autocal_field(render(), "Current in range");
+
+  datalayer_extended.bydAtto3.autocal_crit_low_current = true;
+  const std::string in_range = autocal_field(render(), "Current in range");
+  EXPECT_NE(in_range.find("≤3.0A"), std::string::npos) << in_range;
+  EXPECT_NE(in_range.find("≤0.5A"), std::string::npos) << in_range;
+  EXPECT_EQ(BydAttoBattery::kAutoCalMaxChargeCurrentDa, 30);
+  EXPECT_EQ(BydAttoBattery::kAutoCalMinDischargeCurrentDa, -5);
+}
+
+TEST_F(BydAtto3AutoCalibrationTest, EachRowPairsItsTextWithOneSeverity) {
+  datalayer_extended.bydAtto3.autocal_crit_contactors = true;
+  datalayer_extended.bydAtto3.autocal_crit_taper = false;
+  RecordingWriter out = render();
+  EXPECT_EQ(autocal_field(out, "Contactors"), "OK");
+  EXPECT_EQ(autocal_field(out, "Full / In taper?"), "No");
+  EXPECT_EQ(autocal_field(out, "Current in range"), "Waiting for taper");
+
+  datalayer_extended.bydAtto3.autocal_crit_contactors = false;
+  out = render();
+  EXPECT_EQ(autocal_field(out, "Contactors"), "Open");
 }

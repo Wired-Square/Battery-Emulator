@@ -492,6 +492,13 @@ void UdsCanBattery::set_pid_scan_list(const uint16_t* pid_list, uint16_t length)
   this->next_pid = 0;
   this->pending_pid = 0;
 }
+void UdsCanBattery::read_DTC() {
+  start_sequence(UDS_STATE_READ_DTC_START);
+}
+
+void UdsCanBattery::reset_DTC() {
+  start_sequence(UDS_STATE_CLEAR_DTC_START);
+}
 
 void UdsCanBattery::write_advanced_status(AdvancedStatusWriter& out) {
 
@@ -501,12 +508,4 @@ void UdsCanBattery::write_advanced_status(AdvancedStatusWriter& out) {
     DtcCodeStyle style = get_dtc_standard_code_string() ? DtcCodeStyle::kStandard : DtcCodeStyle::kRawHex;
     write_dtc_section(out, *this, *dtc, style);
   }
-}
-
-void UdsCanBattery::read_DTC() {
-  start_sequence(UDS_STATE_READ_DTC_START);
-}
-
-void UdsCanBattery::reset_DTC() {
-  start_sequence(UDS_STATE_CLEAR_DTC_START);
 }

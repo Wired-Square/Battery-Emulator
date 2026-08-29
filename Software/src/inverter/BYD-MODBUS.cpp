@@ -189,3 +189,14 @@ bool BydModbusInverter::setup(void) {  // Performs one time setup at startup ove
 
   return true;
 }
+
+namespace {
+const DeviceSetting kSettings[] = {
+    {{"PRIMOGEN24", SettingType::Bool, kInverter, SettingApplies::Boot, 0, nullptr},
+     "Fronius Primo, 450V maxvoltage cap"},
+};
+}  // namespace
+
+DeviceSettingList BydModbusInverter::settings() {
+  return device_settings(kSettings);
+}

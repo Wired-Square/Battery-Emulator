@@ -6,6 +6,8 @@
 
 class SolaxInverter : public CanInverterProtocol {
  public:
+  static DeviceSettingList settings();
+
   bool setup();
   void update_values();
   void transmit_can(unsigned long currentMillis);

@@ -9,6 +9,16 @@
 
 enum class AdvancedSeverity : uint8_t { Normal, Good, Warning, Critical, Muted };
 
+struct AdvancedValue {
+  String text;
+  AdvancedSeverity severity = AdvancedSeverity::Normal;
+};
+
+inline AdvancedValue good_if(bool ok, const char* yes, const char* no,
+                             AdvancedSeverity otherwise = AdvancedSeverity::Critical) {
+  return {ok ? yes : no, ok ? AdvancedSeverity::Good : otherwise};
+}
+
 // Abstract, not JSON-backed: holding a JsonArray here would pull ArduinoJson
 // into every driver that includes this header.
 //
@@ -26,6 +36,10 @@ class AdvancedStatusWriter {
                   AdvancedSeverity severity = AdvancedSeverity::Normal) = 0;
   virtual void kv(const char* label, const char* value, const char* unit = "",
                   AdvancedSeverity severity = AdvancedSeverity::Normal) = 0;
+
+  void kv(const char* label, const AdvancedValue& value, const char* unit = "") {
+    kv(label, value.text, unit, value.severity);
+  }
 
   virtual void table(const char* label, std::initializer_list<const char*> columns,
                      const char* catalogue = nullptr) = 0;

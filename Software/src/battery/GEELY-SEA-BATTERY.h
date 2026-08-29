@@ -17,36 +17,7 @@ class GeelySeaBattery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  void write_advanced_status(AdvancedStatusWriter& out) override {
-    out.section("");
-
-    out.kv(TL("BECM reported number of DTCs"), String(datalayer_extended.GeelySEA.DTCcount));
-    out.kv(TL("Inhibition status (crash)"), String(datalayer_extended.GeelySEA.CrashStatus));
-    out.kv(TL("BECM reported SOC"), String(datalayer_extended.GeelySEA.soc_bms / 100.0), "%");
-    out.kv(TL("BECM reported SOH"), String(datalayer_extended.GeelySEA.soh_bms / 100.0), "%");
-    out.kv(TL("HV voltage"), String(datalayer_extended.GeelySEA.BECMBatteryVoltage / 100.0), "V");
-    out.kv(TL("Highest cell voltage"), String(datalayer_extended.GeelySEA.CellVoltHighest / 1000.00), "V");
-    out.kv(TL("Lowest cell voltage"), String(datalayer_extended.GeelySEA.CellVoltLowest / 1000.00), "V");
-    out.kv(TL("BECM supply voltage"), String(datalayer_extended.GeelySEA.BECMsupplyVoltage / 1000.0), "V");
-    out.kv(TL("Cell count"), String(datalayer_battery->info.number_of_cells));
-    out.kv(TL("Highest cell temp"), String((datalayer_extended.GeelySEA.CellTempHighest / 100.0) - 50.0), "ºC");
-    out.kv(TL("Average cell temp"), String((datalayer_extended.GeelySEA.CellTempAverage / 100.0) - 50.0), "ºC");
-    out.kv(TL("Lowest cell temp"), String((datalayer_extended.GeelySEA.CellTempLowest / 100.0) - 50.0), "ºC");
-
-    out.kv(TL("HVIL Circuit 1 (M1+M2+FC connectors) status"),
-                          (datalayer_extended.GeelySEA.Interlock & 0x80) == 0x80 ? "Open" : "Closed");
-    out.kv(TL("HVIL Circuit 2 (LV connector pin 9-10) status"),
-                          (datalayer_extended.GeelySEA.Interlock & 0x40) == 0x40 ? "Open" : "Closed");
-    out.kv(TL("HVIL Circuit 3 (LV connector pin 8-12) status"),
-                          (datalayer_extended.GeelySEA.Interlock & 0x04) == 0x04 ? "Open" : "Closed");
-    out.kv(TL("Unknow Contactor Status 1 (Negative FC?)"),
-                          (datalayer_extended.GeelySEA.Interlock & 0x01) == 0x01 ? "Open" : "Closed");
-    out.kv(TL("Unknown Contactor Status 2 (Positive FC?)"),
-                          (datalayer_extended.GeelySEA.Interlock & 0x02) == 0x02 ? "Open" : "Closed");
-    out.kv(TL("Negative Contactor Status"), (datalayer_extended.GeelySEA.Interlock & 0x08) == 0x08 ? "Open" : "Closed");
-    out.kv(TL("Precharge Contactor Status"), (datalayer_extended.GeelySEA.Interlock & 0x10) == 0x10 ? "Open" : "Closed");
-    out.kv(TL("Positive Contactor Status"), (datalayer_extended.GeelySEA.Interlock & 0x20) == 0x20 ? "Open" : "Closed");
-  }
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
  private:
   DATALAYER_BATTERY_TYPE* datalayer_battery;

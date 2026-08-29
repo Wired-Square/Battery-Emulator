@@ -11,6 +11,15 @@ enum inverter_contactor_mode_enum {
   AlwaysClosed = 1,        // Keep contactors always closed
   LockAfterFirstClose = 2  // Wait for first close request, then ignore opens
 };
+struct InverterTypeSettings {
+  InverterProtocolType id;
+  DeviceSettingList (*settings)();
+  InverterCapabilities capabilities;
+};
+
+size_t inverter_type_settings_count();
+InverterTypeSettings inverter_type_settings_at(size_t index);
+
 extern InverterProtocol* inverter;
 
 // Call to initialize the build-time selected inverter. Safe to call even though inverter was not selected.

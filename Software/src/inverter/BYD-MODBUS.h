@@ -6,6 +6,8 @@
 
 class BydModbusInverter : public ModbusInverterProtocol {
  public:
+  static DeviceSettingList settings();
+
   BydModbusInverter() : ModbusInverterProtocol(21) {}
   bool setup() override;
   void update_values();

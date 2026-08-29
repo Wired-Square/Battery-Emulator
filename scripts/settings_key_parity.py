@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """NVS key ownership parity between the boot load path and the settings table.
 
-comm_nvm.cpp reads settings straight from NVS at boot; kSettingFields describes
+comm_nvm.cpp reads settings straight from NVS at boot; the settings tables describe
 what the web API can read and write. A key present in one and absent from the
 other is how the two drift apart, which is the class of bug upstream #2697 and
 #2839 both fixed.
+
+Device settings are declared by the driver that owns them, so the table scan
+covers every DeviceSetting array under the driver directories as well as the
+central kSettingFields, the way driver_command_parity.py already scans all
+driver headers.
 
 Not every boot key belongs in the table: OWNED_ELSEWHERE names the writer of each
 one that does not, so a key left unowned fails the run.
@@ -17,6 +22,7 @@ REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "Software/src"
 NVM = SRC / "communication/nvm/comm_nvm.cpp"
 TABLE = SRC / "devboard/webserver/settings_api.cpp"
+DRIVER_DIRS = ("battery", "inverter", "charger")
 
 # Boot keys the settings table deliberately does not describe, and who owns them.
 OWNED_ELSEWHERE = {
@@ -39,17 +45,17 @@ NOT_READ_AT_BOOT = {
     "SHUNTCOMM": "packed interface config, resolved by the interface schema",
     "CANFDASCAN": "read by the HAL during interface setup",
     "CANFD2ASCAN": "read by the HAL during interface setup",
-    "RAMPDOWNSOC": "read by the estimated-SOC battery driver",
 }
 
 BOOT_READ = re.compile(r'settings\.get[A-Za-z]+\("([A-Za-z0-9_]+)"')
-TABLE_DECL = "const SettingField kSettingFields[] = {"
-ROW_KEY = re.compile(r'^\s*\{"([A-Za-z0-9_]+)",\s*ST::', re.M)
-VOLATILE_ROW = "SS::Volatile"
+TABLE_DECLS = ("const SettingField kSettingFields[] = {", "const DeviceSetting kFamilySettingFields[] = {")
+DRIVER_DECL = "const DeviceSetting kSettings[] = {"
+ROW_KEY = re.compile(r'^\s*\{\{?"([A-Za-z0-9_]+)",\s*(?:ST|SettingType)::', re.M)
+VOLATILE_ROWS = ("SS::Volatile", "SettingStorage::Volatile")
 NVS_KEY_MAX = 15
 
 
-def table_keys(source: str) -> set:
+def table_keys(source: str, decl: str) -> set:
     """Keys of the NVS-backed rows. Volatile rows name no NVS key at all.
 
     Rows are found by brace depth, not by a regex over the whole file: a row can
@@ -57,7 +63,9 @@ def table_keys(source: str) -> set:
     misses those rows silently, and the gate then reports their keys as read at
     boot but settable nowhere.
     """
-    body = source[source.index(TABLE_DECL) + len(TABLE_DECL):]
+    if decl not in source:
+        return set()
+    body = source[source.index(decl) + len(decl):]
     keys = set()
     depth = 0
     row = ""
@@ -71,15 +79,26 @@ def table_keys(source: str) -> set:
             depth -= 1
             if depth == 0:
                 match = ROW_KEY.search(row)
-                if match and VOLATILE_ROW not in row:
+                if match and not any(v in row for v in VOLATILE_ROWS):
                     keys.add(match.group(1))
                 row = ""
     return keys
 
 
+def all_table_keys() -> set:
+    central = TABLE.read_text()
+    keys = set()
+    for decl in TABLE_DECLS:
+        keys |= table_keys(central, decl)
+    for directory in DRIVER_DIRS:
+        for path in sorted((SRC / directory).glob("*.cpp")):
+            keys |= table_keys(path.read_text(), DRIVER_DECL)
+    return keys
+
+
 def main() -> int:
     boot = set(BOOT_READ.findall(NVM.read_text()))
-    table = table_keys(TABLE.read_text())
+    table = all_table_keys()
 
     unowned = sorted(boot - table - set(OWNED_ELSEWHERE))
     unread = sorted(table - boot - set(NOT_READ_AT_BOOT))
@@ -87,7 +106,7 @@ def main() -> int:
     stale_unread = sorted(set(NOT_READ_AT_BOOT) - table)
     overlong = sorted(k for k in table if len(k) > NVS_KEY_MAX)
 
-    print(f"{len(boot)} keys read at boot, {len(table)} in kSettingFields, "
+    print(f"{len(boot)} keys read at boot, {len(table)} in the settings tables, "
           f"{len(boot & table)} in both.")
 
     if unowned:

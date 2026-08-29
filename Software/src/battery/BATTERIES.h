@@ -69,6 +69,15 @@ void setup_shunt();
 void setup_battery(void);
 Battery* create_battery(BatteryType type, const BatterySlotContext& ctx);
 
+struct BatteryTypeSettings {
+  BatteryType id;
+  DeviceSettingList (*settings)();
+  BatteryCapabilities capabilities;
+};
+
+size_t battery_type_settings_count();
+BatteryTypeSettings battery_type_settings_at(size_t index);
+
 bool board_supports_battery_type(BatteryType type);
 bool interface_supports_battery_type(BatteryType type, const InterfaceDescriptor* interface);
 
@@ -83,11 +92,6 @@ extern bool user_selected_use_estimated_SOC;
 extern bool user_selected_use_estimated_charge_limits;
 extern bool user_selected_LEAF_interlock_mandatory;
 extern bool user_selected_tesla_digital_HVIL;
-inline constexpr uint16_t kTeslaGtwCountryDefault = 17477;
-inline constexpr bool kTeslaGtwRightHandDriveDefault = true;
-inline constexpr uint16_t kTeslaGtwMapRegionDefault = 2;
-inline constexpr uint16_t kTeslaGtwChassisTypeDefault = 2;
-inline constexpr uint16_t kTeslaGtwPackEnergyDefault = 1;
 extern uint16_t user_selected_tesla_GTW_country;
 extern bool user_selected_tesla_GTW_rightHandDrive;
 extern uint16_t user_selected_tesla_GTW_mapRegion;

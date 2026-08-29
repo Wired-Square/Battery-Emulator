@@ -84,54 +84,14 @@ const LABELS = {
   SSID: 'SSID',
   PASSWORD: 'Password',
   BATTCHEM: 'Battery chemistry',
-  BATTPVMAX: 'Battery max design voltage (V)',
-  BATTPVMIN: 'Battery min design voltage (V)',
-  BATTCVMAX: 'Cell max design voltage (mV)',
-  BATTCVMIN: 'Cell min design voltage (mV)',
-  PYLONBAUD: 'Pylon CAN baudrate (kbps)',
-  INTERLOCKREQ: 'Interlock required',
-  SOCESTIMATED: 'Use estimated SOC',
-  DALYPWRPCT: 'Power limit per percent SOC above 80 / below 20 (W/pct)',
-  DALYPWRDV: 'Max power per dV distance from minimum voltage (W/dV)',
-  DALYDVSTART: 'Voltage difference for start of voltage based discharge limit (dV)',
-  DALYPWRDEG: 'Power change per °C above/below 0°C (W/°C)',
-  DALYPWR0C: 'Power at 0°C (W)',
-  DIGITALHVIL: 'Digital HVIL (2024+)',
-  GTWRHD: 'Right hand drive',
-  GTWCOUNTRY: 'Country code',
-  GTWMAPREG: 'Map region',
-  GTWCHASSIS: 'Chassis type',
-  GTWPACK: 'Pack type',
-  CHGPOWER: 'Manual charging power, watt',
-  DCHGPOWER: 'Manual discharge power, watt',
-  RAMPDOWNSOC: 'Rampdown SOC, pptt',
-  SOFAR_ID: 'Sofar Battery ID (0-15)',
   INVTYPE: 'Inverter protocol',
   INVCOMM: 'Inverter interface',
   INVOFFGRID: 'Inverter run entirely offgrid',
   LOWPASSFILTER: 'Ramp up charge limits gradually',
-  CHGESTIMATED: 'Use estimated charge/discharge limits',
   CHGTAPERSOC: 'Charge power tapering based on SOC',
   CHGTAPERSTART: 'Start tapering at SOC, percent',
   CHGTAPERFLOOR: 'Float charge power, W',
   SLOWCANINV: 'Allow longer CAN timeout',
-  PYLONSEND: 'Pylon, send group (0-1)',
-  PYLONOFFSET: 'Pylon, 30k offset',
-  PYLONORDER: 'Pylon, invert byteorder',
-  PYLONBRAND: 'Pylon, manufacturer name',
-  DEYEBYD: 'Deye avoid over/undercharge fix',
-  PRIMOGEN24: 'Fronius Primo, 450V maxvoltage cap',
-  INVCELLS: 'Reported cell count (0 for default)',
-  INVMODULES: 'Reported module count (0 for default)',
-  INVCELLSPER: 'Reported cells per module (0 for default)',
-  INVVLEVEL: 'Reported voltage level (0 for default)',
-  INVCAPACITY: 'Reported Ah capacity (0 for default)',
-  INVBTYPE: 'Reported battery type (in decimal)',
-  INVSUNTYPE: 'Battery model',
-  INVICNT: 'Inverter Contactor Workaround',
-  FOXESSTYPE: 'FoxESS battery type (0 for default)',
-  FOXESSSUBTYPE: 'FoxESS battery subtype (0 for default)',
-  FOXESSMODULES: 'FoxESS module count (0 for default)',
   CHGTYPE: 'Charger',
   CHGCOMM: 'Charger interface',
   SHUNTTYPE: 'Shunt',
@@ -209,22 +169,8 @@ const LABELS = {
   setpoint_v: 'Charge voltage setpoint (V)',
   setpoint_a: 'Charge current setpoint (A)',
   end_a: 'Charge termination current (A)',
-  BYDAUTOCALEN: 'Auto-calibrate SOC (battery 1)',
-  BYDAUTOCALDRIFT: 'Drift (%) (battery 1)',
-  BYDAUTOCALEN2: 'Auto-calibrate SOC (battery 2)',
-  BYDAUTOCALDRFT2: 'Drift (%) (battery 2)',
-  BYDKEEPISOOFF: 'Keep isolation monitoring disabled',
-  cal_target_soc: 'Calibration target SOC (battery 1)',
-  cal_target_ah: 'Calibration target Ah (battery 1)',
-  cal_target_soc2: 'Calibration target SOC (battery 2)',
-  cal_target_ah2: 'Calibration target Ah (battery 2)',
   recovery_mode: 'Undercharged recovery mode',
   cutoff: 'CAN ID logging cutoff',
-  max_time_min: 'Balancing max time (min)',
-  max_cell_mv: 'Max cell voltage (mV)',
-  max_dev_mv: 'Max cell deviation (mV)',
-  max_pack_v: 'Max pack voltage (V)',
-  float_power_w: 'Float power (W)',
 };
 
 // Client-only text-field regexes (numeric bounds ride the schema). An empty value passes
@@ -268,63 +214,38 @@ const PASSWORD_KEYS = new Set(['PASSWORD', 'HTTPPASS', 'HTTPPASSCONFIRM', 'APPAS
 // Stored secrets that can be explicitly cleared (sent as JSON null). HTTPPASSCONFIRM is not stored.
 const CLEARABLE_PASSWORD_KEYS = new Set(['PASSWORD', 'HTTPPASS', 'APPASSWORD', 'MQTTPASSWORD']);
 
-// BatteryType / InverterProtocolType enum values, mirrored from the firmware enums.
-const BAT = {
-  CBMS: [6, 11, 22, 23, 24, 31, 41, 48, 49, 51],
-  NISSAN: [21],
-  DALY: [23],
-  TESLA: [32, 33],
-  ESTIMATED: [3, 4, 6, 8, 14, 16, 24, 26, 32, 33, 40, 41, 44, 50, 51],
-  CHGEST: [8, 26, 44],
-  SOCEST: [16, 26, 41, 42],
-  PYLON: [22],
-  BMWPHEV: [43],
-};
-const INV = {
-  SOFAR: [17],
-  BYD: [2],
-  BYDMODBUS: [3],
-  PYLON: [10],
-  PYLONISH: [4, 10, 19],
-  SOLAX: [18],
-  SUNGROW: [21],
-  KOSTAL: [9],
-  FOXESS: [5],
-};
 const SHUNT_CTCLAMP = 3;
 const TESLA_CHASSIS_MODEL_3 = 2;
 
-const inList = (list, value) => list.includes(Number(value));
+const fieldFor = (key) => (data?.schema ?? []).find((f) => f.key === key);
+
+const ownedBy = (field) => {
+  if (!field?.owners) return true;
+  if (field.domain === 'inverter') return field.owners.includes(Number(state.INVTYPE));
+  const slots = dynamicState.batteries ?? [];
+  if (field.slot != null) {
+    const entry = slots.find((b) => b.slot === field.slot);
+    return entry != null && field.owners.includes(Number(entry.type));
+  }
+  return slots.some((b) => field.owners.includes(Number(b.type)));
+};
+
+const forcesBalancing = () => ownedBy(fieldFor('max_cell_mv'));
 
 // 3/Y only: the driver's forced-balancing override never runs on S/X.
-const forcedBalancing = (s) => inList(BAT.TESLA, s.battery) && Number(s.GTWCHASSIS) >= TESLA_CHASSIS_MODEL_3;
+const forcedBalancing = (s) => forcesBalancing() && Number(s.GTWCHASSIS) >= TESLA_CHASSIS_MODEL_3;
 
-// Value-driven show/hide; board-gated absence is already handled by the schema.
+// A driver owning the balancing time but not the chassis-gated rows carries no chassis condition.
+// Testing the chassis alone would hide the row for a BMW PHEV sharing the box with a sub-3/Y Tesla.
+const ownsUngatedBalancing = () => {
+  const gated = fieldFor('max_cell_mv')?.owners ?? [];
+  const ungated = (fieldFor('max_time_min')?.owners ?? []).filter((id) => !gated.includes(id));
+  return (dynamicState.batteries ?? []).some((b) => ungated.includes(Number(b.type)));
+};
+
+// Value-driven show/hide; ownership and board-gated absence are handled by the schema.
 const VISIBILITY = {
   BATTCHEM: (s) => Number(s.battery) !== 0,
-  PYLONBAUD: (s) => inList(BAT.PYLON, s.battery),
-  BATTPVMAX: (s) => inList(BAT.CBMS, s.battery),
-  BATTPVMIN: (s) => inList(BAT.CBMS, s.battery),
-  BATTCVMAX: (s) => inList(BAT.CBMS, s.battery),
-  BATTCVMIN: (s) => inList(BAT.CBMS, s.battery),
-  INTERLOCKREQ: (s) => inList(BAT.NISSAN, s.battery),
-  DALYPWRPCT: (s) => inList(BAT.DALY, s.battery),
-  DALYDVSTART: (s) => inList(BAT.DALY, s.battery),
-  DALYPWRDV: (s) => inList(BAT.DALY, s.battery),
-  DALYPWRDEG: (s) => inList(BAT.DALY, s.battery),
-  DALYPWR0C: (s) => inList(BAT.DALY, s.battery),
-  DIGITALHVIL: (s) => inList(BAT.TESLA, s.battery),
-  GTWRHD: (s) => inList(BAT.TESLA, s.battery),
-  GTWCOUNTRY: (s) => inList(BAT.TESLA, s.battery),
-  GTWMAPREG: (s) => inList(BAT.TESLA, s.battery),
-  GTWCHASSIS: (s) => inList(BAT.TESLA, s.battery),
-  GTWPACK: (s) => inList(BAT.TESLA, s.battery),
-  CHGPOWER: (s) => inList(BAT.ESTIMATED, s.battery),
-  DCHGPOWER: (s) => inList(BAT.ESTIMATED, s.battery),
-  RAMPDOWNSOC: (s) => inList(BAT.ESTIMATED, s.battery),
-  SOCESTIMATED: (s) => inList(BAT.SOCEST, s.battery),
-  CHGESTIMATED: (s) => inList(BAT.CHGEST, s.battery),
-  SOFAR_ID: (s) => inList(INV.SOFAR, s.INVTYPE),
   INVCOMM: (s) => Number(s.INVTYPE) !== 0,
   INVOFFGRID: (s) => Number(s.INVTYPE) !== 0,
   PERBMSRESETH: (s) => s.PERBMSRESET === true,
@@ -336,23 +257,6 @@ const VISIBILITY = {
   CHGTAPERSTART: (s) => Number(s.INVTYPE) !== 0 && s.CHGTAPERSOC === true,
   CHGTAPERFLOOR: (s) => Number(s.INVTYPE) !== 0 && s.CHGTAPERSOC === true,
   SLOWCANINV: (s) => Number(s.INVTYPE) !== 0,
-  PYLONSEND: (s) => inList(INV.PYLON, s.INVTYPE),
-  PYLONOFFSET: (s) => inList(INV.PYLON, s.INVTYPE),
-  PYLONORDER: (s) => inList(INV.PYLON, s.INVTYPE),
-  PYLONBRAND: (s) => inList(INV.PYLON, s.INVTYPE),
-  DEYEBYD: (s) => inList(INV.BYD, s.INVTYPE),
-  PRIMOGEN24: (s) => inList(INV.BYDMODBUS, s.INVTYPE),
-  INVCELLS: (s) => inList(INV.PYLONISH, s.INVTYPE),
-  INVCELLSPER: (s) => inList(INV.PYLONISH, s.INVTYPE),
-  INVVLEVEL: (s) => inList(INV.PYLONISH, s.INVTYPE),
-  INVCAPACITY: (s) => inList(INV.PYLONISH, s.INVTYPE),
-  INVMODULES: (s) => inList(INV.PYLONISH, s.INVTYPE) || inList(INV.SOLAX, s.INVTYPE),
-  INVBTYPE: (s) => inList(INV.SOLAX, s.INVTYPE),
-  INVSUNTYPE: (s) => inList(INV.SUNGROW, s.INVTYPE),
-  INVICNT: (s) => inList(INV.KOSTAL, s.INVTYPE) || inList(INV.SOLAX, s.INVTYPE),
-  FOXESSTYPE: (s) => inList(INV.FOXESS, s.INVTYPE),
-  FOXESSSUBTYPE: (s) => inList(INV.FOXESS, s.INVTYPE),
-  FOXESSMODULES: (s) => inList(INV.FOXESS, s.INVTYPE),
   CHGCOMM: (s) => Number(s.CHGTYPE) !== 0,
   SHUNTCOMM: (s) => Number(s.SHUNTTYPE) !== 0 && Number(s.SHUNTTYPE) !== SHUNT_CTCLAMP,
   CTOFFSET: (s) => Number(s.SHUNTTYPE) === SHUNT_CTCLAMP,
@@ -393,7 +297,7 @@ const VISIBILITY = {
   setpoint_v: (s) => Number(s.CHGTYPE) !== 0,
   setpoint_a: (s) => Number(s.CHGTYPE) !== 0,
   end_a: (s) => Number(s.CHGTYPE) !== 0,
-  max_time_min: (s) => inList(BAT.BMWPHEV, s.battery) || forcedBalancing(s),
+  max_time_min: (s) => ownsUngatedBalancing() || forcedBalancing(s),
   max_cell_mv: forcedBalancing,
   max_dev_mv: forcedBalancing,
   max_pack_v: forcedBalancing,
@@ -566,8 +470,7 @@ function passwordCell(field, input) {
 
 function applyVisibility(panel) {
   panel.querySelectorAll('.field[data-key]').forEach((row) => {
-    const rule = VISIBILITY[row.dataset.key];
-    row.classList.toggle('hidden', rule ? !rule(state) : false);
+    row.classList.toggle('hidden', !isVisible(row.dataset.key));
   });
 }
 
@@ -874,6 +777,7 @@ function liveControl(field, current) {
 const LIVE_REJECTED = t('ui.live_rejected', 'The device rejected this value.');
 
 const isVisible = (key) => {
+  if (!ownedBy(fieldFor(key))) return false;
   const rule = VISIBILITY[key];
   return !rule || rule(state);
 };
@@ -1029,6 +933,7 @@ function seedState(values) {
 function firstInvalidField() {
   for (const field of data.schema ?? []) {
     if (field.category === LIVE_CATEGORY) continue;
+    if (!ownedBy(field)) continue;
     const rule = VISIBILITY[field.key];
     if (rule && !rule(state)) continue;
     const value = state[field.key];

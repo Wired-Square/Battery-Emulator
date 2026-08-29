@@ -24,60 +24,7 @@ class RenaultZoeGen2Battery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  void write_advanced_status(AdvancedStatusWriter& out) override {
-    out.section("");
-    out.kv(TL("soc"), String(datalayer_extended.zoePH2.battery_soc));
-    out.kv(TL("usable soc"), String(datalayer_extended.zoePH2.battery_usable_soc));
-    out.kv(TL("soh"), String(datalayer_extended.zoePH2.battery_soh));
-    out.kv(TL("pack voltage"), String(datalayer_extended.zoePH2.battery_pack_voltage));
-    out.kv(TL("max cell voltage"), String(datalayer_extended.zoePH2.battery_max_cell_voltage));
-    out.kv(TL("min cell voltage"), String(datalayer_extended.zoePH2.battery_min_cell_voltage));
-    out.kv(TL("12v"), String(datalayer_extended.zoePH2.battery_12v));
-    out.kv(TL("avg temp"), String(datalayer_extended.zoePH2.battery_avg_temp));
-    out.kv(TL("min temp"), String(datalayer_extended.zoePH2.battery_min_temp));
-    out.kv(TL("max temp"), String(datalayer_extended.zoePH2.battery_max_temp));
-    out.kv(TL("max power"), String(datalayer_extended.zoePH2.battery_max_power));
-    out.kv(TL("interlock"), String(datalayer_extended.zoePH2.battery_interlock));
-    out.kv(TL("kwh"), String(datalayer_extended.zoePH2.battery_kwh));
-    out.kv(TL("current"), String(datalayer_extended.zoePH2.battery_current));
-    out.kv(TL("current offset"), String(datalayer_extended.zoePH2.battery_current_offset));
-    out.kv(TL("max generated"), String(datalayer_extended.zoePH2.battery_max_generated));
-    out.kv(TL("max available"), String(datalayer_extended.zoePH2.battery_max_available));
-    out.kv(TL("current voltage"), String(datalayer_extended.zoePH2.battery_current_voltage));
-    out.kv(TL("charging status"), String(datalayer_extended.zoePH2.battery_charging_status));
-    out.kv(TL("remaining charge"), String(datalayer_extended.zoePH2.battery_remaining_charge));
-    out.kv(TL("balance capacity total"), String(datalayer_extended.zoePH2.battery_balance_capacity_total));
-    out.kv(TL("balance time total"), String(datalayer_extended.zoePH2.battery_balance_time_total));
-    out.kv(TL("balance capacity sleep"), String(datalayer_extended.zoePH2.battery_balance_capacity_sleep));
-    out.kv(TL("balance time sleep"), String(datalayer_extended.zoePH2.battery_balance_time_sleep));
-    out.kv(TL("balance capacity wake"), String(datalayer_extended.zoePH2.battery_balance_capacity_wake));
-    out.kv(TL("balance time wake"), String(datalayer_extended.zoePH2.battery_balance_time_wake));
-    out.kv(TL("bms state"), String(datalayer_extended.zoePH2.battery_bms_state));
-    out.kv(TL("energy complete"), String(datalayer_extended.zoePH2.battery_energy_complete));
-    out.kv(TL("energy partial"), String(datalayer_extended.zoePH2.battery_energy_partial));
-    out.kv(TL("slave failures"), String(datalayer_extended.zoePH2.battery_slave_failures));
-    out.kv(TL("mileage"), String(datalayer_extended.zoePH2.battery_mileage));
-    out.kv(TL("fan speed"), String(datalayer_extended.zoePH2.battery_fan_speed));
-    out.kv(TL("fan period"), String(datalayer_extended.zoePH2.battery_fan_period));
-    out.kv(TL("fan control"), String(datalayer_extended.zoePH2.battery_fan_control));
-    out.kv(TL("fan duty"), String(datalayer_extended.zoePH2.battery_fan_duty));
-    out.kv(TL("time"), String(datalayer_extended.zoePH2.battery_time));
-    out.kv(TL("pack time"), String(datalayer_extended.zoePH2.battery_pack_time));
-    out.kv(TL("soc min"), String(datalayer_extended.zoePH2.battery_soc_min));
-    out.kv(TL("soc max"), String(datalayer_extended.zoePH2.battery_soc_max));
-
-    String temporisation;
-    if (datalayer_extended.zoePH2.battery_temporisation == 255) {
-      temporisation = "Not read yet";
-    } else if (datalayer_extended.zoePH2.battery_temporisation == 0) {
-      temporisation = "0 Activated!";
-    } else if (datalayer_extended.zoePH2.battery_temporisation == 1) {
-      temporisation = "1 Disabled!";
-    } else {
-      temporisation = String(datalayer_extended.zoePH2.battery_temporisation);
-    }
-    out.kv(TL("temporisation"), temporisation);
-  }
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
   uint8_t calculate_crc_zoe(CAN_frame& frame, uint8_t crc_xor);
 

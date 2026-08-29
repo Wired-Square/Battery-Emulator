@@ -71,32 +71,44 @@ struct InverterTypeInfo {
   InverterProtocolType id;
   const char* name;
   InverterProtocol* (*make)(const char*);  // nullptr => not constructible (None)
+  DeviceSettingList (*settings)() = nullptr;
+  InverterCapabilities capabilities = 0;
 };
 
 // A row's make<T> must construct the class its id and name denote — the pairing is convention, not compiler-checked.
 static constexpr InverterTypeInfo kInverterRegistry[] = {
     {InverterProtocolType::None,        "None",                                       nullptr},
     {InverterProtocolType::AforeCan,    "Afore battery over CAN",                     &make<AforeCanInverter>},
-    {InverterProtocolType::BydCan,      "BYD Battery-Box Premium HVS over CAN Bus",   &make<BydCanInverter>},
-    {InverterProtocolType::BydModbus,   "BYD 11kWh HVM battery over Modbus RTU",      &make<BydModbusInverter>},
-    {InverterProtocolType::FerroampCan, "Ferroamp Pylon battery over CAN bus",        &make<FerroampCanInverter>},
-    {InverterProtocolType::Foxess,      "FoxESS compatible HV2600/ECS4100 battery",   &make<FoxessCanInverter>},
+    {InverterProtocolType::BydCan,      "BYD Battery-Box Premium HVS over CAN Bus",   &make<BydCanInverter>,
+     &BydCanInverter::settings, 0},
+    {InverterProtocolType::BydModbus,   "BYD 11kWh HVM battery over Modbus RTU",      &make<BydModbusInverter>,
+     &BydModbusInverter::settings, 0},
+    {InverterProtocolType::FerroampCan, "Ferroamp Pylon battery over CAN bus",        &make<FerroampCanInverter>,
+     nullptr, InverterCapability::PackGeometry | InverterCapability::ModuleCount},
+    {InverterProtocolType::Foxess,      "FoxESS compatible HV2600/ECS4100 battery",   &make<FoxessCanInverter>,
+     &FoxessCanInverter::settings, 0},
     {InverterProtocolType::GrowattHv,   "Growatt High Voltage protocol via CAN",      &make<GrowattHvInverter>},
     {InverterProtocolType::GrowattLv,   "Growatt Low Voltage (48V) protocol via CAN", &make<GrowattLvInverter>},
     {InverterProtocolType::GrowattWit,  "Growatt WIT compatible battery via CAN",     &make<GrowattWitInverter>},
-    {InverterProtocolType::Kostal,      "BYD battery via Kostal RS485",               &make<KostalInverterProtocol>},
-    {InverterProtocolType::Pylon,       "Pylontech HV battery over CAN bus",          &make<PylonInverter>},
+    {InverterProtocolType::Kostal,      "BYD battery via Kostal RS485",               &make<KostalInverterProtocol>,
+     nullptr, InverterCapability::ContactorWorkaround},
+    {InverterProtocolType::Pylon,       "Pylontech HV battery over CAN bus",          &make<PylonInverter>,
+     &PylonInverter::settings, InverterCapability::PackGeometry | InverterCapability::ModuleCount},
     {InverterProtocolType::PylonLv,     "Pylontech LV battery over CAN bus",          &make<PylonLvInverter>},
     {InverterProtocolType::Schneider,   "Schneider V2 SE BMS CAN",                    &make<SchneiderInverter>},
     // id 13 is an NVM-frozen gap: no row, so lookups return nullptr
     {InverterProtocolType::SmaBydH,     "SMA compatible BYD Battery-Box H",           &make<SmaBydHInverter>},
     {InverterProtocolType::SmaLv,       "SMA Low Voltage (48V) protocol via CAN",     &make<SmaLvInverter>},
     {InverterProtocolType::SmaBydHvs,   "SMA compatible BYD Battery-Box HVS",         &make<SmaBydHvsInverter>},
-    {InverterProtocolType::Sofar,       "Sofar BMS (Extended) via CAN, Battery ID",   &make<SofarInverter>},
-    {InverterProtocolType::Solax,       "SolaX Triple Power LFP over CAN bus",        &make<SolaxInverter>},
-    {InverterProtocolType::Solxpow,     "Solxpow compatible battery",                 &make<SolxpowInverter>},
+    {InverterProtocolType::Sofar,       "Sofar BMS (Extended) via CAN, Battery ID",   &make<SofarInverter>,
+     &SofarInverter::settings, 0},
+    {InverterProtocolType::Solax,       "SolaX Triple Power LFP over CAN bus",        &make<SolaxInverter>,
+     &SolaxInverter::settings, InverterCapability::ModuleCount | InverterCapability::ContactorWorkaround},
+    {InverterProtocolType::Solxpow,     "Solxpow compatible battery",                 &make<SolxpowInverter>,
+     nullptr, InverterCapability::PackGeometry | InverterCapability::ModuleCount},
     {InverterProtocolType::SolArkLv,    "Sol-Ark LV protocol over CAN bus",           &make<SolArkLvInverter>},
-    {InverterProtocolType::Sungrow,     "Sungrow SBRXXX emulation over CAN bus",      &make<SungrowInverter>},
+    {InverterProtocolType::Sungrow,     "Sungrow SBRXXX emulation over CAN bus",      &make<SungrowInverter>,
+     &SungrowInverter::settings, 0},
     {InverterProtocolType::VCU,         "VCU mode: Nissan LEAF battery",              &make<VCUInverter>},
     {InverterProtocolType::PylonLV485,  "Pylon low voltage via RS485",                &make<PylonLV485InverterProtocol>},
     {InverterProtocolType::SmaSBSByd,   "SMA SBS compatible BYD Battery-Box HVS",     &make<SmaSBSBydHvsInverter>},
@@ -115,6 +127,15 @@ static const InverterTypeInfo* find_inverter_info(InverterProtocolType type) {
   for (const auto& info : kInverterRegistry)
     if (info.id == type) return &info;
   return nullptr;
+}
+
+size_t inverter_type_settings_count() {
+  return std::size(kInverterRegistry);
+}
+
+InverterTypeSettings inverter_type_settings_at(size_t index) {
+  const InverterTypeInfo& info = kInverterRegistry[index];
+  return {info.id, info.settings, info.capabilities};
 }
 
 extern const char* name_for_inverter_type(InverterProtocolType type) {

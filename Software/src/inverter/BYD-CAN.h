@@ -6,6 +6,8 @@
 
 class BydCanInverter : public CanInverterProtocol {
  public:
+  static DeviceSettingList settings();
+
   void transmit_can(unsigned long currentMillis);
   void map_can_frame_to_variable(CAN_frame rx_frame);
   void update_values();

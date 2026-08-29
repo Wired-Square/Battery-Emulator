@@ -207,3 +207,14 @@ void BydCanInverter::enable_shunt() {
   datalayer.system.info.shunt_protocol[31] = '\0';
   useAsShunt = true;
 }
+
+namespace {
+const DeviceSetting kSettings[] = {
+    {{"DEYEBYD", SettingType::Bool, kInverter, SettingApplies::Boot, 0, nullptr},
+     "Deye avoid over/undercharge fix"},
+};
+}  // namespace
+
+DeviceSettingList BydCanInverter::settings() {
+  return device_settings(kSettings);
+}

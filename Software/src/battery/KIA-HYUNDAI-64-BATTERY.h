@@ -24,52 +24,7 @@ class KiaHyundai64Battery : public CanBattery {
 
   bool supports_insulation_resistance() override { return true; }
 
-  void write_advanced_status(AdvancedStatusWriter& out) override {
-    DATALAYER_INFO_KIAHYUNDAI64* kia_datalayer = &extended_;
-    out.section("");
-    auto build_fields = [&out](DATALAYER_INFO_KIAHYUNDAI64& data) {
-      char readableSerialNumber[17];  // One extra space for null terminator
-      memcpy(readableSerialNumber, data.ecu_serial_number, sizeof(data.ecu_serial_number));
-      readableSerialNumber[16] = '\0';  // Null terminate the string
-      char readableVersionNumber[17];   // One extra space for null terminator
-      memcpy(readableVersionNumber, data.ecu_version_number, sizeof(data.ecu_version_number));
-      readableVersionNumber[16] = '\0';  // Null terminate the string
-
-      out.kv(TL("BMS serial number"), String(readableSerialNumber));
-      out.kv(TL("BMS software version"), String(readableVersionNumber));
-      out.kv(TL("Cells"), String(data.total_cell_count), "S");
-      out.kv(TL("12V voltage"), String(data.battery_12V / 10.0f, 1), "V");
-
-      String waterleakage;
-      if (data.waterleakageSensor == 0) {
-        waterleakage = "LEAK DETECTED";
-      } else if (data.waterleakageSensor == 164) {
-        waterleakage = "No leakage";
-      } else {
-        waterleakage = String(data.waterleakageSensor);
-      }
-      out.kv(TL("Waterleakage"), waterleakage);
-
-      out.kv(TL("Temperature, water inlet"), String(data.temperature_water_inlet), "°C");
-      out.kv(TL("Temperature, power relay"), String(data.powerRelayTemperature), "°C");
-      out.kv(TL("Batterymanagement mode"), String(data.batteryManagementMode));
-      out.kv(TL("BMS ignition"), String(data.BMS_ign));
-      out.kv(TL("Battery relay"), String(data.batteryRelay));
-      out.kv(TL("Inverter voltage"), String(data.inverterVoltage), "V");
-      out.kv(TL("Isolation resistance"), String(data.isolation_resistance_kOhm), "kOhm");
-      out.kv(TL("Power on total time"), String(data.powered_on_total_time), "s");
-      out.kv(TL("Fastcharging sessions"), String(data.number_of_fastcharging_sessions), "x");
-      out.kv(TL("Slowcharging sessions"), String(data.number_of_standard_charging_sessions), "x");
-      out.kv(TL("Normal charged energy amount"), String(data.accumulated_normal_charging_energy_kWh), "kWh");
-      out.kv(TL("Fastcharged energy amount"), String(data.accumulated_fastcharging_energy_kWh), "kWh");
-      out.kv(TL("Total amount charged energy"), String(data.cumulative_energy_charged_kWh / 10.0), "kWh");
-      out.kv(TL("Total amount discharged energy"), String(data.cumulative_energy_discharged_kWh / 10.0), "kWh");
-      out.kv(TL("Cumulative charge current"), String(data.cumulative_charge_current_ah / 10.0), "Ah");
-      out.kv(TL("Cumulative discharge current"), String(data.cumulative_discharge_current_ah / 10.0), "Ah");
-    };
-
-    build_fields(*kia_datalayer);
-  }
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
  private:
   void reset_DTC() { UserRequestDTCreset = true; }

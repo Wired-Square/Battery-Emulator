@@ -6,6 +6,7 @@
 #include "battery_advanced_status.h"
 #include "battery_cell_series.h"
 #include "battery_command.h"
+#include "../devboard/webserver/settings_field.h"
 
 enum class BatteryType {
   None = 0,
@@ -64,6 +65,17 @@ enum class BatteryType {
   VAGMqbEvo = 55,
   Highest
 };
+
+using BatteryCapabilities = uint16_t;
+
+namespace BatteryCapability {
+inline constexpr BatteryCapabilities DesignVoltages = 1 << 0;
+inline constexpr BatteryCapabilities EstimatedLimits = 1 << 1;
+inline constexpr BatteryCapabilities EstimatedSoc = 1 << 2;
+inline constexpr BatteryCapabilities EstimatedChargeLimits = 1 << 3;
+inline constexpr BatteryCapabilities ForcedBalancing = 1 << 4;
+inline constexpr BatteryCapabilities UserBalancing = 1 << 5;
+}  // namespace BatteryCapability
 
 extern const char* name_for_battery_type(BatteryType type);
 extern const char* name_for_chemistry(battery_chemistry_enum chem);

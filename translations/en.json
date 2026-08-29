@@ -975,7 +975,6 @@
  "setting.PYLONOFFSET": "Pylon, 30k offset",
  "setting.PYLONORDER": "Pylon, invert byteorder",
  "setting.PYLONSEND": "Pylon, send group (0-1)",
- "setting.RAMPDOWNSOC": "Rampdown SOC, pptt",
  "setting.REMBMSRESET": "Remote BMS reset via MQTT allowed",
  "setting.SDLOGENABLED": "Enable general logging via SD card",
  "setting.SHUNTCOMM": "Shunt interface",

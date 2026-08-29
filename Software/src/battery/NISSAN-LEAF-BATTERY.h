@@ -27,6 +27,8 @@ class NissanLeafBattery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
+  static DeviceSettingList settings();
+
   bool supports_insulation_resistance() override { return true; }
 
   bool soc_plausible() {
@@ -39,80 +41,7 @@ class NissanLeafBattery : public CanBattery {
 
   const char* get_dtc_json_filename() override { return "nissan_leaf_dtc.json"; }
 
-  void write_advanced_status(AdvancedStatusWriter& out) override {
-    out.section("");
-
-    String leaf_gen;
-    switch (datalayer_extended.nissanleaf.LEAF_gen) {
-      case 0:
-        leaf_gen = "ZE0";
-        break;
-      case 1:
-        leaf_gen = "AZE0";
-        break;
-      case 2:
-        leaf_gen = "ZE1";
-        break;
-      default:
-        leaf_gen = "Unknown";
-    }
-    out.kv(TL("LEAF generation"), leaf_gen);
-
-    char readableSerialNumber[16];  // One extra space for null terminator
-    memcpy(readableSerialNumber, datalayer_extended.nissanleaf.BatterySerialNumber,
-           sizeof(datalayer_extended.nissanleaf.BatterySerialNumber));
-    readableSerialNumber[15] = '\0';  // Null terminate the string
-    out.kv(TL("Serial number"), String(readableSerialNumber));
-
-    char readablePartNumber[8];  // One extra space for null terminator
-    memcpy(readablePartNumber, datalayer_extended.nissanleaf.BatteryPartNumber,
-           sizeof(datalayer_extended.nissanleaf.BatteryPartNumber));
-    readablePartNumber[7] = '\0';  // Null terminate the string
-    out.kv(TL("Part number"), String(readablePartNumber));
-
-    out.kv("GIDS", String(datalayer_extended.nissanleaf.GIDS));
-    out.kv(TL("Hx"), datalayer_extended.nissanleaf.battery_HX_pptt
-                                    ? String(datalayer_extended.nissanleaf.battery_HX_pptt / 100.0f, 2)
-                                    : String("Unknown"),
-                          datalayer_extended.nissanleaf.battery_HX_pptt ? "%" : "");
-    //A used pack always has AC charges on it, so a zero L1/L2 count means the group was not read yet.
-    out.kv(TL("QC charge count"), datalayer_extended.nissanleaf.ChargeCountL1L2
-                                                 ? String(datalayer_extended.nissanleaf.ChargeCountQC)
-                                                 : String("Unknown"));
-    out.kv(TL("AC charge count"), datalayer_extended.nissanleaf.ChargeCountL1L2
-                                                 ? String(datalayer_extended.nissanleaf.ChargeCountL1L2)
-                                                 : String("Unknown"));
-    out.kv(TL("Regen kW"), String(datalayer_extended.nissanleaf.ChargePowerLimit));
-    out.kv(TL("Charge kW"), String(datalayer_extended.nissanleaf.MaxPowerForCharger));
-    out.kv(TL("Temperature 1"), String(datalayer_extended.nissanleaf.temperature1 / 10.0), "°C");
-    out.kv(TL("Temperature 2"), String(datalayer_extended.nissanleaf.temperature2 / 10.0), "°C");
-    if (datalayer_extended.nissanleaf.LEAF_gen == 0) {
-      out.kv(TL("Temperature 3"), String(datalayer_extended.nissanleaf.temperature3 / 10.0), "°C");
-    }
-    out.kv(TL("Temperature 4"), String(datalayer_extended.nissanleaf.temperature4 / 10.0), "°C");
-    out.kv(TL("Insulation"), String(datalayer_extended.nissanleaf.Insulation), "kΩ");
-    out.kv(TL("Fully charged"), String(datalayer_extended.nissanleaf.Full));
-    out.kv(TL("Battery empty"), String(datalayer_extended.nissanleaf.Empty));
-    out.kv(TL("Failsafe status"), String(datalayer_extended.nissanleaf.FailsafeStatus));
-    out.kv(TL("Interlock"), String(datalayer_extended.nissanleaf.Interlock));
-    out.kv(TL("Main relay ON"), String(datalayer_extended.nissanleaf.MainRelayOn));
-    out.kv(TL("Relay cut request"), String(datalayer_extended.nissanleaf.RelayCutRequest));
-    out.kv(TL("Heater present"), String(datalayer_extended.nissanleaf.HeatExist));
-    out.kv(TL("Heating requested"), String(datalayer_extended.nissanleaf.HeaterSendRequest));
-    out.kv(TL("Heating started"), String(datalayer_extended.nissanleaf.HeatingStart));
-    out.kv(TL("Heating stopped"), String(datalayer_extended.nissanleaf.HeatingStop));
-    out.kv("CryptoChallenge", datalayer_extended.nissanleaf.CryptoChallenge != 0xFFFFFFFF
-                                                 ? String(datalayer_extended.nissanleaf.CryptoChallenge)
-                                                 : String("Not run"));
-    out.kv("SolvedChallenge",
-           (datalayer_extended.nissanleaf.SolvedChallengeMSB || datalayer_extended.nissanleaf.SolvedChallengeLSB)
-               ? String(datalayer_extended.nissanleaf.SolvedChallengeMSB) + "-" +
-                     String(datalayer_extended.nissanleaf.SolvedChallengeLSB)
-               : String("Not run"));
-    out.kv(TL("Challenge failed"), String(datalayer_extended.nissanleaf.challengeFailed));
-
-    write_dtc_section(out, *this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType);
-  }
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
  private:
   void reset_SOH() { UserRequestSOHreset = true; }

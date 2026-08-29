@@ -33,23 +33,9 @@ class PylonBattery : public CanBattery {
   virtual void update_values();
   virtual void transmit_can(unsigned long currentMillis);
 
-  void write_advanced_status(AdvancedStatusWriter& out) override {
-    out.section("");
-    out.kv(TL("BMS charge cutoff voltage"), String(extended_data.charge_cutoff_dV / 10.0, 1), "V");
-    out.kv(TL("BMS discharge cutoff voltage"), String(extended_data.discharge_cutoff_dV / 10.0, 1), "V");
-    out.kv(TL("Design voltage in use"),
-                          String(datalayer_battery->info.min_design_voltage_dV / 10.0, 1) + " - " +
-                              String(datalayer_battery->info.max_design_voltage_dV / 10.0, 1),
-                          "V");
-    if (extended_data.cell_max_number > 0 || extended_data.cell_min_number > 0) {
-      out.kv(TL("Highest / lowest cell"),
-                            "#" + String(extended_data.cell_max_number) + " / #" + String(extended_data.cell_min_number));
-    }
-    if (extended_data.temp_max_sensor > 0 || extended_data.temp_min_sensor > 0) {
-      out.kv(TL("Hottest / coldest sensor"),
-                            "#" + String(extended_data.temp_max_sensor) + " / #" + String(extended_data.temp_min_sensor));
-    }
-  }
+  static DeviceSettingList settings();
+
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
  private:
   PylonExtendedData extended_data;

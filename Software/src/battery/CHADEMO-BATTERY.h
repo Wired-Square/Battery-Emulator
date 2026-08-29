@@ -29,67 +29,7 @@ class ChademoBattery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  void write_advanced_status(AdvancedStatusWriter& out) override {
-    out.section("");
-
-    String chademo_state;
-    switch (datalayer_extended.chademo.CHADEMO_Status) {
-      case 0:
-        chademo_state = "FAULT";
-        break;
-      case 1:
-        chademo_state = "STOP";
-        break;
-      case 2:
-        chademo_state = "IDLE";
-        break;
-      case 3:
-        chademo_state = "CONNECTED";
-        break;
-      case 4:
-        chademo_state = "INIT";
-        break;
-      case 5:
-        chademo_state = "NEGOTIATE";
-        break;
-      case 6:
-        chademo_state = "EV ALLOWED";
-        break;
-      case 7:
-        chademo_state = "EVSE PREPARE";
-        break;
-      case 8:
-        chademo_state = "EVSE START";
-        break;
-      case 9:
-        chademo_state = "EVSE CONTACTORS ENABLED";
-        break;
-      case 10:
-        chademo_state = "POWERFLOW";
-        break;
-      default:
-        chademo_state = "Unknown";
-        break;
-    }
-    out.kv(TL("Chademo state"), chademo_state);
-
-    if (datalayer_extended.chademo.FaultBatteryCurrentDeviation) {
-      out.kv("FAULT", "Battery Current Deviation");
-    }
-    if (datalayer_extended.chademo.FaultBatteryOverVoltage) {
-      out.kv("FAULT", "Battery Overvoltage");
-    }
-    if (datalayer_extended.chademo.FaultBatteryUnderVoltage) {
-      out.kv("FAULT", "Battery Undervoltage");
-    }
-    if (datalayer_extended.chademo.FaultBatteryVoltageDeviation) {
-      out.kv("FAULT", "Battery Voltage Deviation");
-    }
-    if (datalayer_extended.chademo.FaultHighBatteryTemperature) {
-      out.kv("FAULT", "Battery Temperature");
-    }
-    out.kv(TL("Protocol"), String(datalayer_extended.chademo.ControlProtocolNumberEV));
-  }
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
  private:
   DATALAYER_BATTERY_TYPE* datalayer_battery;

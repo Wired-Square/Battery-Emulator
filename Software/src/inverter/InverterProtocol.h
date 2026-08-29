@@ -1,6 +1,10 @@
 #ifndef INVERTER_PROTOCOL_H
 #define INVERTER_PROTOCOL_H
 
+#include <cstdint>
+
+#include "../devboard/webserver/settings_field.h"
+
 enum class InverterProtocolType {
   None = 0,
   AforeCan = 1,
@@ -28,6 +32,14 @@ enum class InverterProtocolType {
   SmaSBSByd = 24,
   Highest
 };
+
+using InverterCapabilities = uint16_t;
+
+namespace InverterCapability {
+inline constexpr InverterCapabilities PackGeometry = 1 << 0;
+inline constexpr InverterCapabilities ModuleCount = 1 << 1;
+inline constexpr InverterCapabilities ContactorWorkaround = 1 << 2;
+}  // namespace InverterCapability
 
 extern InverterProtocolType user_selected_inverter_protocol;
 

@@ -369,12 +369,9 @@ void BydAttoBattery::
 void BydAttoBattery::handle_auto_soc_calibration(bool crit_taper, uint32_t dt_ms, uint32_t now_ms) {
   if (!datalayer_bydatto)
     return;
-  const uint32_t TAIL_DWELL_REQUIRED_MS = 10UL * 60UL * 1000UL;
-  const uint32_t CURRENT_SPIKE_GRACE_MS = 60UL * 1000UL;
-
   const int16_t current_dA = datalayer_battery->status.current_dA;
-  const bool crit_low_current = (current_dA >= -5 &&  // discharge up to 0.5A
-                                 current_dA <= 30);   // charge up to 3A
+  const bool crit_low_current =
+      (current_dA >= kAutoCalMinDischargeCurrentDa && current_dA <= kAutoCalMaxChargeCurrentDa);
 
   if (!crit_taper) {
     autocal_dwell_ms = 0;
@@ -382,13 +379,13 @@ void BydAttoBattery::handle_auto_soc_calibration(bool crit_taper, uint32_t dt_ms
   } else if (crit_low_current) {
     autocal_grace_start_ms = 0;
     autocal_dwell_ms += dt_ms;
-    if (autocal_dwell_ms > TAIL_DWELL_REQUIRED_MS)
-      autocal_dwell_ms = TAIL_DWELL_REQUIRED_MS;
+    if (autocal_dwell_ms > kAutoCalDwellRequiredMs)
+      autocal_dwell_ms = kAutoCalDwellRequiredMs;
   } else {
     if (autocal_grace_start_ms == 0) {
       autocal_grace_start_ms = now_ms;
     }
-    if ((now_ms - autocal_grace_start_ms) >= CURRENT_SPIKE_GRACE_MS) {
+    if ((now_ms - autocal_grace_start_ms) >= kAutoCalCurrentGraceMs) {
       autocal_dwell_ms = 0;
       autocal_grace_start_ms = 0;
     }
@@ -396,11 +393,11 @@ void BydAttoBattery::handle_auto_soc_calibration(bool crit_taper, uint32_t dt_ms
 
   const uint64_t now64 = millis64();
 
-  const bool crit_dwell = (autocal_dwell_ms >= TAIL_DWELL_REQUIRED_MS);
+  const bool crit_dwell = (autocal_dwell_ms >= kAutoCalDwellRequiredMs);
   const bool crit_drift =
       (battery_highprecision_SOC < 1000 &&
        (1000 - battery_highprecision_SOC) > (uint16_t)(datalayer_bydatto->auto_calibrate_soc_drift_percent * 10));
-  const bool crit_cooldown = ((now64 - last_auto_calibrate_ms) > 3600000ULL);
+  const bool crit_cooldown = ((now64 - last_auto_calibrate_ms) > kAutoCalCooldownMs);
   // Only calibrate when the pack itself reports closed, not just when BE permits closing
   const bool crit_contactors = (contactor_feedback & BMS_FEEDBACK_MAIN_CLOSED) != 0;
   uint32_t current_spike_ms = 0;
@@ -1285,4 +1282,273 @@ void BydAttoBattery::setup(void) {  // Performs one time setup at startup
   datalayer_battery->info.max_cell_voltage_mV = MAX_CELL_VOLTAGE_MV;
   datalayer_battery->info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
   datalayer_battery->info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
+}
+
+void BydAttoBattery::write_advanced_status(AdvancedStatusWriter& out) {
+  DATALAYER_INFO_BYDATTO3* byd_datalayer = datalayer_bydatto;
+  const String s = (datalayer_bydatto == &datalayer_extended.bydAtto3) ? "" : "2";
+  out.section("");
+
+  const auto& dl_bat = *datalayer_battery;
+  out.kv(TL("Detected cells"), String(dl_bat.info.number_of_cells));
+
+  String contactor_control_state;
+  switch (byd_datalayer->contactor_control_state) {
+    case 0:
+      contactor_control_state = "Closing";
+      break;
+    case 1:
+      contactor_control_state = "Closed (live)";
+      break;
+    case 2:
+      contactor_control_state = "Preparing to open";
+      break;
+    case 3:
+      contactor_control_state = "Opening";
+      break;
+    case 4:
+      contactor_control_state = "Standby / idle";
+      break;
+    case 5:
+      contactor_control_state = "Open requested";
+      break;
+    case 6:
+      contactor_control_state = "Open (settling)";
+      break;
+    case 7:
+      contactor_control_state = "Held open (fault / e-stop / startup)";
+      break;
+    default:
+      contactor_control_state = "Unknown";
+  }
+  out.kv(TL("BE contactor state"), contactor_control_state);
+
+  out.kv(TL("Main contactors"), byd_datalayer->contactor_main_closed
+                                                  ? "Closed — battery connected"
+                                                  : "Open — battery disconnected");
+  out.kv(TL("Precharge state"), byd_datalayer->contactor_precharging ? "Active" : "Idle");
+  // Bit2 (0x04) = car on/off (clear during car-off AC charging even though HV is live),
+  // not literal HV-bus energisation.
+  out.kv(TL("HV active"), byd_datalayer->contactor_hv_active ? "Yes" : "No");
+
+  // Pack mode read straight from the 0x344 byte0 state table (not re-derived per-bit).
+  String pack_mode;
+  switch (byd_datalayer->contactor_feedback) {
+    case 0x00:
+      pack_mode = "Disconnected";
+      break;
+    case 0x02:
+      pack_mode = "Open standby";
+      break;
+    case 0x42:
+      pack_mode = "Precharging";
+      break;
+    case 0x80:
+      pack_mode = "Closed, HV inactive";
+      break;
+    case 0x84:
+      pack_mode = "Closed idle, HV active";
+      break;
+    case 0x81:
+      pack_mode = "Charging, car off";
+      break;
+    case 0x85:
+      pack_mode = "Charging, HV active";
+      break;
+    case 0x82:
+      pack_mode = "Drive-ready pending";
+      break;
+    case 0x86:
+      pack_mode = "Drive ready";
+      break;
+    default: {
+      if (!(byd_datalayer->contactor_feedback & 0x80)) {
+        pack_mode = "Disconnected";
+      } else if (byd_datalayer->contactor_feedback & 0x01) {
+        pack_mode = "Charging";
+      } else if (byd_datalayer->contactor_feedback & 0x02) {
+        pack_mode = "Drive";
+      } else {
+        pack_mode = "Closed idle";
+      }
+      char modeStr[10];
+      snprintf(modeStr, sizeof(modeStr), " (0x%02X)", byd_datalayer->contactor_feedback);
+      pack_mode += modeStr;
+    }
+  }
+  out.kv(TL("BMS pack mode"), pack_mode);
+
+  char feedbackStr[5];
+  snprintf(feedbackStr, sizeof(feedbackStr), "0x%02X", byd_datalayer->contactor_feedback);
+  // 0x344 byte1 low nibble: a BMS state code whose meaning is unconfirmed (reads 1 in
+  // idle/drive/discharge alike). byte0 is the real charge/drive truth, so show this raw.
+  out.kv(TL("BMS raw status"), "mode " + String(feedbackStr) + ", state " + String(byd_datalayer->discharge_status));
+
+  float soc_measured = static_cast<float>(byd_datalayer->SOC_highprec) * 0.1f;
+  float BMS_maxChargePower = static_cast<float>(byd_datalayer->chargePower) * 0.1f;
+  float BMS_maxDischargePower = static_cast<float>(byd_datalayer->dischargePower) * 0.1f;
+
+  out.kv(TL("SOC measured"), String(soc_measured), "%");
+  out.kv(TL("SOC OBD2"), String(byd_datalayer->SOC_polled), "%");
+  if (byd_datalayer->pack_voltage_dV > 0) {
+    out.kv(TL("Pack voltage"), String(byd_datalayer->pack_voltage_dV / 10.0f, 1), "V");
+  } else {
+    out.kv(TL("Pack voltage"), "Not received");
+  }
+
+  for (int i = 0; i < 13; i++) {
+    if (byd_datalayer->battery_temperatures[i] != 215) {
+      out.kv(("Temperature sensor " + String(i + 1)).c_str(),
+             String(byd_datalayer->battery_temperatures[i]), "°C");
+    }
+  }
+
+  out.kv(TL("Max discharge power"), String(BMS_maxDischargePower), "kW");
+  out.kv(TL("Max charge (regen) power"), String(BMS_maxChargePower), "kW");
+  out.kv(TL("Total charged"), String(byd_datalayer->total_charged_kwh), "kWh");
+  out.kv(TL("Total discharged"), String(byd_datalayer->total_discharged_kwh), "kWh");
+  out.kv(TL("Total charged (Ah)"), String(byd_datalayer->total_charged_ah), "Ah");
+  out.kv(TL("Total discharged (Ah)"), String(byd_datalayer->total_discharged_ah), "Ah");
+  out.kv(TL("Charge times"), String(byd_datalayer->charge_times));
+  out.kv(TL("Times of full power"), String(byd_datalayer->times_full_power));
+  out.kv(TL("Min cell voltage number"), String(byd_datalayer->BMS_min_cell_voltage_number));
+  out.kv(TL("Max cell voltage number"), String(byd_datalayer->BMS_max_cell_voltage_number));
+  out.kv(TL("Min temp module number"), String(byd_datalayer->BMS_min_temp_module_number));
+  out.kv(TL("Max temp module number"), String(byd_datalayer->BMS_max_temp_module_number));
+  out.kv(TL("Seed"), String(byd_datalayer->seed));
+  out.kv("SolvedKey", String(byd_datalayer->solvedKey));
+
+  if (byd_datalayer->servicemode == 0) {
+    out.kv("ServiceMode", "No command ran yet");
+  } else if (byd_datalayer->servicemode == 1) {
+    out.kv("ServiceMode", "REJECTED");
+  } else if (byd_datalayer->servicemode == 2) {
+    out.kv("ServiceMode", "APPROVED!");
+  }
+
+  out.kv(TL("Capacity original"), String((byd_datalayer->BMS_capacity_original_calibration) / 100), "AH");
+  out.kv(TL("Capacity current"), String((byd_datalayer->BMS_capacity_current_calibration) / 100), "AH");
+  out.kv(TL("SOC original"), String(byd_datalayer->BMC_SOC_original_calibration), "%");
+  out.kv(TL("SOC current"), String(byd_datalayer->BMC_SOC_current_calibration), "%");
+
+  {
+    const uint32_t dwell_sec = byd_datalayer->autocal_dwell_accumulated_ms / kMillisPerSecond;
+    const float autocal_current_A = static_cast<float>(byd_datalayer->autocal_current_dA) / kDeciPerUnit;
+    const char* current_direction = "idle";
+    if (byd_datalayer->autocal_current_dA < 0) {
+      current_direction = "discharge";
+    } else if (byd_datalayer->autocal_current_dA > 0) {
+      current_direction = "charge";
+    }
+
+    const bool drift_reached =
+        byd_datalayer->autocal_drift_percent >= byd_datalayer->auto_calibrate_soc_drift_percent;
+
+    out.section(TL("Auto-calibration status"));
+    out.kv(TL("Contactors"), good_if(byd_datalayer->autocal_crit_contactors, "OK", "Open"));
+    out.kv(TL("Full / In taper?"), good_if(byd_datalayer->autocal_crit_taper, "Yes", "No"));
+    out.kv(TL("Battery current"), String(autocal_current_A, 1) + " A (" + String(current_direction) + ")");
+    out.kv(TL("Current in range"), autocal_current_range());
+    out.kv(TL("Dwell time"), String(dwell_sec / kSecondsPerMinute) + "m " +
+                                 String(dwell_sec % kSecondsPerMinute) + "s / " +
+                                 String(kAutoCalDwellRequiredMs / kMillisPerMinute) + "m");
+    out.kv(TL("SOC drift"),
+           AdvancedValue{String(byd_datalayer->autocal_drift_percent, 1) + "% / threshold " +
+                             String(byd_datalayer->auto_calibrate_soc_drift_percent) + "%",
+                         drift_reached ? AdvancedSeverity::Good : AdvancedSeverity::Normal});
+    out.kv(TL("Cooldown"), good_if(byd_datalayer->autocal_crit_cooldown_ready, "Ready", "Waiting",
+                                   AdvancedSeverity::Warning));
+  }
+
+
+  out.section(TL("Isolation resistance monitor"));
+
+  String monitoring;
+  if (!byd_datalayer->iso_status_valid) {
+    monitoring = "Unknown";
+  } else if (!byd_datalayer->contactor_main_closed) {
+    // Monitoring status from 0x35E b0 bit0x80; only unambiguous when the pack is closed
+    monitoring = "Inactive (pack open)";
+  } else {
+    monitoring = byd_datalayer->iso_measurement_active ? "On" : "Off";
+  }
+  out.kv(TL("Monitoring"), monitoring);
+
+  if (byd_datalayer->insulation_valid) {
+    float iso_kohm = static_cast<float>(byd_datalayer->insulation_ohm_per_volt) *
+                     (datalayer_battery->status.voltage_dV / 10.0f) / 1000.0f;
+    out.kv(TL("Insulation resistance"),
+                            String(iso_kohm, 1) + " kΩ (" + String(byd_datalayer->insulation_ohm_per_volt) + " Ω/V)");
+  } else {
+    out.kv(TL("Insulation resistance"), "Not received");
+  }
+
+  // Command feedback, only shown while something is pending or after a failure
+  if (byd_datalayer->iso_command_status == 1) {
+    out.kv(TL("Last command"), "Sending…");
+  } else if (byd_datalayer->iso_command_status == 3) {
+    out.kv(TL("Last command"), "Rejected");
+  } else if (byd_datalayer->iso_command_status == 4) {
+    out.kv(TL("Last command"), "No response");
+  }
+
+  auto& dtc = datalayer_battery->dtc;
+  write_dtc_section(out, *this, dtc, DtcCodeStyle::kStandard);
+}
+
+namespace {
+using ST = SettingType;
+using SA = SettingApplies;
+using SS = SettingStorage;
+using SR = SettingRam;
+
+constexpr int32_t kDriftMin = 1;
+constexpr int32_t kDriftMax = 20;
+
+void mirror_keep_iso_disabled(uint8_t) {
+  datalayer_extended.bydAtto3_2.keep_iso_disabled = datalayer_extended.bydAtto3.keep_iso_disabled;
+}
+
+const DeviceSetting kSettings[] = {
+    {{"BYDAUTOCALEN", ST::Bool, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Nvs, kSecBydCal,
+      {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_enabled; }}},
+     "Auto-calibrate SOC (battery 1)",
+     0},
+    {{"BYDAUTOCALDRIFT", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kDriftMin, kDriftMax, SS::Nvs, kSecBydCal,
+      {SR::U8, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_drift_percent; }}},
+     "Drift (%) (battery 1)",
+     0},
+    {{"BYDAUTOCALEN2", ST::Bool, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Nvs, kSecBydCal,
+      {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_enabled; }}},
+     "Auto-calibrate SOC (battery 2)",
+     1},
+    {{"BYDAUTOCALDRFT2", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kDriftMin, kDriftMax, SS::Nvs, kSecBydCal,
+      {SR::U8, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_drift_percent; }}},
+     "Drift (%) (battery 2)",
+     1},
+    {{"BYDKEEPISOOFF", ST::Bool, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Nvs, kSecBydCal,
+      {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.keep_iso_disabled; }, 1,
+       SettingScope::Global, mirror_keep_iso_disabled}},
+     "Keep isolation monitoring disabled"},
+    {{"cal_target_soc", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBydCal,
+      {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetSOC; }}},
+     "Calibration target SOC (battery 1)",
+     0},
+    {{"cal_target_ah", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBydCal,
+      {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetAH; }}},
+     "Calibration target Ah (battery 1)",
+     0},
+    {{"cal_target_soc2", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBydCal,
+      {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetSOC; }}},
+     "Calibration target SOC (battery 2)",
+     1},
+    {{"cal_target_ah2", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBydCal,
+      {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetAH; }}},
+     "Calibration target Ah (battery 2)",
+     1},
+};
+}  // namespace
+
+DeviceSettingList BydAttoBattery::settings() {
+  return device_settings(kSettings);
 }

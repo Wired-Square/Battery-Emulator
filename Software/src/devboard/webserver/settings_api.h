@@ -8,69 +8,24 @@
 #include "../../battery/balancing_bounds.h"
 #include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "../utils/types.h"
+#include "settings_field.h"
 
 class BatteryEmulatorSettingsStore;
 
-// Selects the JSON<->NVS transform. InterfacePacked carries a packed
-// interface-config uint that resolves against the live descriptor table.
-enum class SettingType : uint8_t {
-  Bool,
-  Uint,
-  Int,
-  StringVal,
-  EnumUint,
-  FloatX10,
-  SignedFloatX10,
-  Float,
-  FloatString,
-  SecondsToMs,
-  InterfacePacked
-};
-
-enum class SettingApplies : uint8_t { Boot, Live };
-
-enum class SettingStorage : uint8_t { Nvs, Volatile };
-
-enum class SettingScope : uint8_t { Global, BatterySlot };
-
-enum class SettingRam : uint8_t { None, Bool, U8, U16, I16, U32, F32 };
-
-constexpr int32_t kNoMin = INT32_MIN;
-constexpr int32_t kNoMax = INT32_MAX;
-
-struct SettingField;
-
-using SettingCheck = const char* (*)(const SettingField& field, uint8_t slot, JsonObjectConst fields);
-
-struct SettingLive {
-  SettingRam kind = SettingRam::None;
-  void* (*address)(uint8_t slot) = nullptr;
-  int32_t ram_per_json = 1;
-  SettingScope scope = SettingScope::Global;
-  void (*on_apply)(uint8_t slot) = nullptr;
-  SettingCheck check = nullptr;
-};
-
-struct SettingField {
-  const char* key;  // <= 15 chars (NVS key-length limit)
-  SettingType type;
-  const char* category;
-  SettingApplies applies;
-  int32_t default_int;      // Bool(0/1), Uint, Int, EnumUint, FloatX10 (deci-units), SecondsToMs (seconds)
-  const char* default_str;  // StringVal / FloatString; nullptr otherwise
-  // Pick-list key into the JSON "options" object; nullptr when the field is not
-  // a dropdown. InterfacePacked fields leave this null and use "interfaces".
-  const char* options_key = nullptr;
-  // Inclusive numeric bounds (kNoMin/kNoMax = unbounded); text-field patterns are client-only.
-  int32_t min_value = kNoMin;
-  int32_t max_value = kNoMax;
-  SettingStorage storage = SettingStorage::Nvs;
-  const char* section = nullptr;
-  SettingLive live = {};
-};
-
 extern const SettingField kSettingFields[];
 extern const size_t kSettingFieldCount;
+
+using DeviceSettingSource = DeviceSettingList (*)();
+
+struct SettingRef {
+  const SettingField* field;
+  const DeviceSetting* device;
+  DeviceSettingSource source;
+  SettingDomain domain;
+};
+
+size_t setting_count();
+SettingRef setting_at(size_t index);
 
 // Serialises the settings payload: {"values":{...}} scalars, {"options":{...}}
 // enum/map pick-lists, {"schema":[...]} the field list (key, category, widget

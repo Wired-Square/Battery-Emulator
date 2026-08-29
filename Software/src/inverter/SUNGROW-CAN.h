@@ -11,6 +11,8 @@ struct SungrowBatteryConfig {
 
 class SungrowInverter : public CanInverterProtocol {
  public:
+  static DeviceSettingList settings();
+
   // Constructor: request 250 kbps on the inverter CAN interface
   SungrowInverter() : CanInverterProtocol(CAN_Speed::CAN_SPEED_250KBPS) {}
   bool setup() override;

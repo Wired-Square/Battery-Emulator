@@ -1895,3 +1895,421 @@ void EcmpBattery::setup(void) {  // Performs one time setup at startup
     *allows_contactor_closing = true;
   }
 }
+
+void EcmpBattery::write_advanced_status(AdvancedStatusWriter& out) {
+  out.section("");
+
+  String main_connector_state;
+  if (datalayer_extended.stellantisECMP.MainConnectorState == 0) {
+    main_connector_state = "Contactors open";
+  } else if (datalayer_extended.stellantisECMP.MainConnectorState == 0x01) {
+    main_connector_state = "Precharged";
+  } else {
+    main_connector_state = "Invalid";
+  }
+  out.kv(TL("Main Connector State"), main_connector_state);
+
+  out.kv(TL("Insulation Resistance"), String(datalayer_extended.stellantisECMP.InsulationResistance), "kOhm");
+  out.kv(TL("Interlock"), datalayer_extended.stellantisECMP.InterlockOpen == true ? "BROKEN!" : "Seated OK");
+
+  String insulation_diag;
+  if (datalayer_extended.stellantisECMP.InsulationDiag == 0) {
+    insulation_diag = "No failure";
+  } else if (datalayer_extended.stellantisECMP.InsulationDiag == 1) {
+    insulation_diag = "Symmetric failure";
+  } else {  //4 Invalid, 5-7 illegal, wrap em under one text
+    insulation_diag = "N/A";
+  }
+  out.kv(TL("Insulation Diag"), insulation_diag);
+
+  String weld_check;
+  if (datalayer_extended.stellantisECMP.pid_welding_detection == 0) {
+    weld_check = "OK";
+  } else if (datalayer_extended.stellantisECMP.pid_welding_detection == 255) {
+    weld_check = "N/A";
+  } else {  //Problem
+    weld_check = "WELDED!" + String(datalayer_extended.stellantisECMP.pid_welding_detection);
+  }
+  out.kv(TL("Contactor weld check"), weld_check);
+
+  String opening_reason;
+  if (datalayer_extended.stellantisECMP.pid_reason_open == 7) {
+    opening_reason = "Invalid Status";
+  } else if (datalayer_extended.stellantisECMP.pid_reason_open == 255) {
+    opening_reason = "N/A";
+  } else {  //Problem (Also status 0 might be OK?)
+    opening_reason = "Unknown" + String(datalayer_extended.stellantisECMP.pid_reason_open);
+  }
+  out.kv(TL("Contactor opening reason"), opening_reason);
+
+  out.kv(TL("Status of power switch"),
+                        datalayer_extended.stellantisECMP.pid_contactor_status == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_contactor_status));
+  out.kv(TL("Negative power switch control"),
+                        datalayer_extended.stellantisECMP.pid_negative_contactor_control == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_negative_contactor_control));
+  out.kv(TL("Negative power switch status"),
+                        datalayer_extended.stellantisECMP.pid_negative_contactor_status == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_negative_contactor_status));
+  out.kv(TL("Positive power switch control"),
+                        datalayer_extended.stellantisECMP.pid_positive_contactor_control == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_positive_contactor_control));
+  out.kv(TL("Positive power switch status"),
+                        datalayer_extended.stellantisECMP.pid_positive_contactor_status == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_positive_contactor_status));
+  out.kv(TL("Contactor negative"),
+                        datalayer_extended.stellantisECMP.pid_contactor_negative == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_contactor_negative));
+  out.kv(TL("Contactor positive"),
+                        datalayer_extended.stellantisECMP.pid_contactor_positive == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_contactor_positive));
+  out.kv(TL("Precharge control"),
+                        datalayer_extended.stellantisECMP.pid_precharge_relay_control == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_precharge_relay_control));
+  out.kv(TL("Precharge status"),
+                        datalayer_extended.stellantisECMP.pid_precharge_relay_status == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_precharge_relay_status));
+  out.kv(TL("Recharge Status"),
+                        datalayer_extended.stellantisECMP.pid_recharge_status == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_recharge_status));
+  out.kv(TL("Delta temperature"),
+                        datalayer_extended.stellantisECMP.pid_delta_temperature == 127
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_delta_temperature),
+                        "°C");
+  out.kv(TL("Lowest temperature"),
+                        datalayer_extended.stellantisECMP.pid_lowest_temperature == 127
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_lowest_temperature),
+                        "°C");
+  out.kv(TL("Average temperature"),
+                        datalayer_extended.stellantisECMP.pid_average_temperature == 127
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_average_temperature),
+                        "°C");
+  out.kv(TL("Highest temperature"),
+                        datalayer_extended.stellantisECMP.pid_highest_temperature == 127
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_highest_temperature),
+                        "°C");
+  out.kv(TL("Coldest module"),
+                        datalayer_extended.stellantisECMP.pid_coldest_module == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_coldest_module));
+  out.kv(TL("Hottest module"),
+                        datalayer_extended.stellantisECMP.pid_hottest_module == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_hottest_module));
+  out.kv(TL("Average cell voltage"),
+                        datalayer_extended.stellantisECMP.pid_avg_cell_voltage == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_avg_cell_voltage),
+                        "mV");
+  out.kv(TL("High precision current"),
+                        datalayer_extended.stellantisECMP.pid_current == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_current),
+                        "mA");
+  out.kv(TL("Insulation resistance neg-gnd"),
+                        datalayer_extended.stellantisECMP.pid_insulation_res_neg == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_insulation_res_neg),
+                        "kOhm");
+  out.kv(TL("Insulation resistance pos-gnd"),
+                        datalayer_extended.stellantisECMP.pid_insulation_res_pos == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_insulation_res_pos),
+                        "kOhm");
+  out.kv(TL("Max current 10s"),
+                        datalayer_extended.stellantisECMP.pid_max_current_10s == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_max_current_10s));
+  out.kv(TL("Max discharge power 10s"),
+                        datalayer_extended.stellantisECMP.pid_max_discharge_10s == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_max_discharge_10s));
+  out.kv(TL("Max discharge power 30s"),
+                        datalayer_extended.stellantisECMP.pid_max_discharge_30s == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_max_discharge_30s));
+  out.kv(TL("Max charge power 10s"),
+                        datalayer_extended.stellantisECMP.pid_max_charge_10s == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_max_charge_10s));
+  out.kv(TL("Max charge power 30s"),
+                        datalayer_extended.stellantisECMP.pid_max_charge_30s == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_max_charge_30s));
+  out.kv(TL("Energy capacity"),
+                        datalayer_extended.stellantisECMP.pid_energy_capacity == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_energy_capacity));
+  out.kv(TL("Highest cell number"),
+                        datalayer_extended.stellantisECMP.pid_highest_cell_voltage_num == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_highest_cell_voltage_num));
+  out.kv(TL("Lowest cell voltage number"),
+                        datalayer_extended.stellantisECMP.pid_lowest_cell_voltage_num == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_lowest_cell_voltage_num));
+  out.kv(TL("Sum of all cell voltages"),
+                        datalayer_extended.stellantisECMP.pid_sum_of_cells == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_sum_of_cells),
+                        "dV");
+  out.kv(TL("Cell min capacity"),
+                        datalayer_extended.stellantisECMP.pid_cell_min_capacity == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_cell_min_capacity));
+  out.kv(TL("Cell voltage measurement status"),
+                        datalayer_extended.stellantisECMP.pid_cell_voltage_measurement_status == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_cell_voltage_measurement_status));
+  out.kv(TL("Battery Insulation Resistance"),
+                        datalayer_extended.stellantisECMP.pid_insulation_res == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_insulation_res),
+                        "kOhm");
+  out.kv(TL("Pack voltage"),
+                        datalayer_extended.stellantisECMP.pid_pack_voltage == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_pack_voltage),
+                        "dV");
+  out.kv(TL("Highest cell voltage"),
+                        datalayer_extended.stellantisECMP.pid_high_cell_voltage == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_high_cell_voltage),
+                        "mV");
+  out.kv(TL("Lowest cell voltage"),
+                        datalayer_extended.stellantisECMP.pid_low_cell_voltage == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_low_cell_voltage),
+                        "mV");
+  out.kv(TL("Battery Energy"),
+                        datalayer_extended.stellantisECMP.pid_battery_energy == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_battery_energy));
+  out.kv(TL("Collision information Counter"),
+                        datalayer_extended.stellantisECMP.pid_crash_counter == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_crash_counter));
+  out.kv(TL("Collision Counter recieved by Wire"),
+                        datalayer_extended.stellantisECMP.pid_wire_crash == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_wire_crash));
+  out.kv(TL("Collision data sent from car to battery"),
+                        datalayer_extended.stellantisECMP.pid_CAN_crash == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_CAN_crash));
+  out.kv(TL("History data"),
+                        datalayer_extended.stellantisECMP.pid_history_data == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_history_data));
+  out.kv(TL("Low SOC counter"),
+                        datalayer_extended.stellantisECMP.pid_lowsoc_counter == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_lowsoc_counter));
+  out.kv(TL("Last CAN failure detail"),
+                        datalayer_extended.stellantisECMP.pid_last_can_failure_detail == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_last_can_failure_detail));
+  out.kv(TL("HW version number"),
+                        datalayer_extended.stellantisECMP.pid_hw_version_num == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_hw_version_num));
+  out.kv(TL("SW version number"),
+                        datalayer_extended.stellantisECMP.pid_sw_version_num == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_sw_version_num));
+  out.kv(TL("Factory mode"),
+                        datalayer_extended.stellantisECMP.pid_factory_mode_control == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_factory_mode_control));
+
+  char readableSerialNumber[14];  // One extra space for null terminator
+  memcpy(readableSerialNumber, datalayer_extended.stellantisECMP.pid_battery_serial,
+         sizeof(datalayer_extended.stellantisECMP.pid_battery_serial));
+  readableSerialNumber[13] = '\0';  // Null terminate the string
+  out.kv(TL("Battery serial"), String(readableSerialNumber));
+
+  uint8_t day = (datalayer_extended.stellantisECMP.pid_date_of_manufacture >> 16) & 0xFF;
+  uint8_t month = (datalayer_extended.stellantisECMP.pid_date_of_manufacture >> 8) & 0xFF;
+  uint8_t year = datalayer_extended.stellantisECMP.pid_date_of_manufacture & 0xFF;
+  out.kv(TL("Date of manufacture"), String(day) + "/" + String(month) + "/" + String(year));
+
+  out.kv(TL("Aux fuse state"),
+                        datalayer_extended.stellantisECMP.pid_aux_fuse_state == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_aux_fuse_state));
+  out.kv(TL("Battery state"),
+                        datalayer_extended.stellantisECMP.pid_battery_state == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_battery_state));
+  out.kv(TL("Precharge short circuit"),
+                        datalayer_extended.stellantisECMP.pid_precharge_short_circuit == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_precharge_short_circuit));
+  out.kv(TL("Service plug state"),
+                        datalayer_extended.stellantisECMP.pid_eservice_plug_state == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_eservice_plug_state));
+  out.kv(TL("Main fuse state"),
+                        datalayer_extended.stellantisECMP.pid_mainfuse_state == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_mainfuse_state));
+  out.kv(TL("Most critical fault"),
+                        datalayer_extended.stellantisECMP.pid_most_critical_fault == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_most_critical_fault));
+  out.kv(TL("Current time"),
+                        datalayer_extended.stellantisECMP.pid_current_time == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_current_time),
+                        "ticks");
+  out.kv(TL("Time sent by car"),
+                        datalayer_extended.stellantisECMP.pid_time_sent_by_car == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_time_sent_by_car),
+                        "ticks");
+  out.kv("12V",
+                        datalayer_extended.stellantisECMP.pid_12v == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_12v));
+
+  String v12_abnormal;
+  if (datalayer_extended.stellantisECMP.pid_12v_abnormal == 255) {
+    v12_abnormal = "N/A";
+  } else if (datalayer_extended.stellantisECMP.pid_12v_abnormal == 0) {
+    v12_abnormal = "No";
+  } else {
+    v12_abnormal = "Yes";
+  }
+  out.kv(TL("12V abnormal"), v12_abnormal);
+
+  out.kv(TL("HVIL IN Voltage"),
+                        datalayer_extended.stellantisECMP.pid_hvil_in_voltage == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_hvil_in_voltage),
+                        "mV");
+  out.kv(TL("HVIL Out Voltage"),
+                        datalayer_extended.stellantisECMP.pid_hvil_out_voltage == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_hvil_out_voltage),
+                        "mV");
+  out.kv(TL("HVIL State"),
+                        datalayer_extended.stellantisECMP.pid_hvil_state == 255
+                            ? "N/A"
+                            : (datalayer_extended.stellantisECMP.pid_hvil_state == 0
+                                   ? "OK"
+                                   : String(datalayer_extended.stellantisECMP.pid_hvil_state)));
+  out.kv(TL("BMS State"),
+                        datalayer_extended.stellantisECMP.pid_bms_state == 255
+                            ? "N/A"
+                            : (datalayer_extended.stellantisECMP.pid_bms_state == 0
+                                   ? "OK"
+                                   : String(datalayer_extended.stellantisECMP.pid_bms_state)));
+  out.kv(TL("Vehicle speed"),
+                        datalayer_extended.stellantisECMP.pid_vehicle_speed == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_vehicle_speed),
+                        "km/h");
+  out.kv(TL("Time spent over 55c"),
+                        datalayer_extended.stellantisECMP.pid_time_spent_over_55c == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_time_spent_over_55c),
+                        "minutes");
+  out.kv(TL("Contactor lifetime closing counter"),
+                        datalayer_extended.stellantisECMP.pid_contactor_closing_counter == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_contactor_closing_counter),
+                        "cycles");
+  out.kv(TL("State of Health Cell-1"),
+                        datalayer_extended.stellantisECMP.pid_SOH_cell_1 == 255
+                            ? "N/A"
+                            : String(datalayer_extended.stellantisECMP.pid_SOH_cell_1));
+
+  auto push_alert_fields = [&out]() {
+    out.kv(TL("Alert Battery"), datalayer_extended.stellantisECMP.ALERT_BATT ? "Yes" : "No");
+    out.kv(TL("Alert Low SOC"), datalayer_extended.stellantisECMP.ALERT_LOW_SOC ? "Yes" : "No");
+    out.kv(TL("Alert High SOC"), datalayer_extended.stellantisECMP.ALERT_HIGH_SOC ? "Yes" : "No");
+    out.kv(TL("Alert SOC Jump"), datalayer_extended.stellantisECMP.ALERT_SOC_JUMP ? "Yes" : "No");
+    out.kv(TL("Alert Overcharge"), datalayer_extended.stellantisECMP.ALERT_OVERCHARGE ? "Yes" : "No");
+    out.kv(TL("Alert Temp Diff"), datalayer_extended.stellantisECMP.ALERT_TEMP_DIFF ? "Yes" : "No");
+    out.kv(TL("Alert Temp High"), datalayer_extended.stellantisECMP.ALERT_HIGH_TEMP ? "Yes" : "No");
+    out.kv(TL("Alert Overvoltage"), datalayer_extended.stellantisECMP.ALERT_OVERVOLTAGE ? "Yes" : "No");
+    out.kv(TL("Alert Cell Overvoltage"), datalayer_extended.stellantisECMP.ALERT_CELL_OVERVOLTAGE ? "Yes" : "No");
+    out.kv(TL("Alert Cell Undervoltage"), datalayer_extended.stellantisECMP.ALERT_CELL_UNDERVOLTAGE ? "Yes" : "No");
+    out.kv(TL("Alert Cell Poor Consistency"), datalayer_extended.stellantisECMP.ALERT_CELL_POOR_CONSIST ? "Yes" : "No");
+  };
+
+  if (datalayer_extended.stellantisECMP.MysteryVan) {
+    out.section(TL("MysteryVan platform detected!"));
+
+    String contactor_state;
+    if (datalayer_extended.stellantisECMP.CONTACTORS_STATE == 0) {
+      contactor_state = "Open";
+    } else if (datalayer_extended.stellantisECMP.CONTACTORS_STATE == 1) {
+      contactor_state = "Precharge";
+    } else if (datalayer_extended.stellantisECMP.CONTACTORS_STATE == 2) {
+      contactor_state = "Closed";
+    }
+    out.kv(TL("Contactor State"), contactor_state);
+
+    out.kv(TL("Crash Memorized"), datalayer_extended.stellantisECMP.CrashMemorized ? "Yes" : "No");
+
+    String opening_reason_mv;
+    if (datalayer_extended.stellantisECMP.CONTACTOR_OPENING_REASON == 0) {
+      opening_reason_mv = "No error";
+    } else if (datalayer_extended.stellantisECMP.CONTACTOR_OPENING_REASON == 1) {
+      opening_reason_mv = "Crash!";
+    } else if (datalayer_extended.stellantisECMP.CONTACTOR_OPENING_REASON == 2) {
+      opening_reason_mv = "12V supply source undervoltage";
+    } else if (datalayer_extended.stellantisECMP.CONTACTOR_OPENING_REASON == 3) {
+      opening_reason_mv = "12V supply source overvoltage";
+    } else if (datalayer_extended.stellantisECMP.CONTACTOR_OPENING_REASON == 4) {
+      opening_reason_mv = "Battery temperature";
+    } else if (datalayer_extended.stellantisECMP.CONTACTOR_OPENING_REASON == 5) {
+      opening_reason_mv = "Interlock line open";
+    } else if (datalayer_extended.stellantisECMP.CONTACTOR_OPENING_REASON == 6) {
+      opening_reason_mv = "e-Service plug disconnected";
+    }
+    out.kv(TL("Contactor Opening Reason"), opening_reason_mv);
+
+    String fault_type;
+    if (datalayer_extended.stellantisECMP.TBMU_FAULT_TYPE == 0) {
+      fault_type = "No fault";
+    } else if (datalayer_extended.stellantisECMP.TBMU_FAULT_TYPE == 1) {
+      fault_type = "FirstLevelFault: Warning Lamp";
+    } else if (datalayer_extended.stellantisECMP.TBMU_FAULT_TYPE == 2) {
+      fault_type = "SecondLevelFault: Stop Lamp";
+    } else if (datalayer_extended.stellantisECMP.TBMU_FAULT_TYPE == 3) {
+      fault_type = "ThirdLevelFault: Stop Lamp + contactor opening (EPS shutdown)";
+    } else if (datalayer_extended.stellantisECMP.TBMU_FAULT_TYPE == 4) {
+      fault_type = "FourthLevelFault: Stop Lamp + Active Discharge";
+    } else if (datalayer_extended.stellantisECMP.TBMU_FAULT_TYPE == 5) {
+      fault_type = "Inhibition of powertrain activation";
+    } else if (datalayer_extended.stellantisECMP.TBMU_FAULT_TYPE == 6) {
+      fault_type = "Reserved";
+    }
+    out.kv(TL("Battery fault type"), fault_type);
+
+    out.kv(TL("FC insulation minus resistance"), String(datalayer_extended.stellantisECMP.HV_BATT_FC_INSU_MINUS_RES), "kOhm");
+    out.kv(TL("FC insulation plus resistance"), String(datalayer_extended.stellantisECMP.HV_BATT_FC_INSU_PLUS_RES), "kOhm");
+    out.kv(TL("FC vehicle insulation plus resistance"),
+                                String(datalayer_extended.stellantisECMP.HV_BATT_FC_VHL_INSU_PLUS_RES), "kOhm");
+    out.kv(TL("FC vehicle insulation plus resistance"),
+                                String(datalayer_extended.stellantisECMP.HV_BATT_ONLY_INSU_MINUS_RES), "kOhm");
+
+  }
+  push_alert_fields();
+}

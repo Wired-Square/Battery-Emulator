@@ -20,46 +20,7 @@ class GeelyGeometryCBattery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  void write_advanced_status(AdvancedStatusWriter& out) override {
-    out.section("");
-
-    char readableSerialNumber[29];  // One extra space for null terminator
-    memcpy(readableSerialNumber, datalayer_extended.geometryC.BatterySerialNumber,
-           sizeof(datalayer_extended.geometryC.BatterySerialNumber));
-    readableSerialNumber[28] = '\0';   // Null terminate the string
-    char readableSoftwareVersion[17];  // One extra space for null terminator
-    memcpy(readableSoftwareVersion, datalayer_extended.geometryC.BatterySoftwareVersion,
-           sizeof(datalayer_extended.geometryC.BatterySoftwareVersion));
-    readableSoftwareVersion[16] = '\0';  // Null terminate the string
-    char readableHardwareVersion[17];    // One extra space for null terminator
-    memcpy(readableHardwareVersion, datalayer_extended.geometryC.BatteryHardwareVersion,
-           sizeof(datalayer_extended.geometryC.BatteryHardwareVersion));
-    readableHardwareVersion[16] = '\0';  // Null terminate the string
-
-    out.kv(TL("Serial number"), String(readableSoftwareVersion));
-    out.kv(TL("Software version"), String(readableSerialNumber));
-    out.kv(TL("Hardware version"), String(readableHardwareVersion));
-    out.kv(TL("SOC display"), String(datalayer_extended.geometryC.soc), "ppt");
-    out.kv("CC2 voltage", String(datalayer_extended.geometryC.CC2voltage), "mV");
-    out.kv(TL("Cell max voltage number"), String(datalayer_extended.geometryC.cellMaxVoltageNumber));
-    out.kv(TL("Cell min voltage number"), String(datalayer_extended.geometryC.cellMinVoltageNumber));
-    out.kv(TL("Cell total amount"), String(datalayer_extended.geometryC.cellTotalAmount), "S");
-    out.kv(TL("Specificial Voltage"), String(datalayer_extended.geometryC.specificialVoltage), "dV");
-    out.kv(TL("Unknown1"), String(datalayer_extended.geometryC.unknown1));
-    out.kv(TL("Raw SOC max"), String(datalayer_extended.geometryC.rawSOCmax));
-    out.kv(TL("Raw SOC min"), String(datalayer_extended.geometryC.rawSOCmin));
-    out.kv(TL("Unknown4"), String(datalayer_extended.geometryC.unknown4));
-    out.kv(TL("Capacity module max"), String((datalayer_extended.geometryC.capModMax / 10)), "Ah");
-    out.kv(TL("Capacity module min"), String((datalayer_extended.geometryC.capModMin / 10)), "Ah");
-    out.kv(TL("Unknown7"), String(datalayer_extended.geometryC.unknown7));
-    out.kv(TL("Unknown8"), String(datalayer_extended.geometryC.unknown8));
-    out.kv(TL("Module 1 temperature"), String(datalayer_extended.geometryC.ModuleTemperatures[0]), "°C");
-    out.kv(TL("Module 2 temperature"), String(datalayer_extended.geometryC.ModuleTemperatures[1]), "°C");
-    out.kv(TL("Module 3 temperature"), String(datalayer_extended.geometryC.ModuleTemperatures[2]), "°C");
-    out.kv(TL("Module 4 temperature"), String(datalayer_extended.geometryC.ModuleTemperatures[3]), "°C");
-    out.kv(TL("Module 5 temperature"), String(datalayer_extended.geometryC.ModuleTemperatures[4]), "°C");
-    out.kv(TL("Module 6 temperature"), String(datalayer_extended.geometryC.ModuleTemperatures[5]), "°C");
-  }
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
  private:
   void reset_DTC() { UserRequestDTCreset = true; }

@@ -298,3 +298,14 @@ bool SofarInverter::setup() {  // Performs one time setup at startup over CAN bu
 
   return true;
 }
+
+namespace {
+const DeviceSetting kSettings[] = {
+    {{"SOFAR_ID", SettingType::Uint, kBattery, SettingApplies::Boot, 0, nullptr, nullptr, 0, 99},
+     "Sofar Battery ID (0-15)"},
+};
+}  // namespace
+
+DeviceSettingList SofarInverter::settings() {
+  return device_settings(kSettings);
+}

@@ -237,3 +237,76 @@ void CellPowerBms::setup(void) {  // Performs one time setup at startup
   datalayer_battery->info.max_cell_voltage_mV = user_selected_max_cell_voltage_mV;
   datalayer_battery->info.min_cell_voltage_mV = user_selected_min_cell_voltage_mV;
 }
+
+void CellPowerBms::write_advanced_status(AdvancedStatusWriter& out) {
+  static const char* falseTrue[2] = {"False", "True"};
+
+  out.section(TL("States"));
+  out.kv(TL("Discharge"), falseTrue[datalayer_extended.cellpower.system_state_discharge]);
+  out.kv(TL("Charge"), falseTrue[datalayer_extended.cellpower.system_state_charge]);
+  out.kv(TL("Cellbalancing"), falseTrue[datalayer_extended.cellpower.system_state_cellbalancing]);
+  out.kv(TL("Tricklecharging"), falseTrue[datalayer_extended.cellpower.system_state_tricklecharge]);
+  out.kv(TL("Idle"), falseTrue[datalayer_extended.cellpower.system_state_idle]);
+  out.kv(TL("Charge completed"), falseTrue[datalayer_extended.cellpower.system_state_chargecompleted]);
+  out.kv(TL("Maintenance charge"), falseTrue[datalayer_extended.cellpower.system_state_maintenancecharge]);
+
+  out.section("IO");
+  out.kv(TL("Main positive relay"), falseTrue[datalayer_extended.cellpower.IO_state_main_positive_relay]);
+  out.kv(TL("Main negative relay"), falseTrue[datalayer_extended.cellpower.IO_state_main_negative_relay]);
+  out.kv(TL("Charge enabled"), falseTrue[datalayer_extended.cellpower.IO_state_charge_enable]);
+  out.kv(TL("Precharge relay"), falseTrue[datalayer_extended.cellpower.IO_state_precharge_relay]);
+  out.kv(TL("Discharge enable"), falseTrue[datalayer_extended.cellpower.IO_state_discharge_enable]);
+  out.kv(TL("IO 6"), falseTrue[datalayer_extended.cellpower.IO_state_IO_6]);
+  out.kv(TL("IO 7"), falseTrue[datalayer_extended.cellpower.IO_state_IO_7]);
+  out.kv(TL("IO 8"), falseTrue[datalayer_extended.cellpower.IO_state_IO_8]);
+
+  out.section(TL("Errors"));
+  out.kv(TL("Cell overvoltage"), falseTrue[datalayer_extended.cellpower.error_Cell_overvoltage]);
+  out.kv(TL("Cell undervoltage"), falseTrue[datalayer_extended.cellpower.error_Cell_undervoltage]);
+  out.kv(TL("Cell end of life voltage"), falseTrue[datalayer_extended.cellpower.error_Cell_end_of_life_voltage]);
+  out.kv(TL("Cell voltage misread"), falseTrue[datalayer_extended.cellpower.error_Cell_voltage_misread]);
+  out.kv(TL("Cell over temperature"), falseTrue[datalayer_extended.cellpower.error_Cell_over_temperature]);
+  out.kv(TL("Cell under temperature"), falseTrue[datalayer_extended.cellpower.error_Cell_under_temperature]);
+  out.kv(TL("Cell unmanaged"), falseTrue[datalayer_extended.cellpower.error_Cell_unmanaged]);
+  out.kv(TL("LMU over temperature"), falseTrue[datalayer_extended.cellpower.error_LMU_over_temperature]);
+  out.kv(TL("LMU under temperature"), falseTrue[datalayer_extended.cellpower.error_LMU_under_temperature]);
+  out.kv(TL("Temp sensor open circuit"), falseTrue[datalayer_extended.cellpower.error_Temp_sensor_open_circuit]);
+  out.kv(TL("Temp sensor short circuit"), falseTrue[datalayer_extended.cellpower.error_Temp_sensor_short_circuit]);
+  out.kv(TL("SUB comm"), falseTrue[datalayer_extended.cellpower.error_SUB_communication]);
+  out.kv(TL("LMU comm"), falseTrue[datalayer_extended.cellpower.error_LMU_communication]);
+  out.kv(TL("Over current In"), falseTrue[datalayer_extended.cellpower.error_Over_current_IN]);
+  out.kv(TL("Over current Out"), falseTrue[datalayer_extended.cellpower.error_Over_current_OUT]);
+  out.kv(TL("Short circuit"), falseTrue[datalayer_extended.cellpower.error_Short_circuit]);
+  out.kv(TL("Leak detected"), falseTrue[datalayer_extended.cellpower.error_Leak_detected]);
+  out.kv(TL("Leak detection failed"), falseTrue[datalayer_extended.cellpower.error_Leak_detection_failed]);
+  out.kv(TL("Voltage diff"), falseTrue[datalayer_extended.cellpower.error_Voltage_difference]);
+  out.kv(TL("BMCU supply overvoltage"), falseTrue[datalayer_extended.cellpower.error_BMCU_supply_over_voltage]);
+  out.kv(TL("BMCU supply undervoltage"), falseTrue[datalayer_extended.cellpower.error_BMCU_supply_under_voltage]);
+  out.kv(TL("Main positive contactor"), falseTrue[datalayer_extended.cellpower.error_Main_positive_contactor]);
+  out.kv(TL("Main negative contactor"), falseTrue[datalayer_extended.cellpower.error_Main_negative_contactor]);
+  out.kv(TL("Precharge contactor"), falseTrue[datalayer_extended.cellpower.error_Precharge_contactor]);
+  out.kv(TL("Midpack contactor"), falseTrue[datalayer_extended.cellpower.error_Midpack_contactor]);
+  out.kv(TL("Precharge timeout"), falseTrue[datalayer_extended.cellpower.error_Precharge_timeout]);
+  out.kv(TL("EMG connector override"), falseTrue[datalayer_extended.cellpower.error_Emergency_connector_override]);
+
+  out.section(TL("Warnings"));
+  out.kv(TL("High cell voltage"), falseTrue[datalayer_extended.cellpower.warning_High_cell_voltage]);
+  out.kv(TL("Low cell voltage"), falseTrue[datalayer_extended.cellpower.warning_Low_cell_voltage]);
+  out.kv(TL("High cell temperature"), falseTrue[datalayer_extended.cellpower.warning_High_cell_temperature]);
+  out.kv(TL("Low cell temperature"), falseTrue[datalayer_extended.cellpower.warning_Low_cell_temperature]);
+  out.kv(TL("High LMU temperature"), falseTrue[datalayer_extended.cellpower.warning_High_LMU_temperature]);
+  out.kv(TL("Low LMU temperature"), falseTrue[datalayer_extended.cellpower.warning_Low_LMU_temperature]);
+  out.kv(TL("SUB comm interf"), falseTrue[datalayer_extended.cellpower.warning_SUB_communication_interfered]);
+  out.kv(TL("LMU comm interf"), falseTrue[datalayer_extended.cellpower.warning_LMU_communication_interfered]);
+  out.kv(TL("High current In"), falseTrue[datalayer_extended.cellpower.warning_High_current_IN]);
+  out.kv(TL("High current Out"), falseTrue[datalayer_extended.cellpower.warning_High_current_OUT]);
+  out.kv(TL("Pack resistance diff"), falseTrue[datalayer_extended.cellpower.warning_Pack_resistance_difference]);
+  out.kv(TL("High pack resistance"), falseTrue[datalayer_extended.cellpower.warning_High_pack_resistance]);
+  out.kv(TL("Cell resistance diff"), falseTrue[datalayer_extended.cellpower.warning_Cell_resistance_difference]);
+  out.kv(TL("High cell resistance"), falseTrue[datalayer_extended.cellpower.warning_High_cell_resistance]);
+  out.kv(TL("High BMCU supply voltage"), falseTrue[datalayer_extended.cellpower.warning_High_BMCU_supply_voltage]);
+  out.kv(TL("Low BMCU supply voltage"), falseTrue[datalayer_extended.cellpower.warning_Low_BMCU_supply_voltage]);
+  out.kv(TL("Low SOC"), falseTrue[datalayer_extended.cellpower.warning_Low_SOC]);
+  out.kv(TL("Balancing required"), falseTrue[datalayer_extended.cellpower.warning_Balancing_required_OCV_model]);
+  out.kv(TL("Charger not responding"), falseTrue[datalayer_extended.cellpower.warning_Charger_not_responding]);
+}

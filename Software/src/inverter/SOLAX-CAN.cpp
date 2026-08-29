@@ -292,3 +292,14 @@ bool SolaxInverter::setup(void) {  // Performs one time setup at startup
 
   return true;
 }
+
+namespace {
+const DeviceSetting kSettings[] = {
+    {{"INVBTYPE", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr},
+     "Reported battery type (in decimal)"},
+};
+}  // namespace
+
+DeviceSettingList SolaxInverter::settings() {
+  return device_settings(kSettings);
+}

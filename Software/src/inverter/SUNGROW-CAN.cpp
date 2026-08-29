@@ -788,3 +788,13 @@ void SungrowInverter::transmit_can(unsigned long currentMillis) {
     }
   }
 }
+
+namespace {
+const DeviceSetting kSettings[] = {
+    {{"INVSUNTYPE", SettingType::EnumUint, kInverter, SettingApplies::Boot, 0, nullptr, "sungrow"}, "Battery model"},
+};
+}  // namespace
+
+DeviceSettingList SungrowInverter::settings() {
+  return device_settings(kSettings);
+}

@@ -18,6 +18,7 @@ SETTINGS_JS = "Software/src/devboard/webserver/web/settings.js"
 DASHBOARD_JS = "Software/src/devboard/webserver/web/dashboard.js"
 SETTINGS_API = "Software/src/devboard/webserver/settings_api.cpp"
 DRIVER_DIR = "Software/src/battery"
+DEVICE_SETTING_DIRS = ("Software/src/battery", "Software/src/inverter")
 ADVANCED_API = "Software/src/devboard/webserver/advanced_api.cpp"
 WEB_DIR = "Software/src/devboard/webserver/web"
 OUT_FILE = "translations/en.json"
@@ -50,6 +51,8 @@ SHELL_ATTR_MARKER = re.compile(r'(\w[\w-]*)="([^"]*)"[^>]*data-i18n-attr="\1:([^
 # TL() marks a driver label or section title as English prose rather than a
 # signal name. The slug must match slugify() in advanced.js.
 TL_CALL = re.compile(r'\bTL\(\s*((?:"(?:[^"\\\\]|\\\\.)*"\s*)+)\)')
+DEVICE_SETTING_LABEL = re.compile(
+    r'\{\{"([A-Za-z0-9_]+)",\s*(?:ST|SettingType)::.*?\}\s*,\s*("(?:[^"\\\\]|\\\\.)*")', re.S)
 SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 SLUG_RUNS = re.compile(r"_+")
 
@@ -140,6 +143,11 @@ def advanced_labels(source: str) -> dict:
     return out
 
 
+def device_setting_labels(source: str) -> dict:
+    return {SETTING_KEY_PREFIX + key: unquote_c(literal)
+            for key, literal in DEVICE_SETTING_LABEL.findall(source)}
+
+
 def shell_markers(source: str) -> dict:
     out = {key: text for key, text in SHELL_MARKER.findall(source)}
     for _, value, key in SHELL_ATTR_MARKER.findall(source):
@@ -154,6 +162,11 @@ def collect(repo_root: Path) -> dict:
     strings.update(setting_labels(root.joinpath(SETTINGS_JS).read_text(encoding=SOURCE_ENCODING)))
     strings.update(row_labels(root.joinpath(DASHBOARD_JS).read_text(encoding=SOURCE_ENCODING)))
     strings.update(apply_errors(root.joinpath(SETTINGS_API).read_text(encoding=SOURCE_ENCODING)))
+    settings_sources = [root / SETTINGS_API]
+    for directory in DEVICE_SETTING_DIRS:
+        settings_sources.extend(sorted((root / directory).glob("*.cpp")))
+    for path in settings_sources:
+        strings.update(device_setting_labels(path.read_text(encoding=SOURCE_ENCODING)))
     marked = [p for p in sorted((root / DRIVER_DIR).rglob("*")) if p.suffix in (".h", ".cpp")]
     marked.append(root / ADVANCED_API)
     for path in marked:

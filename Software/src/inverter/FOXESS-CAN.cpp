@@ -610,3 +610,18 @@ bool FoxessCanInverter::setup(void) {  // Performs one time setup at startup
 
   return true;
 }
+
+namespace {
+const DeviceSetting kSettings[] = {
+    {{"FOXESSTYPE", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr},
+     "FoxESS battery type (0 for default)"},
+    {{"FOXESSSUBTYPE", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr},
+     "FoxESS battery subtype (0 for default)"},
+    {{"FOXESSMODULES", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr},
+     "FoxESS module count (0 for default)"},
+};
+}  // namespace
+
+DeviceSettingList FoxessCanInverter::settings() {
+  return device_settings(kSettings);
+}

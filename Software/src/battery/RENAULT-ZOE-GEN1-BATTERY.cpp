@@ -631,3 +631,17 @@ void RenaultZoeGen1Battery::setup(void) {  // Performs one time setup at startup
   datalayer_battery->info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
   datalayer_battery->info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
 }
+
+void RenaultZoeGen1Battery::write_advanced_status(AdvancedStatusWriter& out) {
+  out.section("");
+  out.kv("CUV", String(datalayer_extended.zoe.CUV));
+  out.kv("HVBIR", String(datalayer_extended.zoe.HVBIR));
+  out.kv("HVBUV", String(datalayer_extended.zoe.HVBUV));
+  out.kv("EOCR", String(datalayer_extended.zoe.EOCR));
+  out.kv("HVBOC", String(datalayer_extended.zoe.HVBOC));
+  out.kv("HVBOT", String(datalayer_extended.zoe.HVBOT));
+  out.kv("HVBOV", String(datalayer_extended.zoe.HVBOV));
+  out.kv("COV", String(datalayer_extended.zoe.COV));
+  out.kv(TL("Battery mileage"), String(datalayer_extended.zoe.mileage_km), "km");
+  out.kv(TL("Alltime energy"), String(datalayer_extended.zoe.alltime_kWh), "kWh");
+}

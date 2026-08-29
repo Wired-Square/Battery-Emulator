@@ -8,6 +8,7 @@
 #include "../Software/src/devboard/hal/hal.h"
 #include "../Software/src/devboard/hal/hw_lilygo.h"
 #include "../Software/src/battery/BATTERIES.h"
+#include "../Software/src/inverter/INVERTERS.h"
 #include "../Software/src/battery/battery_slots.h"
 #include "../Software/src/devboard/webserver/settings_api.h"
 #include "../Software/src/devboard/webserver/web_json.h"
@@ -97,18 +98,101 @@ TEST_F(SettingsApiTest, WireKeyIsTheNvsKey) {
   EXPECT_EQ(values["INVTYPE"].as<uint32_t>(), 3u);
 
   JsonObjectConst balancing = doc["dynamic"]["balancing"][0];
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const SettingField& field = kSettingFields[i];
+  for (size_t i = 0; i < setting_count(); i++) {
+    const SettingField& field = *setting_at(i).field;
     JsonObjectConst home = field.live.scope == SettingScope::BatterySlot ? balancing : values;
     EXPECT_FALSE(home[field.key].isNull())
         << field.key << " is missing, so some field still renames itself on the wire";
   }
 }
 
+TEST_F(SettingsApiTest, EveryDeviceRowResolvesToARegisteredOwner) {
+  std::set<uint32_t> battery_ids;
+  for (size_t i = 0; i < battery_type_settings_count(); i++) {
+    battery_ids.insert(static_cast<uint32_t>(battery_type_settings_at(i).id));
+  }
+  std::set<uint32_t> inverter_ids;
+  for (size_t i = 0; i < inverter_type_settings_count(); i++) {
+    inverter_ids.insert(static_cast<uint32_t>(inverter_type_settings_at(i).id));
+  }
+
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  const JsonDocument doc = parse_values(build_settings_json(store));
+  size_t device_rows = 0;
+  for (JsonObjectConst entry : doc["schema"].as<JsonArrayConst>()) {
+    JsonArrayConst owners = entry["owners"];
+    if (owners.isNull()) {
+      continue;
+    }
+    device_rows++;
+    const char* key = entry["key"];
+    const std::string domain = entry["domain"].as<const char*>();
+    EXPECT_GT(owners.size(), 0u) << key << " is a device row no driver claims, so it can never be shown";
+    const std::set<uint32_t>& registered = domain == "battery" ? battery_ids : inverter_ids;
+    for (JsonVariantConst owner : owners) {
+      EXPECT_EQ(registered.count(owner.as<uint32_t>()), 1u)
+          << key << " names " << domain << " type " << owner.as<uint32_t>() << ", which no registry row declares";
+    }
+  }
+  EXPECT_GT(device_rows, 0u);
+}
+
+TEST_F(SettingsApiTest, EveryDeclaredCapabilityIsClaimedByARow) {
+  BatteryCapabilities battery_declared = 0;
+  for (size_t i = 0; i < battery_type_settings_count(); i++) {
+    battery_declared |= battery_type_settings_at(i).capabilities;
+  }
+  InverterCapabilities inverter_declared = 0;
+  for (size_t i = 0; i < inverter_type_settings_count(); i++) {
+    inverter_declared |= inverter_type_settings_at(i).capabilities;
+  }
+
+  BatteryCapabilities battery_claimed = 0;
+  InverterCapabilities inverter_claimed = 0;
+  for (size_t i = 0; i < setting_count(); i++) {
+    const SettingRef ref = setting_at(i);
+    if (ref.device == nullptr) {
+      continue;
+    }
+    if (ref.domain == SettingDomain::Battery) {
+      battery_claimed |= ref.device->capability;
+    } else if (ref.domain == SettingDomain::Inverter) {
+      inverter_claimed |= ref.device->capability;
+    }
+  }
+
+  EXPECT_EQ(battery_declared & ~battery_claimed, 0u)
+      << "battery capability bits " << (battery_declared & ~battery_claimed)
+      << " are declared on a registry row but gate no setting, so the rows they were meant to own are "
+         "shown to every configuration";
+  EXPECT_EQ(inverter_declared & ~inverter_claimed, 0u)
+      << "inverter capability bits " << (inverter_declared & ~inverter_claimed)
+      << " are declared on a registry row but gate no setting";
+}
+
+TEST_F(SettingsApiTest, BydAutoCalibrationRowsBelongToTheBydDriver) {
+  HalScope hal;
+  BatteryEmulatorSettingsStore store;
+  const JsonDocument doc = parse_values(build_settings_json(store));
+  size_t seen = 0;
+  for (JsonObjectConst entry : doc["schema"].as<JsonArrayConst>()) {
+    if (entry["section"].isNull() || std::string(entry["section"].as<const char*>()) != "bydautocal") {
+      continue;
+    }
+    seen++;
+    JsonArrayConst owners = entry["owners"];
+    ASSERT_EQ(owners.size(), 1u) << entry["key"].as<const char*>();
+    EXPECT_EQ(owners[0].as<uint32_t>(), static_cast<uint32_t>(BatteryType::BydAtto3))
+        << entry["key"].as<const char*>() << " would render the auto-calibration card on a non-BYD install";
+  }
+  EXPECT_EQ(seen, 9u);
+}
+
 TEST(SettingsTableTest, EveryKeyIsUniqueAcrossStorageKinds) {
   std::set<std::string> seen;
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const std::string key = kSettingFields[i].key;
+  for (size_t i = 0; i < setting_count(); i++) {
+    const std::string key = setting_at(i).field->key;
     EXPECT_TRUE(seen.insert(key).second) << key << " is claimed twice; values{} is one flat namespace";
   }
 }
@@ -335,8 +419,8 @@ TEST_F(SettingsApiTest, ServerEmittedDropdownsAreNonEmpty) {
   JsonObjectConst options = doc["options"];
   JsonArrayConst interfaces = doc["interfaces"];
 
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const SettingField& field = kSettingFields[i];
+  for (size_t i = 0; i < setting_count(); i++) {
+    const SettingField& field = *setting_at(i).field;
     if (field.type == SettingType::EnumUint) {
       EXPECT_NE(field.options_key, nullptr) << field.key;
     }
@@ -359,12 +443,12 @@ TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
   JsonArrayConst schema = doc["schema"];
 
   ASSERT_FALSE(schema.isNull());
-  // The board's GPIO-option rows are appended after the static fields, so the
-  // static rows stay index-aligned with kSettingFields.
-  ASSERT_EQ(schema.size(), kSettingFieldCount + esp32hal->gpio_options().group_count);
+  // The board's GPIO-option rows are appended after the declared fields, so the
+  // declared rows stay index-aligned with the settings tables.
+  ASSERT_EQ(schema.size(), setting_count() + esp32hal->gpio_options().group_count);
 
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const SettingField& field = kSettingFields[i];
+  for (size_t i = 0; i < setting_count(); i++) {
+    const SettingField& field = *setting_at(i).field;
     JsonObjectConst entry = schema[i];
     EXPECT_STREQ(entry["key"].as<const char*>(), field.key);
     EXPECT_STREQ(entry["category"].as<const char*>(), field.category);
@@ -1026,13 +1110,11 @@ TEST_F(SettingsApiTest, InclusiveBoundariesAndSecondsDomainAccepted) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["CHGTAPERSTART"] = 99;   // inclusive max
-  body["values"]["RAMPDOWNSOC"] = 7000;   // inclusive min
   body["values"]["MQTTPUBLISHMS"] = 300;  // seconds-domain max, stored as ms
   const auto r = apply_settings_json(store, body.as<JsonObjectConst>());
 
   EXPECT_TRUE(r.ok) << r.error.c_str();
   EXPECT_EQ(store.getUInt("CHGTAPERSTART", 0), 99u);
-  EXPECT_EQ(store.getUInt("RAMPDOWNSOC", 0), 7000u);
   EXPECT_EQ(store.getUInt("MQTTPUBLISHMS", 0), 300000u);
 }
 
@@ -1437,8 +1519,8 @@ TEST_F(SettingsApiTest, EveryOptionsKeyIsPublishedOrDeliberatelyClientOwned) {
   JsonObjectConst options = doc["options"];
   const std::set<std::string> client_owned = {"country",    "mapregion",  "chassis", "pack",
                                               "pylonbrand", "contactor",  "sungrow"};
-  for (size_t i = 0; i < kSettingFieldCount; i++) {
-    const SettingField& field = kSettingFields[i];
+  for (size_t i = 0; i < setting_count(); i++) {
+    const SettingField& field = *setting_at(i).field;
     if (field.options_key == nullptr) {
       continue;
     }

@@ -20,42 +20,7 @@ class BoltAmperaBattery : public CanBattery {
 
   const std::vector<BatteryCommand>& get_commands() override { return commands_; }
 
-  void write_advanced_status(AdvancedStatusWriter& out) override {
-    DATALAYER_INFO_BOLTAMPERA* boltampera_dl = &extended_;
-
-    out.section("");
-    out.kv(TL("5V Reference"), String(boltampera_dl->battery_5V_ref));
-    out.kv(TL("Module 1 temp"), String(boltampera_dl->battery_module_temp_1));
-    out.kv(TL("Module 2 temp"), String(boltampera_dl->battery_module_temp_2));
-    out.kv(TL("Module 3 temp"), String(boltampera_dl->battery_module_temp_3));
-    out.kv(TL("Module 4 temp"), String(boltampera_dl->battery_module_temp_4));
-    out.kv(TL("Module 5 temp"), String(boltampera_dl->battery_module_temp_5));
-    out.kv(TL("Module 6 temp"), String(boltampera_dl->battery_module_temp_6));
-    out.kv(TL("Cell average voltage"), String(boltampera_dl->battery_cell_average_voltage));
-    out.kv(TL("Cell average voltage 2"), String(boltampera_dl->battery_cell_average_voltage_2));
-    out.kv(TL("Terminal voltage"), String(boltampera_dl->battery_terminal_voltage));
-    out.kv(TL("Ignition power mode"), String(boltampera_dl->battery_ignition_power_mode));
-    out.kv("Battery current (7E7)", String(boltampera_dl->battery_current_7E7));
-    out.kv(TL("Capacity MY17-18"), String(boltampera_dl->battery_capacity_my17_18));
-    out.kv(TL("Capacity MY19+"), String(boltampera_dl->battery_capacity_my19plus));
-    out.kv(TL("SOC Display"), String(boltampera_dl->battery_SOC_display));
-    out.kv(TL("SOC Raw highprec"), String(boltampera_dl->battery_SOC_raw_highprec));
-    out.kv(TL("Max temp"), String(boltampera_dl->battery_max_temperature));
-    out.kv(TL("Min temp"), String(boltampera_dl->battery_min_temperature));
-    out.kv(TL("Cell max mV"), String(boltampera_dl->battery_max_cell_voltage));
-    out.kv(TL("Cell min mV"), String(boltampera_dl->battery_min_cell_voltage));
-    out.kv(TL("Lowest cell"), String(boltampera_dl->battery_lowest_cell));
-    out.kv(TL("Highest cell"), String(boltampera_dl->battery_highest_cell));
-    out.kv(TL("Internal resistance"), String(boltampera_dl->battery_internal_resistance));
-    out.kv(TL("Voltage"), String(boltampera_dl->battery_voltage_polled));
-    out.kv(TL("Isolation Ohm"), String(boltampera_dl->battery_vehicle_isolation));
-    out.kv(TL("Isolation kOhm"), String(boltampera_dl->battery_isolation_kohm));
-    out.kv(TL("HV locked"), String(boltampera_dl->battery_HV_locked));
-    out.kv(TL("Crash event"), String(boltampera_dl->battery_crash_event));
-    out.kv("HVIL", String(boltampera_dl->battery_HVIL));
-    out.kv(TL("HVIL status"), String(boltampera_dl->battery_HVIL_status));
-    out.kv("Current (7E4)", String(boltampera_dl->battery_current_7E4));
-  }
+  void write_advanced_status(AdvancedStatusWriter& out) override;
 
  private:
   void reset_DTC() { UserRequestDTCreset = true; }

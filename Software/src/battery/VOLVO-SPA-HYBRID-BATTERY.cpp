@@ -508,3 +508,97 @@ void VolvoSpaHybridBattery::setup(void) {                     // Performs one ti
   datalayer_battery->info.min_cell_voltage_mV = MIN_CELL_VOLTAGE_MV;
   datalayer_battery->info.max_cell_voltage_deviation_mV = MAX_CELL_DEVIATION_MV;
 }
+
+void VolvoSpaHybridBattery::write_advanced_status(AdvancedStatusWriter& out) {
+  out.section("");
+
+  out.kv(TL("BECM reported SOC"), String(datalayer_extended.VolvoHybrid.soc_bms));
+  out.kv(TL("Calculated SOC"), String(datalayer_extended.VolvoHybrid.soc_calc));
+  out.kv(TL("Rescaled SOC"), String(datalayer_extended.VolvoHybrid.soc_rescaled / 10));
+  out.kv(TL("BECM reported SOH"), String(datalayer_extended.VolvoHybrid.soh_bms));
+  out.kv(TL("BECM supply voltage"), String(datalayer_extended.VolvoHybrid.BECMsupplyVoltage), "mV");
+
+  out.kv(TL("HV voltage"), String(datalayer_extended.VolvoHybrid.BECMBatteryVoltage), "V");
+  out.kv(TL("HV current"), String(datalayer_extended.VolvoHybrid.BECMBatteryCurrent), "A");
+  out.kv(TL("Dynamic max voltage"), String(datalayer_extended.VolvoHybrid.BECMUDynMaxLim), "V");
+  out.kv(TL("Dynamic min voltage"), String(datalayer_extended.VolvoHybrid.BECMUDynMinLim), "V");
+
+  out.kv(TL("Discharge power limit 1"), String(datalayer_extended.VolvoHybrid.HvBattPwrLimDcha1), "kW");
+  out.kv(TL("Discharge soft power limit"), String(datalayer_extended.VolvoHybrid.HvBattPwrLimDchaSoft), "kW");
+
+  String hv_sys_relay_status;
+  switch (datalayer_extended.VolvoHybrid.HVSysRlySts) {
+    case 0:
+      hv_sys_relay_status = "Open";
+      break;
+    case 1:
+      hv_sys_relay_status = "Closed";
+      break;
+    case 2:
+      hv_sys_relay_status = "KeepStatus";
+      break;
+    case 3:
+      hv_sys_relay_status = "OpenAndRequestActiveDischarge";
+      break;
+    default:
+      hv_sys_relay_status = "Not valid";
+  }
+  out.kv(TL("HV system relay status"), hv_sys_relay_status);
+
+  String hv_sys_dc_relay_status1;
+  switch (datalayer_extended.VolvoHybrid.HVSysDCRlySts1) {
+    case 0:
+      hv_sys_dc_relay_status1 = "Open";
+      break;
+    case 1:
+      hv_sys_dc_relay_status1 = "Closed";
+      break;
+    case 2:
+      hv_sys_dc_relay_status1 = "KeepStatus";
+      break;
+    case 3:
+      hv_sys_dc_relay_status1 = "Fault";
+      break;
+    default:
+      hv_sys_dc_relay_status1 = "Not valid";
+  }
+  out.kv(TL("HV system relay status 1"), hv_sys_dc_relay_status1);
+
+  String hv_sys_dc_relay_status2;
+  switch (datalayer_extended.VolvoHybrid.HVSysDCRlySts2) {
+    case 0:
+      hv_sys_dc_relay_status2 = "Open";
+      break;
+    case 1:
+      hv_sys_dc_relay_status2 = "Closed";
+      break;
+    case 2:
+      hv_sys_dc_relay_status2 = "KeepStatus";
+      break;
+    case 3:
+      hv_sys_dc_relay_status2 = "Fault";
+      break;
+    default:
+      hv_sys_dc_relay_status2 = "Not valid";
+  }
+  out.kv(TL("HV system relay status 2"), hv_sys_dc_relay_status2);
+
+  String hv_sys_iso_monitor_status;
+  switch (datalayer_extended.VolvoHybrid.HVSysIsoRMonrSts) {
+    case 0:
+      hv_sys_iso_monitor_status = "Not valid 1";
+      break;
+    case 1:
+      hv_sys_iso_monitor_status = "False";
+      break;
+    case 2:
+      hv_sys_iso_monitor_status = "True";
+      break;
+    case 3:
+      hv_sys_iso_monitor_status = "Not valid 2";
+      break;
+    default:
+      hv_sys_iso_monitor_status = "Not valid";
+  }
+  out.kv(TL("HV system isolation resistance monitoring status"), hv_sys_iso_monitor_status);
+}
