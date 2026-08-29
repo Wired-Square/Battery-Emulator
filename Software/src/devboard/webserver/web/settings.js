@@ -1,6 +1,7 @@
 import {
   getJson, postJson, skinName, t, tf, currentLanguage, cachedLanguages, setLanguage,
 } from '/app.js';
+import { VISIBILITY, isVisible as ruleIsVisible, ownedBy } from '/visibility.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -214,95 +215,9 @@ const PASSWORD_KEYS = new Set(['PASSWORD', 'HTTPPASS', 'HTTPPASSCONFIRM', 'APPAS
 // Stored secrets that can be explicitly cleared (sent as JSON null). HTTPPASSCONFIRM is not stored.
 const CLEARABLE_PASSWORD_KEYS = new Set(['PASSWORD', 'HTTPPASS', 'APPASSWORD', 'MQTTPASSWORD']);
 
-const SHUNT_CTCLAMP = 3;
-const TESLA_CHASSIS_MODEL_3 = 2;
+const visibilityContext = () => ({ schema: data?.schema ?? [], state, dynamicState });
 
-const fieldFor = (key) => (data?.schema ?? []).find((f) => f.key === key);
-
-const ownedBy = (field) => {
-  if (!field?.owners) return true;
-  if (field.domain === 'inverter') return field.owners.includes(Number(state.INVTYPE));
-  const slots = dynamicState.batteries ?? [];
-  if (field.slot != null) {
-    const entry = slots.find((b) => b.slot === field.slot);
-    return entry != null && field.owners.includes(Number(entry.type));
-  }
-  return slots.some((b) => field.owners.includes(Number(b.type)));
-};
-
-const forcesBalancing = () => ownedBy(fieldFor('max_cell_mv'));
-
-// 3/Y only: the driver's forced-balancing override never runs on S/X.
-const forcedBalancing = (s) => forcesBalancing() && Number(s.GTWCHASSIS) >= TESLA_CHASSIS_MODEL_3;
-
-// A driver owning the balancing time but not the chassis-gated rows carries no chassis condition.
-// Testing the chassis alone would hide the row for a BMW PHEV sharing the box with a sub-3/Y Tesla.
-const ownsUngatedBalancing = () => {
-  const gated = fieldFor('max_cell_mv')?.owners ?? [];
-  const ungated = (fieldFor('max_time_min')?.owners ?? []).filter((id) => !gated.includes(id));
-  return (dynamicState.batteries ?? []).some((b) => ungated.includes(Number(b.type)));
-};
-
-// Value-driven show/hide; ownership and board-gated absence are handled by the schema.
-const VISIBILITY = {
-  BATTCHEM: (s) => Number(s.battery) !== 0,
-  INVCOMM: (s) => Number(s.INVTYPE) !== 0,
-  INVOFFGRID: (s) => Number(s.INVTYPE) !== 0,
-  PERBMSRESETH: (s) => s.PERBMSRESET === true,
-  PERBMSDEFSOC: (s) => s.PERBMSRESET === true,
-  PERBMSSKIPBAL: (s) => s.PERBMSRESET === true,
-  CPUTEMPOFFSET: (s) => s.MEASURECPUTEMP === true,
-  LOWPASSFILTER: (s) => Number(s.INVTYPE) !== 0,
-  CHGTAPERSOC: (s) => Number(s.INVTYPE) !== 0,
-  CHGTAPERSTART: (s) => Number(s.INVTYPE) !== 0 && s.CHGTAPERSOC === true,
-  CHGTAPERFLOOR: (s) => Number(s.INVTYPE) !== 0 && s.CHGTAPERSOC === true,
-  SLOWCANINV: (s) => Number(s.INVTYPE) !== 0,
-  CHGCOMM: (s) => Number(s.CHGTYPE) !== 0,
-  SHUNTCOMM: (s) => Number(s.SHUNTTYPE) !== 0 && Number(s.SHUNTTYPE) !== SHUNT_CTCLAMP,
-  CTOFFSET: (s) => Number(s.SHUNTTYPE) === SHUNT_CTCLAMP,
-  CTVNOM: (s) => Number(s.SHUNTTYPE) === SHUNT_CTCLAMP,
-  CTANOM: (s) => Number(s.SHUNTTYPE) === SHUNT_CTCLAMP,
-  CTATTEN: (s) => Number(s.SHUNTTYPE) === SHUNT_CTCLAMP,
-  CTINVERT: (s) => Number(s.SHUNTTYPE) === SHUNT_CTCLAMP,
-  PRECHGMS: (s) => s.CNTCTRL === true,
-  NCCONTACTOR: (s) => s.CNTCTRL === true,
-  PWMCNTCTRL: (s) => s.CNTCTRL === true,
-  PWMFREQ: (s) => s.CNTCTRL === true && s.PWMCNTCTRL === true,
-  PWMHOLD: (s) => s.CNTCTRL === true && s.PWMCNTCTRL === true,
-  MAXPRETIME: (s) => s.EXTPRECHARGE === true,
-  MAXPREFREQ: (s) => s.EXTPRECHARGE === true,
-  NOINVDISC: (s) => s.EXTPRECHARGE === true,
-  LOCALIP: (s) => s.STATICIP === true,
-  GATEWAY: (s) => s.STATICIP === true,
-  SUBNET: (s) => s.STATICIP === true,
-  DNS: (s) => s.STATICIP === true,
-  ESPNOWMACS: (s) => s.ESPNOWENABLED === true,
-  MQTTSERVER: (s) => s.MQTTENABLED === true,
-  MQTTPORT: (s) => s.MQTTENABLED === true,
-  MQTTUSER: (s) => s.MQTTENABLED === true,
-  MQTTPASSWORD: (s) => s.MQTTENABLED === true,
-  MQTTTIMEOUT: (s) => s.MQTTENABLED === true,
-  MQTTPUBLISHMS: (s) => s.MQTTENABLED === true,
-  MQTTCELLV: (s) => s.MQTTENABLED === true,
-  MQTTHEAP: (s) => s.MQTTENABLED === true,
-  REMBMSRESET: (s) => s.MQTTENABLED === true,
-  HADISC: (s) => s.MQTTENABLED === true,
-  HADISCFWU: (s) => s.MQTTENABLED === true,
-  HADISCTOPIC: (s) => s.MQTTENABLED === true && (s.HADISC === true || s.HADISCFWU === true),
-  SYSLOGIP: (s) => s.SYSLOGEN === true,
-  SYSLOGPORT: (s) => s.SYSLOGEN === true,
-  SYSLOGFAC: (s) => s.SYSLOGEN === true,
-  hv_enabled: (s) => Number(s.CHGTYPE) !== 0,
-  aux12v_enabled: (s) => Number(s.CHGTYPE) !== 0,
-  setpoint_v: (s) => Number(s.CHGTYPE) !== 0,
-  setpoint_a: (s) => Number(s.CHGTYPE) !== 0,
-  end_a: (s) => Number(s.CHGTYPE) !== 0,
-  max_time_min: (s) => ownsUngatedBalancing() || forcedBalancing(s),
-  max_cell_mv: forcedBalancing,
-  max_dev_mv: forcedBalancing,
-  max_pack_v: forcedBalancing,
-  float_power_w: forcedBalancing,
-};
+const isVisible = (key) => ruleIsVisible(key, visibilityContext());
 
 const NUMERIC_TYPES = new Set(['uint', 'int', 'float', 'seconds']);
 
@@ -776,12 +691,6 @@ function liveControl(field, current) {
 
 const LIVE_REJECTED = t('ui.live_rejected', 'The device rejected this value.');
 
-const isVisible = (key) => {
-  if (!ownedBy(fieldFor(key))) return false;
-  const rule = VISIBILITY[key];
-  return !rule || rule(state);
-};
-
 // Consecutive schema rows sharing a section become one card; the firmware emits
 // them grouped, so a section never reopens once it has closed.
 function liveSections() {
@@ -933,9 +842,9 @@ function seedState(values) {
 function firstInvalidField() {
   for (const field of data.schema ?? []) {
     if (field.category === LIVE_CATEGORY) continue;
-    if (!ownedBy(field)) continue;
+    if (!ownedBy(field, visibilityContext())) continue;
     const rule = VISIBILITY[field.key];
-    if (rule && !rule(state)) continue;
+    if (rule && !rule(state, visibilityContext())) continue;
     const value = state[field.key];
     const pattern = PATTERNS[field.key];
     if (pattern) {

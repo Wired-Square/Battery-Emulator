@@ -72,6 +72,9 @@ class InverterProtocol {
   // Some inverters are slow to boot; suppress the CAN-missing fault during a startup grace window.
   virtual bool needs_can_startup_grace() { return false; }
 
+  // Static for the same reason as Battery::SettingsHook.
+  using SettingsHook = DeviceSettingList (*)();
+
  private:
   const char* name_ = nullptr;
 };

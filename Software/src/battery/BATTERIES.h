@@ -71,7 +71,7 @@ Battery* create_battery(BatteryType type, const BatterySlotContext& ctx);
 
 struct BatteryTypeSettings {
   BatteryType id;
-  DeviceSettingList (*settings)();
+  Battery::SettingsHook settings;
   BatteryCapabilities capabilities;
 };
 

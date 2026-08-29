@@ -71,7 +71,7 @@ struct InverterTypeInfo {
   InverterProtocolType id;
   const char* name;
   InverterProtocol* (*make)(const char*);  // nullptr => not constructible (None)
-  DeviceSettingList (*settings)() = nullptr;
+  InverterProtocol::SettingsHook settings = nullptr;
   InverterCapabilities capabilities = 0;
 };
 

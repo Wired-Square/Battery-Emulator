@@ -127,6 +127,10 @@ class Battery {
   // learned from the bus after construction and others track live state.
   virtual const std::vector<BatteryCommand>& get_commands() { return kNoCommands; }
 
+  // Static, not virtual: the schema is built before any driver is constructed.
+  // A driver opts in with `static DeviceSettingList settings();`, named by its registry row.
+  using SettingsHook = DeviceSettingList (*)();
+
  protected:
   static const std::vector<BatteryCommand> kNoCommands;
 };

@@ -101,7 +101,7 @@ struct BatteryTypeInfo {
   uint8_t max_slots;
   BusRequirement bus;
   Battery* (*make)(const BatterySlotContext&);  // null for None (no driver class)
-  DeviceSettingList (*settings)() = nullptr;
+  Battery::SettingsHook settings = nullptr;
   BatteryCapabilities capabilities = 0;
 };
 

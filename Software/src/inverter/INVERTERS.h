@@ -13,7 +13,7 @@ enum inverter_contactor_mode_enum {
 };
 struct InverterTypeSettings {
   InverterProtocolType id;
-  DeviceSettingList (*settings)();
+  InverterProtocol::SettingsHook settings;
   InverterCapabilities capabilities;
 };
 
