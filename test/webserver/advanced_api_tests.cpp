@@ -6,6 +6,11 @@
 #include "../../Software/src/datalayer/datalayer_extended.h"
 #include "../../Software/src/devboard/hal/hal.h"
 #include "../../Software/src/devboard/webserver/advanced_api.h"
+#include "../../Software/src/devboard/webserver/json_response_writer.h"
+
+static String advanced_json() {
+  return render_json(write_advanced);
+}
 #include "../advanced_status_recorder.h"
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
@@ -78,7 +83,7 @@ bool run_with_value(const char* id, uint8_t battery_index, int32_t value) {
 
 TEST_F(AdvancedApi, EmptyWhenNoBattery) {
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, advanced_json().c_str()));
   EXPECT_EQ(doc["batteries"].size(), 0u);
 }
 
@@ -189,7 +194,7 @@ TEST_F(AdvancedApi, DtcCatalogueComesFromTheBatteryAndReachesTheJson) {
   };
   batteries[0] = &stub;
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, advanced_json().c_str()));
   JsonObject field = doc["batteries"][0]["sections"][0]["fields"][1];
   EXPECT_STREQ(field["catalogue"] | "", "mg_dtc.json");
   EXPECT_STREQ(field["row_keys"][0] | "", "P0C9500");
@@ -216,7 +221,7 @@ TEST_F(AdvancedApi, DeclaredCommandsAreOfferedAndDispatched) {
   stub.commands_ = {command(CMD_CHADEMO_STOP, [&stub] { stub.stop_calls++; })};
   batteries[0] = &stub;
 
-  const String json = build_advanced_json();
+  const String json = advanced_json();
   EXPECT_TRUE(command_offered(json, "chademoStop"));
   EXPECT_FALSE(command_offered(json, "chademoRestart"));
 
@@ -231,12 +236,12 @@ TEST_F(AdvancedApi, UnavailableCommandIsHiddenAndRefused) {
       command(CMD_CHADEMO_STOP, [&stub] { stub.stop_calls++; }, [&stub] { return stub.gate_open; })};
   batteries[0] = &stub;
 
-  EXPECT_FALSE(command_offered(build_advanced_json(), "chademoStop"));
+  EXPECT_FALSE(command_offered(advanced_json(), "chademoStop"));
   EXPECT_FALSE(run_advanced_command("chademoStop", 0));
   EXPECT_EQ(stub.stop_calls, 0);
 
   stub.gate_open = true;
-  EXPECT_TRUE(command_offered(build_advanced_json(), "chademoStop"));
+  EXPECT_TRUE(command_offered(advanced_json(), "chademoStop"));
   EXPECT_TRUE(run_advanced_command("chademoStop", 0));
   EXPECT_EQ(stub.stop_calls, 1);
 }
@@ -248,7 +253,7 @@ TEST_F(AdvancedApi, ChademoStopStopsAndRestartRestarts) {
   datalayer_extended.chademo.UserRequestStop = false;
   datalayer_extended.chademo.UserRequestRestart = false;
 
-  const String json = build_advanced_json();
+  const String json = advanced_json();
   EXPECT_TRUE(command_offered(json, "chademoStop"));
   EXPECT_TRUE(command_offered(json, "chademoRestart"));
 
@@ -270,7 +275,7 @@ TEST_F(AdvancedApi, AvailabilityIsReevaluatedOnDispatchAlone) {
       command(CMD_CHADEMO_STOP, [&stub] { stub.stop_calls++; }, [&stub] { return stub.gate_open; })};
   batteries[0] = &stub;
 
-  EXPECT_TRUE(command_offered(build_advanced_json(), "chademoStop"));
+  EXPECT_TRUE(command_offered(advanced_json(), "chademoStop"));
 
   stub.gate_open = false;
   EXPECT_FALSE(run_advanced_command("chademoStop", 0));
@@ -290,7 +295,7 @@ TEST_F(AdvancedApi, ValueCommandPublishesItsSpecAndReceivesTheValue) {
   batteries[0] = &stub;
 
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, advanced_json().c_str()));
   JsonObject spec = doc["batteries"][0]["commands"][0]["value"];
   EXPECT_STREQ(spec["unit"] | "", "V");
   EXPECT_EQ(spec["min"] | -1, FAKE_VOLTAGE_MIN_DV);
@@ -360,7 +365,7 @@ TEST_F(AdvancedApi, OmitsSevWhenSeverityIsNormal) {
   batteries[0] = &stub;
 
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, advanced_json().c_str()));
   JsonObject field = doc["batteries"][0]["sections"][0]["fields"][0];
   EXPECT_STREQ(field["value"] | "", "OK");
   EXPECT_FALSE(field["sev"].is<const char*>());
@@ -375,7 +380,7 @@ TEST_F(AdvancedApi, EmitsSevWhenSeverityIsWarning) {
   batteries[0] = &stub;
 
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, advanced_json().c_str()));
   JsonObject field = doc["batteries"][0]["sections"][0]["fields"][0];
   EXPECT_STREQ(field["sev"] | "", "warn");
 }

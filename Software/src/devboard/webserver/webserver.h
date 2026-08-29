@@ -7,6 +7,7 @@
 #include "../../lib/ESP32Async-ESPAsyncWebServer/src/ESPAsyncWebServer.h"
 #include "../../lib/ayushsharma82-ElegantOTA/src/ElegantOTA.h"
 #include "../../lib/mathieucarbou-AsyncTCPSock/src/AsyncTCP.h"
+#include "response_writer.h"
 
 extern const char* version_number;  // The current software version, shown on webserver
 extern std::string http_username;
@@ -56,8 +57,8 @@ void init_webserver();
  */
 void init_ElegantOTA();
 
-String capabilities_json();
-String state_json();
+void write_capabilities(ResponseWriter& out);
+void write_state(ResponseWriter& out);
 
 /**
  * @brief Executes on OTA start 

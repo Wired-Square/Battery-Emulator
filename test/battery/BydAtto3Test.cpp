@@ -5,6 +5,11 @@
 #include "../../Software/src/datalayer/datalayer.h"
 #include "../../Software/src/datalayer/datalayer_extended.h"
 #include "../../Software/src/devboard/webserver/cellmonitor_api.h"
+#include "../../Software/src/devboard/webserver/json_response_writer.h"
+
+static String cellmonitor_json() {
+  return render_json(write_cellmonitor);
+}
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "../advanced_status_recorder.h"
 
@@ -263,7 +268,7 @@ TEST_F(BydAtto3BalanceTimeTest, PublishesTheReadingAsACellSeries) {
 
   batteries[0] = battery;
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_cellmonitor_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, cellmonitor_json().c_str()));
   batteries[0] = nullptr;
 
   JsonObjectConst series = doc["batteries"][0]["series"][0];

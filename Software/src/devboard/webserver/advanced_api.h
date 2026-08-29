@@ -6,12 +6,13 @@
 
 #include "../../battery/battery_advanced_status.h"
 #include "../../datalayer/datalayer.h"
+#include "response_writer.h"
 
 class Battery;
 
 // GET /api/advanced payload: per present battery, its structured advanced
 // status sections plus the commands that battery supports.
-String build_advanced_json();
+void write_advanced(ResponseWriter& out);
 
 enum class DtcCodeStyle { kRawHex, kStandard, kShortFailureType };
 

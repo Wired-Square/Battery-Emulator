@@ -2,6 +2,11 @@
 
 #include "../../Software/src/devboard/utils/events.h"
 #include "../../Software/src/devboard/webserver/events_api.h"
+#include "../../Software/src/devboard/webserver/json_response_writer.h"
+
+static String events_json() {
+  return render_json(write_events);
+}
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 #include "Arduino.h"  // set_millis64
@@ -16,7 +21,7 @@ JsonDocument parse(const String& json) {
 
 TEST(EventsApi, EmptyWhenNoOccurrences) {
   reset_all_events();
-  auto doc = parse(build_events_json());
+  auto doc = parse(events_json());
   EXPECT_EQ(doc["events"].size(), 0u);
 }
 
@@ -28,7 +33,7 @@ TEST(EventsApi, NewestFirstWithFields) {
   set_event(EVENT_THERMAL_RUNAWAY, 3);
   set_millis64(8000);
 
-  auto doc = parse(build_events_json());
+  auto doc = parse(events_json());
   ASSERT_EQ(doc["events"].size(), 2u);
 
   auto newest = doc["events"][0];
@@ -49,7 +54,7 @@ TEST(EventsApi, CountAccumulatesAndLatestDataWins) {
   set_event(EVENT_TASK_OVERRUN, 1);
   set_event(EVENT_TASK_OVERRUN, 2);
 
-  auto doc = parse(build_events_json());
+  auto doc = parse(events_json());
   ASSERT_EQ(doc["events"].size(), 1u);
   EXPECT_EQ(doc["events"][0]["count"].as<int>(), 2);
   EXPECT_EQ(doc["events"][0]["data"].as<int>(), 2);

@@ -70,6 +70,7 @@ unsigned long ota_progress_millis = 0;
 #include "events_api.h"
 #include "logging_api.h"
 #include "settings_api.h"
+#include "json_response_writer.h"
 #include "web_json.h"
 
 MyTimer ota_timeout_timer = MyTimer(15000);
@@ -206,7 +207,7 @@ void canReplayTask(void* param) {
 }
 
 static String canreplay_state_json() {
-  return build_canreplay_json(isReplayRunning, !importedLogs.isEmpty());
+  return render_json([](ResponseWriter& out) { write_canreplay(out, isReplayRunning, !importedLogs.isEmpty()); });
 }
 
 void def_route_with_auth(const char* uri, AsyncWebServer& serv, WebRequestMethodComposite method,
@@ -306,17 +307,17 @@ void init_webserver() {
 
   // Route for machine-readable board capabilities
   def_route_with_auth("/capabilities", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, capabilities_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_capabilities));
   });
 
   // Contract with the bundled OTA page: it reads `hardware` and `firmware` from here.
   def_route_with_auth("/GetFirmwareInfo", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, capabilities_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_capabilities));
   });
 
   // Route for live state polled by the SPA
   def_route_with_auth("/api/state", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, state_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
   });
 
   // Route for root / web page
@@ -342,7 +343,7 @@ void init_webserver() {
 
   // Route for going to advanced battery info web page
   def_route_with_auth("/api/advanced", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, build_advanced_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_advanced));
   });
 
   def_route_with_auth("/api/canreplay", server, HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -383,7 +384,7 @@ void init_webserver() {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
     }
     setBatteryPause(doc["on"].as<bool>(), false);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, state_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
   });
 
   // The SPA's equipment stop. Mirrors /equipmentStop: on == contactors open, CAN
@@ -394,41 +395,40 @@ void init_webserver() {
     }
     bool stop = doc["on"].as<bool>();
     setBatteryPause(stop, false, stop ? EquipmentStop::STOP : EquipmentStop::RESUME);
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, state_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
   });
 
-  // Local store is safe because build_settings_json is synchronous — it does not
+  // Local store is safe because write_settings is synchronous — it does not
   // outlive the request.
   def_route_with_auth("/api/settings", server, HTTP_GET, [](AsyncWebServerRequest* request) {
     BatteryEmulatorSettingsStore settings(true);
-    String json = build_settings_json(settings);
-    if (json.isEmpty()) {
-      return request->send(HTTP_STATUS_INTERNAL_SERVER_ERROR, "text/plain", "Settings payload overflow");
-    }
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, json);
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON,
+                  render_json([&settings](ResponseWriter& out) { write_settings(out, settings); }));
   });
 
   def_json_post_with_auth("/api/settings", [](AsyncWebServerRequest* request, JsonDocument& doc) {
-    BatteryEmulatorSettingsStore settings;
-    SettingsApplyResult result = apply_settings_json(settings, doc.as<JsonObjectConst>());
-    if (!result.ok) {
-      JsonDocument failure;
-      failure["error"] = result.error;
-      if (result.error_key != nullptr) {
-        failure["error_key"] = result.error_key;
-        if (result.error_arg.length() > 0) {
-          failure["error_arg"] = result.error_arg;
+        BatteryEmulatorSettingsStore settings;
+        SettingsApplyResult result = apply_settings_json(settings, doc.as<JsonObjectConst>());
+        if (!result.ok) {
+          return request->send(HTTP_STATUS_BAD_REQUEST, CONTENT_TYPE_JSON,
+                               render_json([&result](ResponseWriter& out) {
+                                 out.begin_object();
+                                 out.field("error", result.error.c_str());
+                                 if (result.error_key != nullptr) {
+                                   out.field("error_key", result.error_key);
+                                   if (result.error_arg.length() > 0) {
+                                     out.field("error_arg", result.error_arg.c_str());
+                                   }
+                                 }
+                                 out.end_object();
+                               }));
         }
-      }
-      return request->send(HTTP_STATUS_BAD_REQUEST, CONTENT_TYPE_JSON, serialise_doc(failure));
-    }
-    settingsUpdated |= result.changed;
-    refresh_web_ui_shell(settings);
-    String json = build_settings_json(settings, result.reboot_required);
-    if (json.isEmpty()) {
-      return request->send(HTTP_STATUS_INTERNAL_SERVER_ERROR, "text/plain", "Settings payload overflow");
-    }
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, json);
+        settingsUpdated |= result.changed;
+        refresh_web_ui_shell(settings);
+        request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON,
+                      render_json([&settings, &result](ResponseWriter& out) {
+                        write_settings(out, settings, result.reboot_required);
+                      }));
   });
 
 #ifdef BOARD_HAS_LOAD_SWITCH
@@ -447,7 +447,7 @@ void init_webserver() {
     load_switch->request_manual((uint8_t)channel, doc["on"].as<bool>());
     // Answers with pending set: the tick has not run, so the client is told the
     // request is in flight rather than shown the value it asked for.
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, state_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_state));
   });
 #endif
 
@@ -461,14 +461,14 @@ void init_webserver() {
       datalayer.system.info.logged_can_messages[0] = '\0';
     }
     datalayer.system.info.can_logging_active = true;
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, build_canlog_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_canlog));
   });
   def_route_with_auth("/api/canlog/stop", server, HTTP_POST, [](AsyncWebServerRequest* request) {
     datalayer.system.info.can_logging_active = false;
     request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, "{\"ok\":true}");
   });
   def_route_with_auth("/api/debug", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, build_debug_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_debug));
   });
 
   // Factory reset carries no body, so it uses the bodyless auth helper: a
@@ -557,16 +557,16 @@ void init_webserver() {
   }
 
   def_route_with_auth("/api/cellmonitor", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, build_cellmonitor_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_cellmonitor));
   });
 
   def_route_with_auth("/api/events", server, HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, build_events_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_events));
   });
 
   def_route_with_auth("/api/events/clear", server, HTTP_POST, [](AsyncWebServerRequest* request) {
     reset_all_events();
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, build_events_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_events));
   });
 
   def_json_post_with_auth("/api/advanced/command", [](AsyncWebServerRequest* request, JsonDocument& doc) {
@@ -590,7 +590,7 @@ void init_webserver() {
     if (!ok) {
       return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Command rejected");
     }
-    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, build_advanced_json());
+    request->send(HTTP_STATUS_OK, CONTENT_TYPE_JSON, render_json(write_advanced));
   });
 
   register_dump_can_route(server);
@@ -628,95 +628,97 @@ void init_ElegantOTA() {
   ElegantOTA.onEnd(onOTAEnd);
 }
 
-static void add_capabilities_device(JsonObject devices, const char* role, const char* type_name,
+static void add_capabilities_device(ResponseWriter& out, const char* role, const char* type_name,
                                     const InterfaceDescriptor* interface, InterfaceList list) {
   if (type_name == nullptr || type_name[0] == '\0') {
     return;
   }
-  JsonObject device = devices[role].to<JsonObject>();
-  device["type"] = type_name;
+  out.begin_object(role);
+  out.field("type", type_name);
   if (interface != nullptr) {
-    device["interface"] = static_cast<size_t>(interface - list.data);
+    out.field("interface", static_cast<size_t>(interface - list.data));
   }
+  out.end_object();
 }
 
-String capabilities_json() {
-  JsonDocument doc;
-  doc["hardware"] = esp32hal->name();
-  doc["firmware"] = String(version_number);
-  doc["api"] = kWebApiVersion;
+void write_capabilities(ResponseWriter& out) {
+  out.begin_object();
+  out.field("hardware", esp32hal->name());
+  out.field("firmware", version_number);
+  out.field("api", kWebApiVersion);
 #if defined(GITHUB_ORG) && defined(GITHUB_REPO)
 #if defined(GIT_TAG)
-  doc["firmware_url"] = "https://github.com/" GITHUB_ORG "/" GITHUB_REPO "/releases/tag/" GIT_TAG;
+  out.field("firmware_url", "https://github.com/" GITHUB_ORG "/" GITHUB_REPO "/releases/tag/" GIT_TAG);
 #elif defined(GITHUB_PR)
-  doc["firmware_url"] = "https://github.com/" GITHUB_ORG "/" GITHUB_REPO "/pull/" GITHUB_PR;
+  out.field("firmware_url", "https://github.com/" GITHUB_ORG "/" GITHUB_REPO "/pull/" GITHUB_PR);
 #endif
 #endif
 
   BatteryEmulatorSettingsStore settings(true);
   InterfaceList list = esp32hal->interfaces();
-  JsonArray interfaces = doc["interfaces"].to<JsonArray>();
+  out.begin_array("interfaces");
   for (size_t i = 0; i < list.count; i++) {
-    JsonObject iface = interfaces.add<JsonObject>();
-    iface["index"] = i;
-    iface["type"] = static_cast<uint8_t>(list.data[i].type);
-    iface["name"] = descriptor_name(list.data[i]);
+    out.begin_object();
+    out.field("index", i);
+    out.field("type", static_cast<uint8_t>(list.data[i].type));
+    out.field("name", descriptor_name(list.data[i]));
     bool termination_capable = esp32hal->supports_interface_termination(i);
-    iface["termination_capable"] = termination_capable;
+    out.field("termination_capable", termination_capable);
     if (termination_capable) {
-      iface["termination"] = settings.getBool(interface_termination_key(i).c_str(), false);
+      out.field("termination", settings.getBool(interface_termination_key(i).c_str(), false));
     }
+    out.end_object();
   }
+  out.end_array();
 
-  JsonArray battery_devices = doc["batteries"].to<JsonArray>();
+  out.begin_array("batteries");
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
     if (!battery_slot_occupied(slot)) {
       continue;
     }
-    JsonObject device = battery_devices.add<JsonObject>();
-    device["slot"] = slot;
-    device["type"] = name_for_battery_type(battery_type_for_slot(slot));
+    out.begin_object();
+    out.field("slot", slot);
+    out.field("type", name_for_battery_type(battery_type_for_slot(slot)));
     const InterfaceDescriptor* interface = can_config.battery[slot];
     if (interface != nullptr) {
-      device["interface"] = static_cast<size_t>(interface - list.data);
+      out.field("interface", static_cast<size_t>(interface - list.data));
     }
+    out.end_object();
   }
+  out.end_array();
 
-  JsonObject devices = doc["devices"].to<JsonObject>();
-  add_capabilities_device(devices, "inverter", name_for_inverter_type(user_selected_inverter_protocol),
+  out.begin_object("devices");
+  add_capabilities_device(out, "inverter", name_for_inverter_type(user_selected_inverter_protocol),
                           can_config.inverter, list);
-  add_capabilities_device(devices, "charger", name_for_charger_type(user_selected_charger_type), can_config.charger,
-                          list);
-  add_capabilities_device(devices, "shunt", name_for_shunt_type(user_selected_shunt_type), can_config.shunt, list);
-
-  String out;
-  serializeJson(doc, out);
-  return out;
+  add_capabilities_device(out, "charger", name_for_charger_type(user_selected_charger_type), can_config.charger, list);
+  add_capabilities_device(out, "shunt", name_for_shunt_type(user_selected_shunt_type), can_config.shunt, list);
+  out.end_object();
+  out.end_object();
 }
 
-static void add_battery_status(JsonObject entry, const DATALAYER_BATTERY_TYPE& pack) {
+static void add_battery_status(ResponseWriter& out, const DATALAYER_BATTERY_TYPE& pack) {
   const DATALAYER_BATTERY_STATUS_TYPE& status = pack.status;
-  entry["soc"] = status.reported_soc / PPTT_PER_PERCENT;
-  entry["soc_real"] = status.real_soc / PPTT_PER_PERCENT;
-  entry["soh"] = status.soh_pptt / PPTT_PER_PERCENT;
-  entry["voltage"] = status.voltage_dV / DECI_PER_UNIT;
-  entry["current"] = status.reported_current_dA / DECI_PER_UNIT;
-  entry["power"] = status.active_power_W;
-  entry["cell_min_mV"] = status.cell_min_voltage_mV;
-  entry["cell_max_mV"] = status.cell_max_voltage_mV;
-  entry["remaining_wh"] = status.remaining_capacity_Wh;
-  entry["max_charge_w"] = status.max_charge_power_W;
-  entry["max_discharge_w"] = status.max_discharge_power_W;
-  entry["max_charge_a"] = status.max_charge_current_dA / DECI_PER_UNIT;
-  entry["max_discharge_a"] = status.max_discharge_current_dA / DECI_PER_UNIT;
-  entry["temp_min_c"] = status.temperature_min_dC / DECI_PER_UNIT;
-  entry["temp_max_c"] = status.temperature_max_dC / DECI_PER_UNIT;
-  entry["total_wh"] = pack.info.total_capacity_Wh;
+  out.field("soc", status.reported_soc / PPTT_PER_PERCENT);
+  out.field("soc_real", status.real_soc / PPTT_PER_PERCENT);
+  out.field("soh", status.soh_pptt / PPTT_PER_PERCENT);
+  out.field("voltage", status.voltage_dV / DECI_PER_UNIT);
+  out.field("current", status.reported_current_dA / DECI_PER_UNIT);
+  out.field("power", status.active_power_W);
+  out.field("cell_min_mV", status.cell_min_voltage_mV);
+  out.field("cell_max_mV", status.cell_max_voltage_mV);
+  out.field("remaining_wh", status.remaining_capacity_Wh);
+  out.field("max_charge_w", status.max_charge_power_W);
+  out.field("max_discharge_w", status.max_discharge_power_W);
+  out.field("max_charge_a", status.max_charge_current_dA / DECI_PER_UNIT);
+  out.field("max_discharge_a", status.max_discharge_current_dA / DECI_PER_UNIT);
+  out.field("temp_min_c", status.temperature_min_dC / DECI_PER_UNIT);
+  out.field("temp_max_c", status.temperature_max_dC / DECI_PER_UNIT);
+  out.field("total_wh", pack.info.total_capacity_Wh);
 }
 
 // The dashboard shows a severity signal, not the event list, which has its own
 // endpoint; "latest" is absent when nothing is active, so the client shows a dash.
-static void add_state_events(JsonObject events) {
+static void add_state_events(ResponseWriter& out) {
   uint16_t active = 0;
   uint64_t newest_timestamp = 0;
   EVENTS_ENUM_TYPE newest = EVENT_NOF_EVENTS;
@@ -734,113 +736,124 @@ static void add_state_events(JsonObject events) {
     }
   }
 
-  events["active"] = active;
+  out.field("active", active);
   if (newest != EVENT_NOF_EVENTS) {
-    events["latest"] = get_event_message_string(newest);
-    events["latest_type"] = get_event_enum_string(newest);
+    out.field("latest", get_event_message_string(newest).c_str());
+    out.field("latest_type", get_event_enum_string(newest));
   }
 }
 
-String state_json() {
-  JsonDocument doc;
+void write_state(ResponseWriter& out) {
+  out.begin_object();
 
-  JsonObject sys = doc["system"].to<JsonObject>();
-  sys["status"] = String(get_emulator_pause_status().c_str());
-  sys["status_id"] = static_cast<uint32_t>(emulator_pause_status);
-  sys["emulator_status"] = get_emulator_status_string(get_emulator_status());
-  sys["uptime"] = format_ms_string(millis64());
+  out.begin_object("system");
+  out.field("status", get_emulator_pause_status().c_str());
+  out.field("status_id", static_cast<uint32_t>(emulator_pause_status));
+  out.field("emulator_status", get_emulator_status_string(get_emulator_status()));
+  out.field("uptime", format_ms_string(millis64()).c_str());
   // Numeric seconds for the SPA to detect a reboot (resets to 0) and reload.
-  sys["uptime_s"] = static_cast<uint32_t>(millis64() / static_cast<uint64_t>(MS_PER_SECOND));
-  sys["free_heap"] = ESP.getFreeHeap();
+  out.field("uptime_s", static_cast<uint32_t>(millis64() / static_cast<uint64_t>(MS_PER_SECOND)));
+  out.field("free_heap", ESP.getFreeHeap());
   if (datalayer.system.info.CPU_measurement_enabled) {
-    sys["cpu_temp"] = datalayer.system.info.CPU_temperature;
+    out.field("cpu_temp", datalayer.system.info.CPU_temperature);
   }
-  sys["paused"] = emulator_pause_request_ON;
-  sys["equipment_stop"] = datalayer.system.info.equipment_stop_active;
-  sys["auth"] = webserver_auth;
-  sys["log_available"] = datalayer.system.info.web_logging_active || datalayer.system.info.SD_logging_active;
+  out.field("paused", emulator_pause_request_ON);
+  out.field("equipment_stop", datalayer.system.info.equipment_stop_active);
+  out.field("auth", webserver_auth);
+  out.field("log_available", datalayer.system.info.web_logging_active || datalayer.system.info.SD_logging_active);
+  out.end_object();
 
-  JsonObject wifi = doc["wifi"].to<JsonObject>();
-  wifi["ap_active"] = ap_active;
+  out.begin_object("wifi");
+  out.field("ap_active", ap_active);
   if (ap_active) {
-    wifi["ap_ssid"] = ssidAP.c_str();
-    wifi["ap_ip"] = WiFi.softAPIP().toString();
+    out.field("ap_ssid", ssidAP.c_str());
+    out.field("ap_ip", WiFi.softAPIP().toString().c_str());
   }
   const bool sta_connected = WiFi.status() == WL_CONNECTED;
-  wifi["connected"] = sta_connected;
-  wifi["ssid"] = ssid.c_str();
+  out.field("connected", sta_connected);
+  out.field("ssid", ssid.c_str());
   String mac = WiFi.macAddress();
   mac.toLowerCase();
-  wifi["mac"] = mac;
+  out.field("mac", mac.c_str());
   if (sta_connected) {
-    wifi["ip"] = WiFi.localIP().toString();
-    wifi["hostname"] = WiFi.getHostname();
-    wifi["rssi"] = WiFi.RSSI();
-    wifi["channel"] = WiFi.channel();
+    out.field("ip", WiFi.localIP().toString().c_str());
+    out.field("hostname", WiFi.getHostname());
+    out.field("rssi", WiFi.RSSI());
+    out.field("channel", WiFi.channel());
   }
+  out.end_object();
 
-  add_battery_status(doc["battery"].to<JsonObject>(), datalayer.battery.combined);
+  out.begin_object("battery");
+  add_battery_status(out, datalayer.battery.combined);
+  out.end_object();
 
-  JsonArray packs = doc["batteries"].to<JsonArray>();
+  out.begin_array("batteries");
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
     if (!battery_slot_occupied(slot)) {
       continue;
     }
     const DATALAYER_BATTERY_TYPE& pack = datalayer.battery_slot(slot);
-    JsonObject entry = packs.add<JsonObject>();
-    entry["slot"] = slot;
+    out.begin_object();
+    out.field("slot", slot);
     if (pack.info.battery_name[0] != '\0') {
-      entry["name"] = pack.info.battery_name;
+      out.field("name", pack.info.battery_name);
     }
-    add_battery_status(entry, pack);
+    add_battery_status(out, pack);
+    out.end_object();
   }
+  out.end_array();
 
-  JsonObject inverter = doc["inverter"].to<JsonObject>();
-  inverter["name"] = name_for_inverter_type(user_selected_inverter_protocol);
+  out.begin_object("inverter");
+  out.field("name", name_for_inverter_type(user_selected_inverter_protocol));
+  out.end_object();
 
   if (charger) {
     const DATALAYER_CHARGER_TYPE& charger_data = datalayer.charger;
-    JsonObject chg = doc["charger"].to<JsonObject>();
-    chg["name"] = name_for_charger_type(user_selected_charger_type);
-    chg["alive"] = charger_data.CAN_charger_still_alive > 0;
-    chg["hv_enabled"] = charger_data.charger_HV_enabled;
-    chg["aux12v_enabled"] = charger_data.charger_aux12V_enabled;
-    chg["hv_v"] = charger_data.charger_stat_HVvol;
-    chg["hv_a"] = charger_data.charger_stat_HVcur;
-    chg["ac_v"] = charger_data.charger_stat_ACvol;
-    chg["ac_a"] = charger_data.charger_stat_ACcur;
-    chg["lv_v"] = charger_data.charger_stat_LVvol;
-    chg["lv_a"] = charger_data.charger_stat_LVcur;
+    out.begin_object("charger");
+    out.field("name", name_for_charger_type(user_selected_charger_type));
+    out.field("alive", charger_data.CAN_charger_still_alive > 0);
+    out.field("hv_enabled", charger_data.charger_HV_enabled);
+    out.field("aux12v_enabled", charger_data.charger_aux12V_enabled);
+    out.field("hv_v", charger_data.charger_stat_HVvol);
+    out.field("hv_a", charger_data.charger_stat_HVcur);
+    out.field("ac_v", charger_data.charger_stat_ACvol);
+    out.field("ac_a", charger_data.charger_stat_ACcur);
+    out.field("lv_v", charger_data.charger_stat_LVvol);
+    out.field("lv_a", charger_data.charger_stat_LVcur);
+    out.end_object();
   }
 
-  add_state_events(doc["events"].to<JsonObject>());
+  out.begin_object("events");
+  add_state_events(out);
+  out.end_object();
 
 #ifdef BOARD_HAS_LOAD_SWITCH
   if (LoadSwitch* load_switch = esp32hal->load_switch()) {
     const LoadSwitchStatus& ls_status = load_switch->status();
-    JsonObject ls = doc["load_switch"].to<JsonObject>();
-    ls["device_ok"] = ls_status.device_ok;
-    JsonArray channels = ls["channels"].to<JsonArray>();
+    out.begin_object("load_switch");
+    out.field("device_ok", ls_status.device_ok);
+    out.begin_array("channels");
     // Every channel is emitted, disabled ones included: the client addresses a
     // channel by its array index when toggling.
     for (uint8_t ch = 0; ch < ls_status.channel_count; ch++) {
       const LoadSwitchChannelStatus& channel = ls_status.channels[ch];
-      JsonObject entry = channels.add<JsonObject>();
-      entry["role_id"] = static_cast<uint32_t>(channel.role);
-      entry["role"] = name_for_load_switch_role(channel.role);
-      entry["manual"] = channel.role == LoadSwitchRole::Manual;
-      entry["on"] = channel.on;
-      entry["pending"] = channel.pending;
-      entry["pending_on"] = channel.pending_on;
-      entry["current_mA"] = channel.current_mA;
-      entry["fault"] = channel.fault || channel.latched_off;
+      out.begin_object();
+      out.field("role_id", static_cast<uint32_t>(channel.role));
+      out.field("role", name_for_load_switch_role(channel.role));
+      out.field("manual", channel.role == LoadSwitchRole::Manual);
+      out.field("on", channel.on);
+      out.field("pending", channel.pending);
+      out.field("pending_on", channel.pending_on);
+      out.field("current_mA", channel.current_mA);
+      out.field("fault", channel.fault || channel.latched_off);
+      out.end_object();
     }
+    out.end_array();
+    out.end_object();
   }
 #endif
 
-  String out;
-  serializeJson(doc, out);
-  return out;
+  out.end_object();
 }
 
 

@@ -11,6 +11,11 @@
 #include "../Software/src/inverter/INVERTERS.h"
 #include "../Software/src/battery/battery_slots.h"
 #include "../Software/src/devboard/webserver/settings_api.h"
+#include "../Software/src/devboard/webserver/json_response_writer.h"
+
+static String settings_json(BatteryEmulatorSettingsStore& store, bool reboot_required = false) {
+  return render_json([&](ResponseWriter& out) { write_settings(out, store, reboot_required); });
+}
 #include "../Software/src/devboard/webserver/web_json.h"
 #include "../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "emul/Preferences.h"
@@ -57,7 +62,7 @@ TEST_F(SettingsApiTest, EmitsScalarsWithCorrectJsonTypes) {
   }
 
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonObjectConst values = doc["values"];
 
   EXPECT_TRUE(values["MQTTENABLED"].is<bool>());
@@ -80,7 +85,7 @@ TEST_F(SettingsApiTest, FloatStringCarriesNegativeSign) {
   }
 
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   EXPECT_STREQ(doc["values"]["CTOFFSET"].as<const char*>(), "-2.5");
 }
 
@@ -91,7 +96,7 @@ TEST_F(SettingsApiTest, WireKeyIsTheNvsKey) {
   }
 
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonObjectConst values = doc["values"];
 
   EXPECT_FALSE(values["INVTYPE"].isNull());
@@ -118,7 +123,7 @@ TEST_F(SettingsApiTest, EveryDeviceRowResolvesToARegisteredOwner) {
 
   HalScope hal;
   BatteryEmulatorSettingsStore store;
-  const JsonDocument doc = parse_values(build_settings_json(store));
+  const JsonDocument doc = parse_values(settings_json(store));
   size_t device_rows = 0;
   for (JsonObjectConst entry : doc["schema"].as<JsonArrayConst>()) {
     JsonArrayConst owners = entry["owners"];
@@ -174,7 +179,7 @@ TEST_F(SettingsApiTest, EveryDeclaredCapabilityIsClaimedByARow) {
 TEST_F(SettingsApiTest, BydAutoCalibrationRowsBelongToTheBydDriver) {
   HalScope hal;
   BatteryEmulatorSettingsStore store;
-  const JsonDocument doc = parse_values(build_settings_json(store));
+  const JsonDocument doc = parse_values(settings_json(store));
   size_t seen = 0;
   for (JsonObjectConst entry : doc["schema"].as<JsonArrayConst>()) {
     if (entry["section"].isNull() || std::string(entry["section"].as<const char*>()) != "bydautocal") {
@@ -199,7 +204,7 @@ TEST(SettingsTableTest, EveryKeyIsUniqueAcrossStorageKinds) {
 
 TEST_F(SettingsApiTest, EmitsDefaultsForAbsentKeys) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonObjectConst values = doc["values"];
 
   // WIFIAPENABLED defaults on even with no stored value.
@@ -212,7 +217,7 @@ TEST_F(SettingsApiTest, EmitsDefaultsForAbsentKeys) {
 
 TEST_F(SettingsApiTest, TeslaGatewayDefaultsMatchTheDriver) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonObjectConst values = doc["values"];
 
   EXPECT_EQ(values["GTWCOUNTRY"].as<uint32_t>(), kTeslaGtwCountryDefault);
@@ -224,7 +229,7 @@ TEST_F(SettingsApiTest, TeslaGatewayDefaultsMatchTheDriver) {
 
 TEST_F(SettingsApiTest, EmitsBatteryOptionsNoneFirst) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonArrayConst battery = doc["options"]["battery"];
 
   ASSERT_FALSE(battery.isNull());
@@ -239,7 +244,7 @@ TEST_F(SettingsApiTest, EmitsBatteryOptionsNoneFirst) {
 
 TEST_F(SettingsApiTest, EmitsMapAndEnumOptionLists) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonObjectConst options = doc["options"];
 
   for (const char* key : {"chemistry", "inverter", "charger", "shunt", "attenuation", "ledmode"}) {
@@ -255,7 +260,7 @@ TEST_F(SettingsApiTest, EmitsMapAndEnumOptionLists) {
 TEST_F(SettingsApiTest, EmitsSelectableInterfacesWhenHalPresent) {
   HalScope hal;
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonArrayConst interfaces = doc["interfaces"];
 
   ASSERT_FALSE(interfaces.isNull());
@@ -270,7 +275,7 @@ TEST_F(SettingsApiTest, EmitsSelectableInterfacesWhenHalPresent) {
 TEST_F(SettingsApiTest, InterfacesSortedAlphabeticallyByName) {
   HalScope hal;
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonArrayConst interfaces = doc["interfaces"];
 
   ASSERT_GT(interfaces.size(), 1u);
@@ -287,7 +292,7 @@ TEST_F(SettingsApiTest, InterfacesSortedAlphabeticallyByName) {
 TEST_F(SettingsApiTest, UnsetCommResolvesToASelectableInterface) {
   HalScope hal;
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
 
   const uint32_t batt_comm = doc["dynamic"]["batteries"][0]["comm"].as<uint32_t>();
   bool matches = false;
@@ -309,7 +314,7 @@ TEST_F(SettingsApiTest, BatterySlotsRoundTripThroughTheDynamicSection) {
   }
 
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonArrayConst batteries = doc["dynamic"]["batteries"];
 
   ASSERT_EQ(batteries.size(), (size_t)kMaxBatterySlots) << "every slot is emitted uniformly, holes included";
@@ -354,7 +359,7 @@ TEST_F(SettingsApiTest, PostWithoutBatterySectionLeavesStoredBadShapeAlone) {
 
 TEST_F(SettingsApiTest, BatteryOptionsHaveExactlyOneNoneFirst) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonArrayConst battery = doc["options"]["battery"];
 
   ASSERT_GT(battery.size(), 0u);
@@ -370,7 +375,7 @@ TEST_F(SettingsApiTest, BatteryOptionsHaveExactlyOneNoneFirst) {
 
 TEST_F(SettingsApiTest, BatteryOptionLabelsAscendingAfterNone) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonArrayConst battery = doc["options"]["battery"];
 
   ASSERT_GT(battery.size(), 1u);
@@ -385,7 +390,7 @@ TEST_F(SettingsApiTest, NullHalOmitsInterfacesAndDynamic) {
   NullHalScope no_hal;
   EXPECT_EQ(esp32hal, nullptr);
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
 
   EXPECT_TRUE(doc["interfaces"].isNull());
   EXPECT_TRUE(doc["dynamic"]["termination"].isNull());
@@ -395,17 +400,17 @@ TEST_F(SettingsApiTest, NullHalOmitsInterfacesAndDynamic) {
 
 TEST_F(SettingsApiTest, BuildReturnsNonEmptyOnSuccess) {
   BatteryEmulatorSettingsStore reader(true);
-  EXPECT_GT(build_settings_json(reader).length(), 0u);
+  EXPECT_GT(settings_json(reader).length(), 0u);
 }
 
 // POST echoes the applier's reboot_required through meta; GET (default arg) reports false.
 TEST_F(SettingsApiTest, MetaRebootRequiredReflectsArgument) {
   BatteryEmulatorSettingsStore reader(true);
 
-  const JsonDocument on = parse_values(build_settings_json(reader, true));
+  const JsonDocument on = parse_values(settings_json(reader, true));
   EXPECT_TRUE(on["meta"]["reboot_required"].as<bool>());
 
-  const JsonDocument off = parse_values(build_settings_json(reader));
+  const JsonDocument off = parse_values(settings_json(reader));
   EXPECT_FALSE(off["meta"]["reboot_required"].as<bool>());
 }
 
@@ -415,7 +420,7 @@ TEST_F(SettingsApiTest, MetaRebootRequiredReflectsArgument) {
 TEST_F(SettingsApiTest, ServerEmittedDropdownsAreNonEmpty) {
   HalScope hal;
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonObjectConst options = doc["options"];
   JsonArrayConst interfaces = doc["interfaces"];
 
@@ -439,7 +444,7 @@ TEST_F(SettingsApiTest, ServerEmittedDropdownsAreNonEmpty) {
 TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
   HalScope hal;
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonArrayConst schema = doc["schema"];
 
   ASSERT_FALSE(schema.isNull());
@@ -504,7 +509,7 @@ TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
 // can hint it when the field is blank; it is not a static schema default_str.
 TEST_F(SettingsApiTest, HostnamePlaceholderCarriesDefaultHostname) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
 
   EXPECT_STREQ(doc["placeholders"]["HOSTNAME"].as<const char*>(), default_hostname().c_str());
 }
@@ -655,7 +660,7 @@ TEST_F(SettingsApiTest, PasswordFieldsRedactedInBuild) {
   }
 
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonObjectConst values = doc["values"];
 
   EXPECT_STREQ(values["HTTPPASS"].as<const char*>(), "");
@@ -833,7 +838,7 @@ TEST_F(SettingsApiTest, StaticIpStoredAsDottedQuadString) {
 
   // IP fields are not secrets: they must round-trip through GET unredacted.
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   EXPECT_STREQ(doc["values"]["LOCALIP"].as<const char*>(), "192.168.1.50");
   EXPECT_STREQ(doc["values"]["DNS"].as<const char*>(), "1.1.1.1");
 }
@@ -883,7 +888,7 @@ TEST_F(SettingsApiTest, UnknownKeyIgnored) {
 // APNAME and the custom-MQTT-topic group are dead: nothing reads them (MQTT identity and AP SSID are hostname-derived).
 TEST_F(SettingsApiTest, RetiredKeysAbsentFromSchemaAndIgnoredOnApply) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonArrayConst schema = doc["schema"];
   ASSERT_FALSE(schema.isNull());
   ASSERT_GT(schema.size(), 0u);  // guard the absence checks below against a vacuous empty schema
@@ -952,7 +957,7 @@ TEST_F(SettingsApiTest, NoChangeNoRebootWhenValueMatchesStored) {
 // CHGTAPERFLOOR default mirrors comm_nvm's read (0), not the old form's 400.
 TEST_F(SettingsApiTest, ChargeTaperDefaultsEmitted) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   JsonObjectConst values = doc["values"];
 
   EXPECT_FALSE(values["CHGTAPERSOC"].as<bool>());
@@ -977,7 +982,7 @@ TEST_F(SettingsApiTest, ChargeTaperApplyWrites) {
 TEST_F(SettingsApiTest, FoxessDefaultsEmittedAndApplyWrites) {
   {
     BatteryEmulatorSettingsStore reader(true);
-    const JsonDocument doc = parse_values(build_settings_json(reader));
+    const JsonDocument doc = parse_values(settings_json(reader));
     JsonObjectConst values = doc["values"];
     EXPECT_EQ(values["FOXESSTYPE"].as<uint32_t>(), 0u);
     EXPECT_EQ(values["FOXESSSUBTYPE"].as<uint32_t>(), 0u);
@@ -1000,7 +1005,7 @@ TEST_F(SettingsApiTest, FoxessDefaultsEmittedAndApplyWrites) {
 TEST_F(SettingsApiTest, HaDiscoveryTopicDefaultAndApply) {
   {
     BatteryEmulatorSettingsStore reader(true);
-    const JsonDocument doc = parse_values(build_settings_json(reader));
+    const JsonDocument doc = parse_values(settings_json(reader));
     EXPECT_STREQ(doc["values"]["HADISCTOPIC"].as<const char*>(), "homeassistant");
   }
 
@@ -1016,7 +1021,7 @@ TEST_F(SettingsApiTest, HaDiscoveryTopicDefaultAndApply) {
 TEST_F(SettingsApiTest, HaDiscoveryTriggersDefaultFalseAndApply) {
   {
     BatteryEmulatorSettingsStore reader(true);
-    const JsonDocument doc = parse_values(build_settings_json(reader));
+    const JsonDocument doc = parse_values(settings_json(reader));
     ASSERT_FALSE(doc["values"]["HADISC"].isNull()) << "HADISC missing from the settings schema";
     ASSERT_FALSE(doc["values"]["HADISCFWU"].isNull()) << "HADISCFWU missing from the settings schema";
     EXPECT_FALSE(doc["values"]["HADISC"].as<bool>()) << "autodiscovery must not publish unless asked";
@@ -1037,7 +1042,7 @@ TEST_F(SettingsApiTest, HaDiscoveryTriggersDefaultFalseAndApply) {
 TEST_F(SettingsApiTest, SyslogFieldsPresentWithDefaultsAndApply) {
   {
     BatteryEmulatorSettingsStore reader(true);
-    const JsonDocument doc = parse_values(build_settings_json(reader));
+    const JsonDocument doc = parse_values(settings_json(reader));
     JsonObjectConst values = doc["values"];
     EXPECT_FALSE(values["SYSLOGEN"].as<bool>());
     EXPECT_STREQ(values["SYSLOGIP"].as<const char*>(), "");
@@ -1063,7 +1068,7 @@ TEST_F(SettingsApiTest, SyslogFieldsPresentWithDefaultsAndApply) {
 
 TEST_F(SettingsApiTest, SchemaEmitsNumericBoundsOnlyWhereSet) {
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
 
   bool saw_bounded = false, saw_unbounded = false;
   for (JsonObjectConst entry : doc["schema"].as<JsonArrayConst>()) {
@@ -1155,7 +1160,7 @@ TEST_F(SettingsApiTest, EmitsGpioOptionGroupOrderedByLabel) {
   esp32hal = &hal;
 
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
 
   EXPECT_EQ(doc["values"]["GPIOOPT9"].as<uint32_t>(), 0u);
 
@@ -1191,7 +1196,7 @@ TEST_F(SettingsApiTest, GpioOptionValueReportsClampedChoice) {
     store.saveUInt("GPIOOPT9", 7);  // no such choice -> reported as default 0
   }
   BatteryEmulatorSettingsStore reader(true);
-  const JsonDocument doc = parse_values(build_settings_json(reader));
+  const JsonDocument doc = parse_values(settings_json(reader));
   EXPECT_EQ(doc["values"]["GPIOOPT9"].as<uint32_t>(), 0u);
 
   esp32hal = saved;
@@ -1469,7 +1474,7 @@ TEST_F(SettingsApiTest, BalancingIsEmittedPerSlotAndRoundTrips) {
       R"({"slot":0,"max_time_min":90,"max_cell_mv":3650,"max_dev_mv":400,"max_pack_v":394.0,"float_power_w":1500})");
   ASSERT_TRUE(result.ok) << result.error.c_str();
 
-  const JsonDocument doc = parse_values(build_settings_json(store));
+  const JsonDocument doc = parse_values(settings_json(store));
   JsonObjectConst entry = doc["dynamic"]["balancing"][0];
   EXPECT_EQ(entry["slot"].as<uint8_t>(), 0);
   EXPECT_FLOAT_EQ(entry["max_time_min"].as<float>(), 90.0f);
@@ -1515,7 +1520,7 @@ TEST_F(SettingsApiTest, AcceptsAValueFromAClientOwnedOptionList) {
 TEST_F(SettingsApiTest, EveryOptionsKeyIsPublishedOrDeliberatelyClientOwned) {
   HalScope hal;
   BatteryEmulatorSettingsStore store;
-  const JsonDocument doc = parse_values(build_settings_json(store));
+  const JsonDocument doc = parse_values(settings_json(store));
   JsonObjectConst options = doc["options"];
   const std::set<std::string> client_owned = {"country",    "mapregion",  "chassis", "pack",
                                               "pylonbrand", "contactor",  "sungrow"};
@@ -1552,7 +1557,7 @@ TEST_F(SettingsApiTest, LeavesFieldsWithoutOptionsUnchecked) {
 TEST_F(SettingsApiTest, PublishesShellOptionsForWebUi) {
   HalScope hal;
   BatteryEmulatorSettingsStore store;
-  const JsonDocument doc = parse_values(build_settings_json(store));
+  const JsonDocument doc = parse_values(settings_json(store));
   JsonArrayConst shells = doc["options"]["webui"].as<JsonArrayConst>();
   ASSERT_EQ(shells.size(), 2u);
   EXPECT_STREQ(shells[0]["v"] | "", "legacy");
@@ -1564,14 +1569,14 @@ TEST_F(SettingsApiTest, PublishesShellOptionsForWebUi) {
 TEST_F(SettingsApiTest, WebUiDefaultsToLegacy) {
   HalScope hal;
   BatteryEmulatorSettingsStore store;
-  const JsonDocument doc = parse_values(build_settings_json(store));
+  const JsonDocument doc = parse_values(settings_json(store));
   EXPECT_STREQ(doc["values"]["WEBUI"] | "", "legacy");
 }
 
 TEST_F(SettingsApiTest, WebUiSchemaRowCarriesOptionsAndCategory) {
   HalScope hal;
   BatteryEmulatorSettingsStore store;
-  const JsonDocument doc = parse_values(build_settings_json(store));
+  const JsonDocument doc = parse_values(settings_json(store));
   bool seen = false;
   for (JsonObjectConst entry : doc["schema"].as<JsonArrayConst>()) {
     if (strcmp(entry["key"] | "", "WEBUI") != 0) {

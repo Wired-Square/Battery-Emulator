@@ -8,6 +8,11 @@
 #include "../../Software/src/datalayer/datalayer_extended.h"
 #include "../../Software/src/devboard/hal/hal.h"
 #include "../../Software/src/devboard/webserver/advanced_api.h"
+#include "../../Software/src/devboard/webserver/json_response_writer.h"
+
+static String advanced_json() {
+  return render_json(write_advanced);
+}
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 namespace {
@@ -16,7 +21,7 @@ namespace {
 // by its availability predicate is indistinguishable from one never declared.
 bool offers(uint8_t entry, const char* id) {
   JsonDocument doc;
-  EXPECT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  EXPECT_FALSE(deserializeJson(doc, advanced_json().c_str()));
   for (JsonObject command : doc["batteries"][entry]["commands"].as<JsonArray>()) {
     if (std::strcmp(command["id"] | "", id) == 0) {
       return true;
@@ -45,7 +50,7 @@ TEST(TeslaTests, AdvancedStatusRendersBeforeAnyCanTraffic) {
   batteries[0] = tesla;
 
   JsonDocument doc;
-  EXPECT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  EXPECT_FALSE(deserializeJson(doc, advanced_json().c_str()));
   EXPECT_STREQ(doc["batteries"][0]["sections"][0]["fields"][3]["label"] | "", "Battery Manufacture Date");
   EXPECT_STREQ(doc["batteries"][0]["sections"][0]["fields"][3]["value"] | "?", "");
 
@@ -91,7 +96,7 @@ TEST(TeslaTests, BalancingIsOfferedOnSecondarySlots) {
   batteries[1] = tesla;
 
   JsonDocument doc;
-  EXPECT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+  EXPECT_FALSE(deserializeJson(doc, advanced_json().c_str()));
   EXPECT_EQ(doc["batteries"][0]["index"] | -1, 1);
 
   EXPECT_TRUE(offers(0, "startBalancing"));

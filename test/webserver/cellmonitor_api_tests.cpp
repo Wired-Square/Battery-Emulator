@@ -6,6 +6,11 @@
 #include "../../Software/src/battery/Battery.h"
 #include "../../Software/src/datalayer/datalayer.h"
 #include "../../Software/src/devboard/webserver/cellmonitor_api.h"
+#include "../../Software/src/devboard/webserver/json_response_writer.h"
+
+static String cellmonitor_json() {
+  return render_json(write_cellmonitor);
+}
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 namespace {
@@ -50,7 +55,7 @@ class CellMonitorApi : public testing::Test {
 TEST_F(CellMonitorApi, SkipsUnreadCellsAndAlignsBalancing) {
   seed(datalayer.battery.pack[0], {3700, 3710, 0, 3690}, {false, true, false, false});
 
-  auto doc = parse(build_cellmonitor_json());
+  auto doc = parse(cellmonitor_json());
   ASSERT_EQ(doc["batteries"].size(), 1u);
   auto cells = doc["batteries"][0]["cells"];
   auto bal = doc["batteries"][0]["balancing"];
@@ -67,7 +72,7 @@ TEST_F(CellMonitorApi, BalancingActiveFlag) {
   seed(datalayer.battery.pack[0], {3700}, {false});
   datalayer.battery.pack[0].status.balancing_status = BALANCING_STATUS_ACTIVE;
 
-  auto doc = parse(build_cellmonitor_json());
+  auto doc = parse(cellmonitor_json());
   EXPECT_TRUE(doc["batteries"][0]["balancing_active"].as<bool>());
 }
 
@@ -75,12 +80,12 @@ TEST_F(CellMonitorApi, IncludesSecondBatteryOnlyWhenPresent) {
   seed(datalayer.battery.pack[0], {3700, 3710}, {false, false});
   seed(datalayer.battery.pack[1], {3600, 3620, 3610}, {false, false, false});
 
-  auto without = parse(build_cellmonitor_json());
+  auto without = parse(cellmonitor_json());
   EXPECT_EQ(without["batteries"].size(), 1u);
 
   SeriesBattery second;
   batteries[1] = &second;
-  auto with = parse(build_cellmonitor_json());
+  auto with = parse(cellmonitor_json());
   ASSERT_EQ(with["batteries"].size(), 2u);
   EXPECT_EQ(with["batteries"][1]["cells"].size(), 3u);
   batteries[1] = nullptr;
@@ -91,7 +96,7 @@ TEST_F(CellMonitorApi, PublishesDriverCellSeries) {
   SeriesBattery primary;
   batteries[0] = &primary;
 
-  auto doc = parse(build_cellmonitor_json());
+  auto doc = parse(cellmonitor_json());
   auto series = doc["batteries"][0]["series"];
   ASSERT_EQ(series.size(), 1u);
   EXPECT_STREQ(series[0]["id"], "balance_hours");
@@ -111,6 +116,6 @@ TEST_F(CellMonitorApi, PublishesDriverCellSeries) {
 
 TEST_F(CellMonitorApi, EmitsAnEmptySeriesListForADriverWithout) {
   seed(datalayer.battery.pack[0], {3700}, {false});
-  auto doc = parse(build_cellmonitor_json());
+  auto doc = parse(cellmonitor_json());
   EXPECT_EQ(doc["batteries"][0]["series"].size(), 0u);
 }

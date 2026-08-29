@@ -8,6 +8,11 @@
 #include "../../Software/src/datalayer/datalayer.h"
 #include "../../Software/src/devboard/hal/hal.h"
 #include "../../Software/src/devboard/webserver/advanced_api.h"
+#include "../../Software/src/devboard/webserver/json_response_writer.h"
+
+static String advanced_json() {
+  return render_json(write_advanced);
+}
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 #include "Arduino.h"
@@ -82,7 +87,7 @@ TEST(NissanLeafTests, ResetSohIsWithdrawnOnceZe1IsDetected) {
 
   JsonDocument doc;
   auto offers = [&doc](const char* id) {
-    EXPECT_FALSE(deserializeJson(doc, build_advanced_json().c_str()));
+    EXPECT_FALSE(deserializeJson(doc, advanced_json().c_str()));
     for (JsonObject command : doc["batteries"][0]["commands"].as<JsonArray>()) {
       if (std::strcmp(command["id"] | "", id) == 0) {
         return true;

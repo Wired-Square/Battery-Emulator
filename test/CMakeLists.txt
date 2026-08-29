@@ -77,6 +77,7 @@ add_executable(tests
     webserver/canreplay_api_tests.cpp
     webserver/cellmonitor_api_tests.cpp
     webserver/advanced_api_tests.cpp
+    webserver/response_writer_tests.cpp
     voltage_sync_tests.cpp
     battery_slot_tests.cpp
     battery_combined_tests.cpp
@@ -141,6 +142,7 @@ add_executable(tests
     ../Software/src/devboard/webserver/cellmonitor_api.cpp
     ../Software/src/devboard/webserver/advanced_api.cpp
     ../Software/src/devboard/webserver/web_json.cpp
+    ../Software/src/devboard/webserver/json_response_writer.cpp
     ../Software/src/devboard/hal/GpioOutput.cpp
     ../Software/src/devboard/hal/PwmTone.cpp
     ../Software/src/devboard/utils/types.cpp

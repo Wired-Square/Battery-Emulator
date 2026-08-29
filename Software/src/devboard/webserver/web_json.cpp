@@ -1,7 +1,5 @@
 #include "web_json.h"
 
-#include <string>
-
 #include "../../battery/battery_slots.h"
 #include "../../system_settings.h"
 
@@ -23,16 +21,4 @@ const char* validate_battery_slot(const JsonDocument& doc, uint8_t& slot) {
   }
   slot = static_cast<uint8_t>(value);
   return nullptr;
-}
-
-String serialise_doc(const JsonDocument& doc) {
-#if ARDUINOJSON_ENABLE_ARDUINO_STRING
-  String out;
-  serializeJson(doc, out);
-  return out;
-#else
-  std::string out;
-  serializeJson(doc, out);
-  return String(out);
-#endif
 }

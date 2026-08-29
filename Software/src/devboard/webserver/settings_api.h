@@ -8,6 +8,8 @@
 #include "../../battery/balancing_bounds.h"
 #include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "../utils/types.h"
+#include "response_writer.h"
+#include "setting_options.h"
 #include "settings_field.h"
 
 class BatteryEmulatorSettingsStore;
@@ -27,14 +29,13 @@ struct SettingRef {
 size_t setting_count();
 SettingRef setting_at(size_t index);
 
-// Serialises the settings payload: {"values":{...}} scalars, {"options":{...}}
+// Writes the settings payload: {"values":{...}} scalars, {"options":{...}}
 // enum/map pick-lists, {"schema":[...]} the field list (key, category, widget
 // type, options-key) the client renders from, and, when a HAL is present, the
 // "interfaces" array and board-gated "dynamic" sections.
-// Returns an empty String if the document overflowed (caller should answer 500).
 // reboot_required is echoed into meta.reboot_required; the POST route passes the
 // applier's result, GET leaves it false.
-String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_required = false);
+void write_settings(ResponseWriter& out, BatteryEmulatorSettingsStore& store, bool reboot_required = false);
 
 struct SettingsApplyResult {
   bool ok;
@@ -46,7 +47,7 @@ struct SettingsApplyResult {
 };
 
 // Applies a POSTed settings document back to NVS through kSettingFields (the same
-// descriptors build_settings_json reads, so the two directions cannot drift). root
+// descriptors write_settings reads, so the two directions cannot drift). root
 // carries "values" (scalar map) and optional "dynamic" (batteries + termination +
 // load switch). A field absent from "values" — or present as JSON null — is
 // preserved, never wiped. Wrong-type scalars and any invalid batteries entry

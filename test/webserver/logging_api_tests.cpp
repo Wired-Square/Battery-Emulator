@@ -2,6 +2,15 @@
 #include <cstring>
 #include "../../Software/src/datalayer/datalayer.h"
 #include "../../Software/src/devboard/webserver/logging_api.h"
+#include "../../Software/src/devboard/webserver/json_response_writer.h"
+
+static String canlog_json() {
+  return render_json(write_canlog);
+}
+
+static String debug_json() {
+  return render_json(write_debug);
+}
 #include "../../Software/src/lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 // comm_can.cpp is not linked into the host target; provide the symbol the
@@ -24,7 +33,7 @@ TEST(LoggingApi, CanlogSplitsBufferOnNewlines) {
   user_selected_CAN_ID_cutoff_filter = 42;
 
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_canlog_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, canlog_json().c_str()));
   EXPECT_TRUE(doc["active"].as<bool>());
   EXPECT_FALSE(doc["sd"].as<bool>());
   EXPECT_EQ(doc["cutoff"].as<int>(), 42);
@@ -36,7 +45,7 @@ TEST(LoggingApi, CanlogSplitsBufferOnNewlines) {
 TEST(LoggingApi, CanlogEmptyBufferYieldsNoLines) {
   seed_buffer("");
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_canlog_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, canlog_json().c_str()));
   EXPECT_EQ(doc["lines"].size(), 0u);
 }
 
@@ -46,7 +55,7 @@ TEST(LoggingApi, CanlogDropsTrailingUnterminatedFragment) {
   // lines.
   seed_buffer("0x100 aa\n0x200 bb");  // no trailing newline
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_canlog_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, canlog_json().c_str()));
   ASSERT_EQ(doc["lines"].size(), 1u);
   EXPECT_STREQ(doc["lines"][0], "0x100 aa");
 }
@@ -54,7 +63,7 @@ TEST(LoggingApi, CanlogDropsTrailingUnterminatedFragment) {
 TEST(LoggingApi, CanlogPreservesEmptyLines) {
   seed_buffer("a\n\nb\n");
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_canlog_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, canlog_json().c_str()));
   ASSERT_EQ(doc["lines"].size(), 3u);
   EXPECT_STREQ(doc["lines"][0], "a");
   EXPECT_STREQ(doc["lines"][1], "");
@@ -71,7 +80,7 @@ TEST(LoggingApi, DebugShowsNewlineLessTailBeforeHead) {
   info.logged_can_messages_offset = 4;
 
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_debug_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, debug_json().c_str()));
   ASSERT_EQ(doc["lines"].size(), 2u);
   EXPECT_STREQ(doc["lines"][0], "oldfragment");
   EXPECT_STREQ(doc["lines"][1], "new");
@@ -87,7 +96,7 @@ TEST(LoggingApi, DebugReadsWrappedRingBufferInOrder) {
   info.logged_can_messages_offset = 5;  // 0 < offset < size-1 -> wrapped path
 
   JsonDocument doc;
-  ASSERT_FALSE(deserializeJson(doc, build_debug_json().c_str()));
+  ASSERT_FALSE(deserializeJson(doc, debug_json().c_str()));
   // Tail (from the first clean boundary after offset) precedes the head.
   ASSERT_GE(doc["lines"].size(), 2u);
   EXPECT_STREQ(doc["lines"][0], "old1");

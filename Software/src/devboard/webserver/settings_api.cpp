@@ -650,22 +650,12 @@ bool is_password_key(const char* nvs_key) {
          std::strcmp(nvs_key, "APPASSWORD") == 0 || std::strcmp(nvs_key, "MQTTPASSWORD") == 0;
 }
 
-// ArduinoJson links (does not copy) a bare const char*, so a computed String
-// must be copied into the document. On device it recognises Arduino String; on
-// the host build it does not, so route through std::string, which it copies.
-void set_json_string(JsonObject obj, const char* key, const String& value) {
-#if ARDUINOJSON_ENABLE_ARDUINO_STRING
-  obj[key] = value;
-#else
-  obj[key] = std::string(value.c_str());
-#endif
-}
-
 // Mirrors options_for_enum_with_none: none first, then labels ascending.
 // strcmp on the producers' static literals reproduces String's order without
 // the host emul String, which has no operator<.
 template <typename TEnum, typename Producer>
-void emit_enum_options(JsonObject options, const char* key, Producer name_for_type, const TEnum* none = nullptr) {
+void emit_enum_options(SettingOptionSink& sink, const char* key, Producer name_for_type,
+                       const TEnum* none = nullptr, int32_t (*slots_for)(TEnum) = nullptr) {
   std::vector<std::pair<const char*, TEnum>> pairs;
   for (TEnum value : enum_values<TEnum>()) {
     const char* name = name_for_type(value);
@@ -682,21 +672,19 @@ void emit_enum_options(JsonObject options, const char* key, Producer name_for_ty
     }
   }
 
-  JsonArray arr = options[key].to<JsonArray>();
+  sink.begin_list(key);
   for (const auto& [name, value] : pairs) {
-    JsonObject opt = arr.add<JsonObject>();
-    opt["v"] = static_cast<int>(value);
-    opt["n"] = name;
+    sink.option(static_cast<int>(value), name, slots_for != nullptr ? slots_for(value) : 0);
   }
+  sink.end_list();
 }
 
-void emit_map_options(JsonObject options, const char* key, const std::map<int, String>& value_names) {
-  JsonArray arr = options[key].to<JsonArray>();
+void emit_map_options(SettingOptionSink& sink, const char* key, const std::map<int, String>& value_names) {
+  sink.begin_list(key);
   for (const auto& [value, name] : value_names) {
-    JsonObject opt = arr.add<JsonObject>();
-    opt["v"] = value;
-    set_json_string(opt, "n", name);
+    sink.option(value, name.c_str(), 0);
   }
+  sink.end_list();
 }
 
 // Parity with emit_enum_options: visible (non-null-label) choices, alphabetical
@@ -704,8 +692,8 @@ void emit_map_options(JsonObject options, const char* key, const std::map<int, S
 // Emit-by-scan over the handful of choices, ordered by (label, address); keeps
 // std::sort/std::vector out of every board, including option-less ones that
 // never reclaim the code.
-void emit_gpio_option_choices(JsonObject options, const GpioOptionGroup& group) {
-  JsonArray arr = options[group.nvs_key].to<JsonArray>();
+void emit_gpio_option_choices(SettingOptionSink& sink, const GpioOptionGroup& group) {
+  sink.begin_list(group.nvs_key);
   const GpioOptionChoice* prev = nullptr;
   for (;;) {
     const GpioOptionChoice* next = nullptr;
@@ -731,11 +719,10 @@ void emit_gpio_option_choices(JsonObject options, const GpioOptionGroup& group) 
     if (next == nullptr) {
       break;
     }
-    JsonObject opt = arr.add<JsonObject>();
-    opt["v"] = static_cast<int>(next->value);
-    opt["n"] = next->label;
+    sink.option(static_cast<int>(next->value), next->label, 0);
     prev = next;
   }
+  sink.end_list();
 }
 
 const char* domain_name(SettingDomain domain) {
@@ -750,25 +737,26 @@ const char* domain_name(SettingDomain domain) {
   return "";
 }
 
-void emit_device_ownership(JsonObject entry, const DeviceSetting& row, SettingDomain domain,
+void emit_device_ownership(ResponseWriter& out, const DeviceSetting& row, SettingDomain domain,
                            DeviceSettingSource source) {
   if (row.label != nullptr) {
-    entry["label"] = row.label;
+    out.field("label", row.label);
   }
   if (row.slot != kAnySlot) {
-    entry["slot"] = row.slot;
+    out.field("slot", row.slot);
   }
-  entry["domain"] = domain_name(domain);
-  JsonArray owners = entry["owners"].to<JsonArray>();
+  out.field("domain", domain_name(domain));
+  out.begin_array("owners");
   const size_t type_count = device_type_count(domain);
   for (size_t i = 0; i < type_count; i++) {
     const bool owned = source != nullptr
                            ? device_source_at(domain, i) == source
                            : row.capability != 0 && (device_capabilities_at(domain, i) & row.capability) != 0;
     if (owned) {
-      owners.add(device_type_id_at(domain, i));
+      out.element(device_type_id_at(domain, i));
     }
   }
+  out.end_array();
 }
 
 // Stable strings keep the client independent of the SettingType enum's numeric ordering.
@@ -796,13 +784,6 @@ const char* widget_type_name(SettingType type) {
       return "interface";
   }
   return "";
-}
-
-bool value_matches_option(SettingType type, JsonVariantConst value, JsonVariantConst option) {
-  if (type == ST::StringVal) {
-    return strcmp(value.as<const char*>(), option.as<const char*>()) == 0;
-  }
-  return value.as<uint32_t>() == option.as<uint32_t>();
 }
 
 double read_live(const SettingField& field, uint8_t slot) {
@@ -856,25 +837,25 @@ void write_live(const SettingField& field, uint8_t slot, double json_value) {
   }
 }
 
-void emit_live_value(JsonObject out, const SettingField& field, uint8_t slot) {
+void emit_live_value(ResponseWriter& out, const SettingField& field, uint8_t slot) {
   const double value = read_live(field, slot) / field.live.ram_per_json;
   switch (field.type) {
     case ST::Bool:
-      out[field.key] = value != 0.0;
+      out.field(field.key, value != 0.0);
       break;
     case ST::FloatX10:
     case ST::SignedFloatX10:
     case ST::Float:
-      out[field.key] = value;
+      out.field(field.key, value);
       break;
     default:
-      out[field.key] = static_cast<int64_t>(std::llround(value));
+      out.field(field.key, static_cast<int64_t>(std::llround(value)));
       break;
   }
 }
 
-void emit_asset_name_options(JsonObject options, const char* options_key, AssetNameSpec spec) {
-  JsonArray names = options[options_key].to<JsonArray>();
+void emit_asset_name_options(SettingOptionSink& sink, const char* options_key, AssetNameSpec spec) {
+  sink.begin_list(options_key);
   const WebAssetTable table = default_web_asset_table();
   const size_t total = web_asset_name_count(table, spec);
   for (size_t i = 0; i < total; i++) {
@@ -882,105 +863,137 @@ void emit_asset_name_options(JsonObject options, const char* options_key, AssetN
     if (!web_asset_name_at(table, spec, i, name, sizeof(name))) {
       continue;
     }
-    names.add<JsonObject>()["v"] = name;
+    sink.text_option(name);
   }
+  sink.end_list();
 }
 
-void emit_all_options(JsonObject options) {
+int32_t battery_slot_hint(BatteryType type) {
+  if (type == BatteryType::None) {
+    return 0;
+  }
+  return battery_type_allowed_in_slot(type, 2) ? 3 : battery_type_allowed_in_slot(type, 1) ? 2 : 1;
+}
+
+class WriterOptionSink : public SettingOptionSink {
+ public:
+  explicit WriterOptionSink(ResponseWriter& out) : out_(out) {}
+
+  void begin_list(const char* key) override { out_.begin_array(key); }
+
+  void option(int32_t value, const char* name, int32_t slots) override {
+    out_.begin_object();
+    out_.field("v", value);
+    if (name != nullptr) {
+      out_.field("n", name);
+    }
+    if (slots != 0) {
+      out_.field("s", slots);
+    }
+    out_.end_object();
+  }
+
+  void text_option(const char* value) override {
+    out_.begin_object();
+    out_.field("v", value);
+    out_.end_object();
+  }
+
+  void end_list() override { out_.end_array(); }
+
+ private:
+  ResponseWriter& out_;
+};
+
+}  // namespace
+
+void emit_all_options(SettingOptionSink& sink) {
   const BatteryType battery_none = BatteryType::None;
   emit_enum_options(
-      options, "battery",
-      [](BatteryType t) { return board_supports_battery_type(t) ? name_for_battery_type(t) : nullptr; }, &battery_none);
-  JsonArray battery_options = options["battery"].as<JsonArray>();
-  for (JsonObject opt : battery_options) {
-    const BatteryType type = static_cast<BatteryType>(opt["v"].as<uint32_t>());
-    if (type != BatteryType::None) {
-      opt["s"] = battery_type_allowed_in_slot(type, 2) ? 3 : battery_type_allowed_in_slot(type, 1) ? 2 : 1;
-    }
-  }
-  emit_enum_options<battery_chemistry_enum>(options, "chemistry", name_for_chemistry);
+      sink, "battery",
+      [](BatteryType t) { return board_supports_battery_type(t) ? name_for_battery_type(t) : nullptr; },
+      &battery_none, battery_slot_hint);
+  emit_enum_options<battery_chemistry_enum>(sink, "chemistry", name_for_chemistry);
   const InverterProtocolType inverter_none = InverterProtocolType::None;
-  emit_enum_options(options, "inverter", name_for_inverter_type, &inverter_none);
+  emit_enum_options(sink, "inverter", name_for_inverter_type, &inverter_none);
   const ChargerType charger_none = ChargerType::None;
-  emit_enum_options(options, "charger", name_for_charger_type, &charger_none);
+  emit_enum_options(sink, "charger", name_for_charger_type, &charger_none);
   const ShuntType shunt_none = ShuntType::None;
-  emit_enum_options(options, "shunt", name_for_shunt_type, &shunt_none);
+  emit_enum_options(sink, "shunt", name_for_shunt_type, &shunt_none);
   const adc_attenuation_enum attenuation_none = adc_attenuation_enum::ADC_0db;
-  emit_enum_options(options, "attenuation", name_for_adc_attenuation, &attenuation_none);
+  emit_enum_options(sink, "attenuation", name_for_adc_attenuation, &attenuation_none);
   const STOP_BUTTON_BEHAVIOR button_none = STOP_BUTTON_BEHAVIOR::NOT_CONNECTED;
-  emit_enum_options(options, "button", name_for_button_type, &button_none);
+  emit_enum_options(sink, "button", name_for_button_type, &button_none);
 
   if (esp32hal != nullptr) {
     GpioOptionCatalog catalog = esp32hal->gpio_options();
     for (size_t g = 0; g < catalog.group_count; g++) {
-      emit_gpio_option_choices(options, catalog.groups[g]);
+      emit_gpio_option_choices(sink, catalog.groups[g]);
     }
   }
 
   // Board-conditional (HW_LILYGO2CAN adds GRB variants), so kept server-side.
-  emit_map_options(options, "ledmode", led_modes);
-  emit_map_options(options, "bmsresetinterval", bms_reset_intervals);
+  emit_map_options(sink, "ledmode", led_modes);
+  emit_map_options(sink, "bmsresetinterval", bms_reset_intervals);
 
 #ifdef BOARD_HAS_LOAD_SWITCH
   // Enum order (Disabled first, unsorted), matching the legacy per-channel select.
-  JsonArray roles = options["loadswitchrole"].to<JsonArray>();
+  sink.begin_list("loadswitchrole");
   for (uint32_t r = 0; r < static_cast<uint32_t>(LoadSwitchRole::Highest); r++) {
     const char* name = name_for_load_switch_role(static_cast<LoadSwitchRole>(r));
     if (name == nullptr || name[0] == '\0') {
       continue;
     }
-    JsonObject opt = roles.add<JsonObject>();
-    opt["v"] = r;
-    opt["n"] = name;
+    sink.option(static_cast<int32_t>(r), name, 0);
   }
+  sink.end_list();
 #endif
 
-  emit_asset_name_options(options, "webui", kUiShellSpec);
+  emit_asset_name_options(sink, "webui", kUiShellSpec);
 }
 
-}  // namespace
-
-String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_required) {
-  JsonDocument doc;
-  JsonObject values = doc["values"].to<JsonObject>();
+void write_settings(ResponseWriter& out, BatteryEmulatorSettingsStore& store, bool reboot_required) {
+  out.begin_object();
+  out.begin_object("values");
 
   const size_t total_settings = setting_count();
   for (size_t i = 0; i < total_settings; i++) {
     const SettingField& field = *setting_at(i).field;
     if (field.live.kind != SR::None) {
       if (field.live.scope == SCP::Global) {
-        emit_live_value(values, field, 0);
+        emit_live_value(out, field, 0);
       }
       continue;
     }
     switch (field.type) {
       case ST::Bool:
-        values[field.key] = store.getBool(field.key, field.default_int != 0);
+        out.field(field.key, store.getBool(field.key, field.default_int != 0));
         break;
       case ST::Uint:
       case ST::EnumUint:
-        values[field.key] = store.getUInt(field.key, static_cast<uint32_t>(field.default_int));
+        out.field(field.key, store.getUInt(field.key, static_cast<uint32_t>(field.default_int)));
         break;
       case ST::Int:
-        values[field.key] = store.getInt(field.key, field.default_int);
+        out.field(field.key, store.getInt(field.key, field.default_int));
         break;
       case ST::StringVal:
       case ST::FloatString:
-        set_json_string(values, field.key,
-                        is_password_key(field.key) ? String("") : store.getString(field.key, field.default_str));
+        out.field(field.key,
+                  is_password_key(field.key) ? "" : store.getString(field.key, field.default_str).c_str());
         break;
       case ST::FloatX10:
-        values[field.key] = store.getUInt(field.key, static_cast<uint32_t>(field.default_int)) / kDeciUnitsPerUnit;
+        out.field(field.key,
+                  store.getUInt(field.key, static_cast<uint32_t>(field.default_int)) / kDeciUnitsPerUnit);
         break;
       case ST::SignedFloatX10:
-        values[field.key] = store.getInt(field.key, field.default_int) / kDeciUnitsPerUnit;
+        out.field(field.key, store.getInt(field.key, field.default_int) / kDeciUnitsPerUnit);
         break;
       case ST::Float:
         break;
       case ST::SecondsToMs:
-        values[field.key] =
-            store.getUInt(field.key, static_cast<uint32_t>(field.default_int) * kMillisecondsPerSecond) /
-            kMillisecondsPerSecond;
+        out.field(field.key,
+                  store.getUInt(field.key, static_cast<uint32_t>(field.default_int) * kMillisecondsPerSecond) /
+                      kMillisecondsPerSecond);
         break;
       case ST::InterfacePacked: {
         // A raw or unresolvable stored value would match no interfaces[].id and,
@@ -992,7 +1005,7 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
             stored = default_interface_config(list);
           }
         }
-        values[field.key] = stored;
+        out.field(field.key, stored);
         break;
       }
     }
@@ -1005,65 +1018,74 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
       // value on load, so echoing the raw one would show a state the pins are not in.
       const GpioOptionGroup& group = catalog.groups[g];
       const uint32_t stored = store.getUInt(group.nvs_key, group.default_value);
-      values[group.nvs_key] = find_gpio_option_choice(group, stored) != nullptr ? stored : group.default_value;
+      out.field(group.nvs_key, find_gpio_option_choice(group, stored) != nullptr ? stored : group.default_value);
     }
   }
+  out.end_object();
 
-  emit_all_options(doc["options"].to<JsonObject>());
+  out.begin_object("options");
+  WriterOptionSink option_sink(out);
+  emit_all_options(option_sink);
+  out.end_object();
 
   // Presentation (labels, visibility) lives client-side; schema carries only identity
   // and widget wiring.
-  JsonArray schema = doc["schema"].to<JsonArray>();
+  out.begin_array("schema");
   for (size_t i = 0; i < total_settings; i++) {
     const SettingRef ref = setting_at(i);
     const SettingField& field = *ref.field;
-    JsonObject entry = schema.add<JsonObject>();
-    entry["key"] = field.key;
-    entry["category"] = field.category;
-    entry["type"] = widget_type_name(field.type);
+    out.begin_object();
+    out.field("key", field.key);
+    out.field("category", field.category);
+    out.field("type", widget_type_name(field.type));
     const char* options = field.options_key;
     if (options == nullptr && field.type == ST::InterfacePacked) {
       options = "interfaces";
     }
-    entry["options"] = options;  // null const char* serialises as JSON null
-    entry["section"] = field.section;
+    out.field("options", options);  // null const char* serialises as JSON null
+    out.field("section", field.section);
     if (field.live.scope == SCP::BatterySlot) {
-      entry["scope"] = "battery";
+      out.field("scope", "battery");
     }
     if (field.min_value != kNoMin) {
-      entry["min"] = field.min_value;
+      out.field("min", field.min_value);
     }
     if (field.max_value != kNoMax) {
-      entry["max"] = field.max_value;
+      out.field("max", field.max_value);
     }
     if (ref.device != nullptr) {
-      emit_device_ownership(entry, *ref.device, ref.domain, ref.source);
+      emit_device_ownership(out, *ref.device, ref.domain, ref.source);
     }
+    out.end_object();
   }
 
   if (esp32hal != nullptr) {
     GpioOptionCatalog catalog = esp32hal->gpio_options();
     for (size_t g = 0; g < catalog.group_count; g++) {
       const GpioOptionGroup& group = catalog.groups[g];
-      JsonObject entry = schema.add<JsonObject>();
-      entry["key"] = group.nvs_key;
-      entry["category"] = kHardware;
-      entry["type"] = widget_type_name(ST::EnumUint);
-      entry["options"] = group.nvs_key;
-      entry["label"] = group.label;
+      out.begin_object();
+      out.field("key", group.nvs_key);
+      out.field("category", kHardware);
+      out.field("type", widget_type_name(ST::EnumUint));
+      out.field("options", group.nvs_key);
+      out.field("label", group.label);
+      out.end_object();
     }
   }
+  out.end_array();
 
   // Hint shown when a field is left blank. Unlike a static default_str, the
   // hostname default is MAC-derived and known only at runtime.
-  JsonObject placeholders = doc["placeholders"].to<JsonObject>();
-  set_json_string(placeholders, "HOSTNAME", default_hostname());
+  out.begin_object("placeholders");
+  out.field("HOSTNAME", default_hostname().c_str());
+  out.end_object();
 
-  JsonArray battery_slots = doc["dynamic"]["batteries"].to<JsonArray>();
+  out.begin_object("dynamic");
+  out.begin_array("batteries");
   for (const BatterySlotKeys& keys : kBatterySlotKeys) {
-    JsonObject slot = battery_slots.add<JsonObject>();
-    slot["slot"] = keys.slot;
-    slot["type"] = store.getUInt(keys.type_key, static_cast<uint32_t>(BatteryType::None));
+    out.begin_object();
+    out.field("slot", keys.slot);
+    out.field("type", store.getUInt(keys.type_key, static_cast<uint32_t>(BatteryType::None)));
     uint32_t comm = store.getUInt(keys.comm_key, 0);
     if (esp32hal != nullptr) {
       InterfaceList iface_list = esp32hal->interfaces();
@@ -1071,25 +1093,79 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
         comm = default_interface_config(iface_list);
       }
     }
-    slot["comm"] = comm;
-    slot["contactor_control"] = store.getBool(keys.contactor_key, false);
+    out.field("comm", comm);
+    out.field("contactor_control", store.getBool(keys.contactor_key, false));
+    out.end_object();
   }
+  out.end_array();
 
-  JsonArray balancing_slots = doc["dynamic"]["balancing"].to<JsonArray>();
+  out.begin_array("balancing");
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
     if (!battery_slot_addressable(slot)) {
       continue;
     }
-    JsonObject entry = balancing_slots.add<JsonObject>();
-    entry["slot"] = slot;
-    const size_t total_settings = setting_count();
+    out.begin_object();
+    out.field("slot", slot);
     for (size_t i = 0; i < total_settings; i++) {
       const SettingField& field = *setting_at(i).field;
       if (field.live.scope == SCP::BatterySlot) {
-        emit_live_value(entry, field, slot);
+        emit_live_value(out, field, slot);
       }
     }
+    out.end_object();
   }
+  out.end_array();
+
+#ifdef BOARD_HAS_INTERFACE_TERMINATION
+  if (esp32hal != nullptr) {
+    InterfaceList list = esp32hal->interfaces();
+    out.begin_array("termination");
+    for (size_t i = 0; i < list.count; i++) {
+      if (!esp32hal->supports_interface_termination(i)) {
+        continue;
+      }
+      out.begin_object();
+      out.field("index", i);
+      out.field("name", descriptor_name(list.data[i]));
+      out.field("enabled", store.getBool(interface_termination_key(i).c_str(), false));
+      out.end_object();
+    }
+    out.end_array();
+  }
+#endif
+
+#ifdef BOARD_HAS_LOAD_SWITCH
+  if (esp32hal != nullptr) {
+    if (LoadSwitch* load_switch = esp32hal->load_switch()) {
+      out.begin_object("loadswitch");
+      out.begin_array("channels");
+      for (uint8_t ch = 0; ch < kLoadSwitchConfigChannels; ch++) {
+        // LSDUTY persists raw 10-bit duty; the client works in percent.
+        uint32_t duty = store.getUInt(load_switch_duty_key(ch).c_str(), kLoadSwitchDutyMax);
+        out.begin_object();
+        out.field("channel", ch);
+        out.field("role",
+                  store.getUInt(load_switch_role_key(ch).c_str(), static_cast<uint32_t>(LoadSwitchRole::Disabled)));
+        out.field("duty", (duty * 100 + kLoadSwitchDutyMax / 2) / kLoadSwitchDutyMax);
+        out.field("divisor", store.getUInt(load_switch_divisor_key(ch).c_str(), 0));
+        out.end_object();
+      }
+      out.end_array();
+      out.begin_array("divisors");
+      for (uint8_t d = 0; d < kLoadSwitchDivisorCodes; d++) {
+        String label = String("÷") + String(load_switch_divisor_ratio(d)) + " (" +
+                       String(load_switch_pwm_frequency_hz(load_switch->pwm_clock_hz(), d)) + " Hz)";
+        out.begin_object();
+        out.field("v", d);
+        out.field("n", label.c_str());
+        out.end_object();
+      }
+      out.end_array();
+      out.end_object();
+    }
+  }
+#endif
+  out.end_object();
 
   if (esp32hal != nullptr) {
     InterfaceList list = esp32hal->interfaces();
@@ -1109,72 +1185,73 @@ String build_settings_json(BatteryEmulatorSettingsStore& store, bool reboot_requ
     // correlating with dynamic.termination[] rather than array position.
     std::sort(entries.begin(), entries.end(),
               [](const IfaceEntry& a, const IfaceEntry& b) { return std::strcmp(a.name, b.name) < 0; });
-    JsonArray interfaces = doc["interfaces"].to<JsonArray>();
+    out.begin_array("interfaces");
     for (const IfaceEntry& entry : entries) {
-      JsonObject iface = interfaces.add<JsonObject>();
-      iface["index"] = entry.index;
-      iface["id"] = entry.id;
-      iface["name"] = entry.name;
+      out.begin_object();
+      out.field("index", entry.index);
+      out.field("id", entry.id);
+      out.field("name", entry.name);
+      out.end_object();
     }
-
-#ifdef BOARD_HAS_INTERFACE_TERMINATION
-    JsonArray termination = doc["dynamic"]["termination"].to<JsonArray>();
-    for (size_t i = 0; i < list.count; i++) {
-      if (!esp32hal->supports_interface_termination(i)) {
-        continue;
-      }
-      JsonObject entry = termination.add<JsonObject>();
-      entry["index"] = i;
-      entry["name"] = descriptor_name(list.data[i]);
-      entry["enabled"] = store.getBool(interface_termination_key(i).c_str(), false);
-    }
-#endif
-
-#ifdef BOARD_HAS_LOAD_SWITCH
-    if (LoadSwitch* load_switch = esp32hal->load_switch()) {
-      JsonObject dynamic_load = doc["dynamic"]["loadswitch"].to<JsonObject>();
-      JsonArray channels = dynamic_load["channels"].to<JsonArray>();
-      for (uint8_t ch = 0; ch < kLoadSwitchConfigChannels; ch++) {
-        // LSDUTY persists raw 10-bit duty; the client works in percent.
-        uint32_t duty = store.getUInt(load_switch_duty_key(ch).c_str(), kLoadSwitchDutyMax);
-        JsonObject channel = channels.add<JsonObject>();
-        channel["channel"] = ch;
-        channel["role"] =
-            store.getUInt(load_switch_role_key(ch).c_str(), static_cast<uint32_t>(LoadSwitchRole::Disabled));
-        channel["duty"] = (duty * 100 + kLoadSwitchDutyMax / 2) / kLoadSwitchDutyMax;
-        channel["divisor"] = store.getUInt(load_switch_divisor_key(ch).c_str(), 0);
-      }
-      JsonArray divisors = dynamic_load["divisors"].to<JsonArray>();
-      for (uint8_t d = 0; d < kLoadSwitchDivisorCodes; d++) {
-        String label = String("÷") + String(load_switch_divisor_ratio(d)) + " (" +
-                       String(load_switch_pwm_frequency_hz(load_switch->pwm_clock_hz(), d)) + " Hz)";
-        JsonObject opt = divisors.add<JsonObject>();
-        opt["v"] = d;
-        set_json_string(opt, "n", label);
-      }
-    }
-#endif
+    out.end_array();
   }
 
-  doc["meta"]["reboot_required"] = reboot_required;
-
-  // Overflow means truncated JSON; the empty String tells the route to answer 500.
-  if (doc.overflowed()) {
-    return String();
-  }
-
-#if ARDUINOJSON_ENABLE_ARDUINO_STRING
-  String out;
-  serializeJson(doc, out);
-  return out;
-#else
-  std::string out;
-  serializeJson(doc, out);
-  return String(out);
-#endif
+  out.begin_object("meta");
+  out.field("reboot_required", reboot_required);
+  out.end_object();
+  out.end_object();
 }
 
 namespace {
+// Resolved in one sweep ahead of the validation loop, not per field: the loop
+// returns on its first failure, so the answer must already be known when it is
+// reached or the reported error would no longer be the first in field order.
+class OptionMembershipSink : public SettingOptionSink {
+ public:
+  struct Check {
+    const char* list_key;
+    bool text;
+    uint32_t numeric;
+    const char* text_value;
+    bool list_seen = false;
+    bool matched = false;
+  };
+
+  explicit OptionMembershipSink(std::vector<Check>& checks) : checks_(checks) {}
+
+  void begin_list(const char* key) override { key_ = key; }
+
+  void option(int32_t value, const char*, int32_t) override {
+    for (Check& check : checks_) {
+      if (std::strcmp(check.list_key, key_) != 0) {
+        continue;
+      }
+      check.list_seen = true;
+      if (!check.text && check.numeric == static_cast<uint32_t>(value)) {
+        check.matched = true;
+      }
+    }
+  }
+
+  void text_option(const char* value) override {
+    for (Check& check : checks_) {
+      if (std::strcmp(check.list_key, key_) != 0) {
+        continue;
+      }
+      check.list_seen = true;
+      if (check.text && check.text_value != nullptr && std::strcmp(check.text_value, value) == 0) {
+        check.matched = true;
+      }
+    }
+  }
+
+  void end_list() override { key_ = ""; }
+
+ private:
+  std::vector<Check>& checks_;
+  const char* key_ = "";
+};
+
 bool value_matches_type(SettingType type, JsonVariantConst value) {
   switch (type) {
     case ST::Bool:
@@ -1235,10 +1312,26 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
 
   // Validate every present field's type before writing anything, so a wrong-type
   // key rejects the whole values pass rather than partially applying it.
-  JsonDocument options_doc;
-  JsonObject all_options = options_doc.to<JsonObject>();
-  bool options_built = false;
   const size_t total_settings = setting_count();
+  std::vector<OptionMembershipSink::Check> option_checks;
+  for (size_t i = 0; i < total_settings; i++) {
+    const SettingField& field = *setting_at(i).field;
+    if (field.options_key == nullptr || field.live.scope == SCP::BatterySlot) {
+      continue;
+    }
+    JsonVariantConst value = values[field.key];
+    if (value.isNull() || !value_matches_type(field.type, value)) {
+      continue;
+    }
+    const bool text = field.type == ST::StringVal;
+    option_checks.push_back({field.options_key, text, text ? 0u : value.as<uint32_t>(),
+                             text ? value.as<const char*>() : nullptr});
+  }
+  if (!option_checks.empty()) {
+    OptionMembershipSink membership(option_checks);
+    emit_all_options(membership);
+  }
+  size_t next_check = 0;
   for (size_t i = 0; i < total_settings; i++) {
     const SettingField& field = *setting_at(i).field;
     if (field.live.scope == SCP::BatterySlot) {
@@ -1269,29 +1362,16 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       }
     }
     if (field.options_key != nullptr) {
-      if (!options_built) {
-        emit_all_options(all_options);
-        options_built = true;
-      }
-      JsonArrayConst choices = all_options[field.options_key].as<JsonArrayConst>();
+      const OptionMembershipSink::Check& check = option_checks[next_check++];
       // Some pick-lists are static enough to live in the client instead of costing
       // flash here. Membership is only checkable against a list this firmware
       // publishes; an absent one is client-owned, not an empty list of choices.
-      if (!choices.isNull()) {
-        bool found = false;
-        for (JsonObjectConst opt : choices) {
-          if (value_matches_option(field.type, value, opt["v"])) {
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          result.ok = false;
-          result.error = String("Setting ") + field.key + " is not an available option";
-          result.error_key = "error.setting_not_an_option";
-          result.error_arg = field.key;
-          return result;
-        }
+      if (check.list_seen && !check.matched) {
+        result.ok = false;
+        result.error = String("Setting ") + field.key + " is not an available option";
+        result.error_key = "error.setting_not_an_option";
+        result.error_arg = field.key;
+        return result;
       }
     }
     if (const char* error = check_field(field, 0, values)) {
@@ -1309,7 +1389,6 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
       return result;
     }
     const uint8_t slot = entry["slot"].as<uint8_t>();
-    const size_t total_settings = setting_count();
     for (size_t i = 0; i < total_settings; i++) {
       const SettingField& field = *setting_at(i).field;
       if (field.live.scope != SCP::BatterySlot) {
@@ -1596,7 +1675,6 @@ SettingsApplyResult apply_settings_json(BatteryEmulatorSettingsStore& store, Jso
 
   for (JsonObjectConst entry : root["dynamic"]["balancing"].as<JsonArrayConst>()) {
     const uint8_t slot = entry["slot"].as<uint8_t>();
-    const size_t total_settings = setting_count();
     for (size_t i = 0; i < total_settings; i++) {
       const SettingField& field = *setting_at(i).field;
       if (field.live.scope != SCP::BatterySlot) {

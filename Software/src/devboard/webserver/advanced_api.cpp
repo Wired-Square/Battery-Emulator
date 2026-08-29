@@ -1,25 +1,31 @@
 #include "advanced_api.h"
-#include "web_json.h"
 
 #include <cstdio>
 #include <cstring>
-#include <string>
 
 #include "../../battery/BATTERIES.h"
 #include "../../battery/Battery.h"
 #include "../../datalayer/datalayer.h"
-#include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
 
 namespace {
 
-class JsonAdvancedStatusWriter : public AdvancedStatusWriter {
+// rows and row_keys are sibling arrays, so the keys are held back while the rows
+// stream. A key that does not fit is emitted empty: that costs a description but
+// keeps the two arrays aligned, where dropping it would misalign every later row.
+constexpr size_t kMaxCatalogueRows = DATALAYER_BATTERY_DTC_TYPE::MAX_DTC_COUNT;
+constexpr size_t kMaxCatalogueKeyLen = 16;
+
+class StreamingAdvancedStatusWriter : public AdvancedStatusWriter {
  public:
-  explicit JsonAdvancedStatusWriter(JsonArray sections) : sections_(sections) {}
+  explicit StreamingAdvancedStatusWriter(ResponseWriter& out) : out_(out) {}
 
   void section(const char* title = "") override {
-    JsonObject s = sections_.add<JsonObject>();
-    s["title"] = std::string(title);
-    fields_ = s["fields"].to<JsonArray>();
+    close_table();
+    close_section();
+    out_.begin_object();
+    out_.field("title", title);
+    out_.begin_array("fields");
+    section_open_ = true;
   }
 
   void kv(const char* label, const String& value, const char* unit = "",
@@ -34,30 +40,57 @@ class JsonAdvancedStatusWriter : public AdvancedStatusWriter {
 
   void table(const char* label, std::initializer_list<const char*> columns,
              const char* catalogue = nullptr) override {
-    JsonObject o = fields_.add<JsonObject>();
-    o["kind"] = "table";
-    o["label"] = std::string(label);
-    JsonArray cols = o["columns"].to<JsonArray>();
-    for (const char* c : columns) cols.add(std::string(c));
-    rows_ = o["rows"].to<JsonArray>();
-    if (catalogue != nullptr) {
-      o["catalogue"] = std::string(catalogue);
-      keys_ = o["row_keys"].to<JsonArray>();
-    } else {
-      keys_ = JsonArray();
+    close_table();
+    if (!section_open_) {
+      return;
     }
+    out_.begin_object();
+    out_.field("kind", "table");
+    out_.field("label", label);
+    out_.begin_array("columns");
+    for (const char* c : columns) out_.element(c);
+    out_.end_array();
+    out_.begin_array("rows");
+    catalogue_ = catalogue;
+    key_count_ = 0;
+    table_open_ = true;
   }
 
   void row_begin(const char* key = nullptr) override {
-    row_ = rows_.add<JsonArray>();
-    if (key != nullptr && !keys_.isNull()) {
-      keys_.add(std::string(key));
+    if (!table_open_) {
+      return;
+    }
+    out_.begin_array();
+    row_open_ = true;
+    if (key == nullptr || catalogue_ == nullptr || key_count_ == kMaxCatalogueRows) {
+      return;
+    }
+    const size_t len = std::strlen(key);
+    if (len < kMaxCatalogueKeyLen) {
+      std::memcpy(keys_[key_count_], key, len + 1);
+    } else {
+      keys_[key_count_][0] = '\0';
+    }
+    key_count_++;
+  }
+
+  void cell(const String& text) override {
+    if (row_open_) {
+      out_.element(text.c_str());
     }
   }
 
-  void cell(const String& text) override { row_.add(std::string(text.c_str())); }
+  void row_end() override {
+    if (row_open_) {
+      out_.end_array();
+      row_open_ = false;
+    }
+  }
 
-  void row_end() override { row_ = JsonArray(); }
+  void finish() {
+    close_table();
+    close_section();
+  }
 
  private:
   static const char* name_for_severity(AdvancedSeverity severity) {
@@ -77,45 +110,83 @@ class JsonAdvancedStatusWriter : public AdvancedStatusWriter {
   }
 
   void emit_kv(const char* label, const char* value, const char* unit, AdvancedSeverity severity) {
-    JsonObject o = fields_.add<JsonObject>();
-    o["kind"] = "kv";
-    o["label"] = std::string(label);
-    o["value"] = std::string(value);
-    o["unit"] = std::string(unit);
-    if (const char* name = name_for_severity(severity)) {
-      o["sev"] = name;
+    close_table();
+    if (!section_open_) {
+      return;
     }
+    out_.begin_object();
+    out_.field("kind", "kv");
+    out_.field("label", label);
+    out_.field("value", value);
+    out_.field("unit", unit);
+    if (const char* name = name_for_severity(severity)) {
+      out_.field("sev", name);
+    }
+    out_.end_object();
   }
 
-  JsonArray sections_;
-  JsonArray fields_;
-  JsonArray rows_;
-  JsonArray keys_;
-  JsonArray row_;
+  void close_table() {
+    if (!table_open_) {
+      return;
+    }
+    row_end();
+    out_.end_array();
+    if (catalogue_ != nullptr) {
+      out_.field("catalogue", catalogue_);
+      out_.begin_array("row_keys");
+      for (size_t i = 0; i < key_count_; i++) out_.element(keys_[i]);
+      out_.end_array();
+    }
+    out_.end_object();
+    table_open_ = false;
+  }
+
+  void close_section() {
+    if (!section_open_) {
+      return;
+    }
+    out_.end_array();
+    out_.end_object();
+    section_open_ = false;
+  }
+
+  ResponseWriter& out_;
+  bool section_open_ = false;
+  bool table_open_ = false;
+  bool row_open_ = false;
+  const char* catalogue_ = nullptr;
+  size_t key_count_ = 0;
+  char keys_[kMaxCatalogueRows][kMaxCatalogueKeyLen] = {};
 };
 
-void emit_battery(JsonArray entries, Battery* batt, uint8_t index) {
-  JsonObject entry = entries.add<JsonObject>();
-  entry["index"] = index;
-  JsonArray sections = entry["sections"].to<JsonArray>();
-  JsonAdvancedStatusWriter writer(sections);
+void emit_battery(ResponseWriter& out, Battery* batt, uint8_t index) {
+  out.begin_object();
+  out.field("index", index);
+  out.begin_array("sections");
+  StreamingAdvancedStatusWriter writer(out);
   batt->write_advanced_status(writer);
-  JsonArray commands = entry["commands"].to<JsonArray>();
+  writer.finish();
+  out.end_array();
+  out.begin_array("commands");
   for (const BatteryCommand& cmd : batt->get_commands()) {
     if (cmd.available && !cmd.available()) continue;
-    JsonObject co = commands.add<JsonObject>();
-    co["id"] = cmd.descriptor->identifier;
-    co["title"] = cmd.descriptor->title;
-    if (cmd.descriptor->prompt) co["prompt"] = cmd.descriptor->prompt;
-    co["reload_after"] = cmd.descriptor->reload_after;
+    out.begin_object();
+    out.field("id", cmd.descriptor->identifier);
+    out.field("title", cmd.descriptor->title);
+    if (cmd.descriptor->prompt) out.field("prompt", cmd.descriptor->prompt);
+    out.field("reload_after", cmd.descriptor->reload_after);
     if (cmd.value) {
-      JsonObject vo = co["value"].to<JsonObject>();
-      vo["unit"] = cmd.value->unit;
-      vo["min"] = cmd.value->min;
-      vo["max"] = cmd.value->max;
-      vo["decimals"] = cmd.value->decimals;
+      out.begin_object("value");
+      out.field("unit", cmd.value->unit);
+      out.field("min", cmd.value->min);
+      out.field("max", cmd.value->max);
+      out.field("decimals", cmd.value->decimals);
+      out.end_object();
     }
+    out.end_object();
   }
+  out.end_array();
+  out.end_object();
 }
 
 // DTC status byte bits, precedence Active > Confirmed > Stored.
@@ -182,13 +253,14 @@ const char* dtc_status_string(uint8_t status) {
 }
 }  // namespace
 
-String build_advanced_json() {
-  JsonDocument doc;
-  JsonArray entries = doc["batteries"].to<JsonArray>();
+void write_advanced(ResponseWriter& out) {
+  out.begin_object();
+  out.begin_array("batteries");
   for (uint8_t i = 0; i < kMaxBatterySlots; i++) {
-    if (batteries[i]) emit_battery(entries, batteries[i], i);
+    if (batteries[i]) emit_battery(out, batteries[i], i);
   }
-  return serialise_doc(doc);
+  out.end_array();
+  out.end_object();
 }
 
 bool run_advanced_command(const char* id, uint8_t battery_index, const int32_t* value) {

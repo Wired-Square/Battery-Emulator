@@ -1,9 +1,9 @@
 #ifndef EVENTS_API_H
 #define EVENTS_API_H
 
-#include <WString.h>
+#include "response_writer.h"
 
 // GET /api/events payload: active events (occurrences > 0), newest first.
-String build_events_json();
+void write_events(ResponseWriter& out);
 
 #endif
