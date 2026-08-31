@@ -5,9 +5,12 @@ Battery-Emulator web UI. When a battery page shows a DTC table, a small JavaScri
 matching file from server (GitHub) and fills in a human-readable description for each code.
 
 - **Fetched from:** `https://raw.githubusercontent.com/dalathegreat/Battery-Emulator/main/web_data/dtc/`
-  (the `GITHUB_RAW_BASE_URL` constant in
-  [`Software/src/devboard/webserver/BatteryHtmlRenderer.h`](../../Software/src/devboard/webserver/BatteryHtmlRenderer.h)).
-- **Loader/renderer code:** `get_dtc_json_loader_html()` in the same header.
+  (the `CATALOGUE_BASE_URL` constant in
+  [`Software/src/devboard/webserver/web/advanced.js`](../../Software/src/devboard/webserver/web/advanced.js)).
+- **Loader code:** `loadCatalogue()` and `describedTable()` in the same file.
+- **Firmware side:** `write_dtc_section()` in
+  [`Software/src/devboard/webserver/advanced_api.cpp`](../../Software/src/devboard/webserver/advanced_api.cpp),
+  which emits the table and the per-row match keys.
 - **Validator:** [`tools/validate_dtc_json.py`](../../tools/validate_dtc_json.py).
 - **JSON Schema:** [`dtc.schema.json`](dtc.schema.json) (editor autocomplete / inline validation).
 
@@ -48,34 +51,48 @@ use an empty string `""` for `code` — see the rules below.)
 
 | Field   | Type    | Required | Purpose |
 |---------|---------|----------|---------|
-| `code`  | integer | one of `code`/`dtc` | Decimal DTC code. Used to match cells that carry the decimal code. |
-| `dtc`   | string  | one of `code`/`dtc` | DTC string (e.g. `"P0C9500"`). Used to match cells that carry the string. |
+| `code`  | integer | one of `code`/`dtc` | Decimal DTC code. Matches a row whose match key is the decimal code. |
+| `dtc`   | string  | one of `code`/`dtc` | DTC string (e.g. `"P0C9500"`). Matches a row whose match key is that string. |
 | `s_dsc` | string  | optional | Short/internal description, shown in grey italics under the long one. |
 | `l_dsc` | string  | **yes**  | Long human-readable description. This is the text that gets displayed. |
 
-An entry must have **at least one** identifier (`code` or `dtc`) so the loader can match it to a table
-cell, and it must have a non-empty **`l_dsc`** so there is something to show. `s_dsc` is optional — when
+An entry must have **at least one** identifier (`code` or `dtc`) so the loader can match it to a row,
+and it must have a non-empty **`l_dsc`** so there is something to show. `s_dsc` is optional — when
 empty it is simply omitted from the output (no empty line).
 
 ### How matching works
 
-The loader builds a lookup keyed by **whichever identifier each entry has** and matches table cells by
-their `data-dtc-code` attribute value:
+`indexCatalogue()` builds a lookup keyed by **whichever identifier each entry has**, both stringified:
 
 ```js
-arr.forEach(function(e){ if (e.code != null) m[e.code] = e; if (e.dtc) m[e.dtc] = e; });
-// cell lookup: m[ td.getAttribute('data-dtc-code') ]
+if (e.code !== undefined && e.code !== null) map.set(String(e.code), e);
+if (e.dtc) map.set(String(e.dtc), e);
 ```
 
-So a single file can mix entries keyed by decimal code, by string, or by both. A renderer that emits
-`data-dtc-code='41848'` matches by `code`; one that emits `data-dtc-code='P0C9500'` matches by `dtc`.
+The firmware sends one **match key per row** alongside the table, in the `row_keys` array of the
+`/api/advanced` payload, and `applyDescriptions()` looks each one up positionally against the rows.
+The key is not always what the row displays: it comes from `format_dtc_match_key()`, and its form is
+chosen by the `DtcCodeStyle` the driver passes to `write_dtc_section()`.
+
+| `DtcCodeStyle` | Match key | Catalogue field it matches | Example |
+|---|---|---|---|
+| `kRawHex` | the raw code in **decimal** | `code` | `41848` |
+| `kStandard` | full 7-character SAE string | `dtc` | `P0C9500` |
+| `kShortFailureType` | first 5 characters, failure type dropped | `dtc` | `P33D7` |
+
+`kShortFailureType` exists because Nissan service data, LeafSpy and `nissan_leaf_dtc.json` all index
+on the short form. The failure-type byte is still **displayed** when set (`P33D7-2F`), so nothing is
+hidden from the user, but it stays out of the lookup key.
+
+So a single file can mix entries keyed by decimal code, by string, or by both. Key your file to match
+the style its driver uses, or supply both.
 
 ### Rules and gotchas
 
 - **`l_dsc` is mandatory** and must be non-empty.
 - **Provide `code`, `dtc`, or both.** If you only have the string code, omit `code` entirely.
-- **Do not use `"code": ""`.** An empty string is *not* the same as absent — it would create a junk
-  `m[""]` lookup entry. To mean "no code", **omit the key** (preferred) or use `"code": null`.
+- **Do not use `"code": ""`.** An empty string is *not* the same as absent: `String("")` still becomes
+  a junk `""` key in the lookup. To mean "no code", **omit the key** (preferred) or use `"code": null`.
 - **`code` must be an integer** (not a quoted string, float, or boolean).
 - **Duplicate identifiers = last wins.** If two entries share the same `code` (or the same `dtc` when
   `dtc` is the only key), the later one overwrites the earlier in the lookup. Decimal `code` is the
@@ -88,10 +105,16 @@ So a single file can mix entries keyed by decimal code, by string, or by both. A
 
 ### Caching / refreshing
 
-The loader caches each file in the browser's `localStorage` (key `dtcJson:<url>`). After you update a
-file on `main`, users see the change once their cache expires or they click the **Refresh** link shown
-in the DTC status line. If GitHub is unreachable, the page reveals a **file picker** so a local copy
-can be loaded manually — handy for testing an unmerged file.
+The loader caches each file in the browser's `localStorage` under `catalogue:<filename>`.
+
+**The cache has no expiry and there is no refresh control.** `loadCatalogue()` returns the stored copy
+whenever one is present and only reaches the network when it is absent, so a browser that has already
+loaded a catalogue will not pick up an edit to it on `main`. Clear the site's local storage to force a
+refetch. A failed fetch is deliberately not cached, so a network problem does not become permanent for
+the session.
+
+If the fetch fails, or the battery declares no catalogue at all, the page reveals a **file picker** so
+a local copy can be loaded by hand. That is the way to test a file before it is merged.
 
 ---
 
@@ -159,57 +182,52 @@ s=json.load(open('web_data/dtc/dtc.schema.json')); v=V(s); \
 
 ---
 
-## 3. Using the loader in a battery renderer
+## 3. Wiring a driver to a catalogue
 
-A battery's HTML renderer subclasses `BatteryHtmlRenderer`
-([`Software/src/devboard/webserver/BatteryHtmlRenderer.h`](../../Software/src/devboard/webserver/BatteryHtmlRenderer.h))
-and implements `get_status_html()`. To get DTC descriptions:
+A battery driver does two things: it names its catalogue file, and it calls the shared DTC section
+writer from its advanced-status output. It never emits markup, and it never touches the loader.
 
-1. **Emit each DTC row with a `data-dtc-code` attribute** carrying the value to match — the decimal
-   code or the DTC string, matching what your JSON is keyed by.
-2. **Call `get_dtc_json_loader_html(base_url, filename)` once**, after the table, to inject the
-   status line, file picker, and matching script.
-
-Example from the BMW iX renderer
-([`Software/src/battery/BMW-IX-HTML.cpp`](../../Software/src/battery/BMW-IX-HTML.cpp)), which matches by
-decimal `code`:
+**Name the file** in the driver header, overriding the default (empty, meaning "no catalogue"):
 
 ```cpp
-// one row per DTC; the description cell carries the decimal code
-content += "<td data-dtc-code='" + String(code) +
-           "' style='padding: 12px 15px; border-top: 1px solid #e0e0e0; font-size: 0.95em; color: #ddd;'>Unknown</td>";
-// ...after the table:
-content += get_dtc_json_loader_html(GITHUB_RAW_BASE_URL, "bmw_ix_dtc.json");
+// Software/src/battery/BMW-IX-BATTERY.h
+const char* get_dtc_json_filename() override { return "bmw_ix_dtc.json"; }
 ```
 
-To match by **DTC string** instead (for a file that has only `dtc`/`l_dsc`), put the string in the
-attribute:
+**Emit the section** from `write_advanced_status()`, choosing the code style your JSON is keyed for:
 
 ```cpp
-content += "<td class='dc dd' data-dtc-code='" + String(dtcStr) + "'>Unknown</td>";
-content += get_dtc_json_loader_html(GITHUB_RAW_BASE_URL, "my_battery_dtc.json");
+// Software/src/battery/NISSAN-LEAF-BATTERY.cpp, at the end of the file
+void NissanLeafBattery::write_advanced_status(AdvancedStatusWriter& out) {
+  // ... other sections ...
+  write_dtc_section(out, *this, datalayer_battery->dtc, DtcCodeStyle::kShortFailureType);
+}
 ```
 
-Notes:
-- The cell's inner text (`Unknown` above) is the fallback shown when no description is found.
-- Pass `GITHUB_RAW_BASE_URL` to fetch from this folder on `main`, or pass `""` to skip the GitHub
-  fetch and only offer the local file picker.
-- The MEB renderer stores the filename in a member (`dtc_json_filename`) so each platform can override
-  it in `setup()` (e.g. MQB Evo → `"vag_mqb_dtc.json"`); a simpler renderer can just pass a literal.
+`write_dtc_section()` renders the whole section: a status line when the store is unread, failed or
+empty, and otherwise a DTC/Status/Description table with the description column filled in by the
+client. It reads `get_dtc_json_filename()` off the battery you pass it, so the two stay in step.
+
+A driver whose DTC store is not the shared `DATALAYER_BATTERY_DTC_TYPE` copies its codes into a local
+one rather than reimplementing the section. `BMW-IX-BATTERY.cpp` does this.
+
+Per the driver file layout convention, `write_advanced_status()` is declared in the header and defined
+at the **end** of the `.cpp`, advanced status first and `settings()` second.
 
 ---
 
 ## 4. Adding DTC descriptions for a new battery
 
 1. **Create the JSON file** in this folder, e.g. `web_data/dtc/<battery>_dtc.json`, following the
-   format in section 1. Decide whether your DTC table cells will carry the decimal `code` or the `dtc`
-   string, and key the JSON accordingly (or include both).
+   format in section 1. Decide whether it is keyed by decimal `code` or by the `dtc` string, and pick
+   the `DtcCodeStyle` in section "How matching works" that produces the same key (or supply both).
 2. **Validate it:** `python tools/validate_dtc_json.py web_data/dtc/<battery>_dtc.json` (fix all
    errors; review warnings).
-3. **Wire up the renderer** (section 3): emit `data-dtc-code` on each row and call
-   `get_dtc_json_loader_html(GITHUB_RAW_BASE_URL, "<battery>_dtc.json")`.
-4. **Test locally before merge:** flash the firmware, open the battery page, and use the **file
-   picker** to load your local JSON (GitHub `main` won't have it yet). Confirm the status line reports
-   `n/Y DTCs matched` with the count you expect.
-5. **Commit both** the JSON file and the renderer change, and merge to `main` so the GitHub fetch
-   works for everyone.
+3. **Override `get_dtc_json_filename()`** in the driver header to return the filename.
+4. **Call `write_dtc_section()`** from the driver's `write_advanced_status()` with the matching style.
+5. **Test locally before merge:** flash the firmware, open the battery's advanced page, and use the
+   **file picker** to load your local JSON. GitHub `main` will not have it yet, and once the real file
+   is merged your browser will keep serving whatever it cached, so clear local storage when you switch
+   from the picker to the fetched copy. Confirm the status line reports the match count you expect.
+6. **Commit both** the JSON file and the driver change, and merge to `main` so the fetch works for
+   everyone.
