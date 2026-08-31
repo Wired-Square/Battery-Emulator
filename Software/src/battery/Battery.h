@@ -66,15 +66,23 @@ enum class BatteryType {
   Highest
 };
 
-using BatteryCapabilities = uint16_t;
+// Not a uint16_t alias: the battery and inverter capability sets number their
+// bits from zero alike, so an alias lets one be written where the other is meant
+// and the row claims a different capability with no diagnostic.
+struct BatteryCapabilities {
+  uint16_t bits = 0;
+  constexpr BatteryCapabilities operator|(BatteryCapabilities other) const {
+    return {static_cast<uint16_t>(bits | other.bits)};
+  }
+};
 
 namespace BatteryCapability {
-inline constexpr BatteryCapabilities DesignVoltages = 1 << 0;
-inline constexpr BatteryCapabilities EstimatedLimits = 1 << 1;
-inline constexpr BatteryCapabilities EstimatedSoc = 1 << 2;
-inline constexpr BatteryCapabilities EstimatedChargeLimits = 1 << 3;
-inline constexpr BatteryCapabilities ForcedBalancing = 1 << 4;
-inline constexpr BatteryCapabilities UserBalancing = 1 << 5;
+inline constexpr BatteryCapabilities DesignVoltages{1 << 0};
+inline constexpr BatteryCapabilities EstimatedLimits{1 << 1};
+inline constexpr BatteryCapabilities EstimatedSoc{1 << 2};
+inline constexpr BatteryCapabilities EstimatedChargeLimits{1 << 3};
+inline constexpr BatteryCapabilities ForcedBalancing{1 << 4};
+inline constexpr BatteryCapabilities UserBalancing{1 << 5};
 }  // namespace BatteryCapability
 
 extern const char* name_for_battery_type(BatteryType type);

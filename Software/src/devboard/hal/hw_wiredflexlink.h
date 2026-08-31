@@ -3,6 +3,7 @@
 
 #include <SPI.h>
 #include <Wire.h>
+#include <cmath>
 
 #include "../../communication/can/NativeTwai.h"
 #include "../../communication/rs485/Rs485Port.h"
@@ -31,8 +32,7 @@ static constexpr uint8_t kWflExpStbyCan1 = 7;
 // All pins are outputs. DI0/DI1 are driven low so the VN9D direct inputs
 // can never switch a channel — the SPI SOCR path is the only control.
 static constexpr uint8_t kWflExpanderConfigMask = 0;
-// All outputs low: MCP2562FD standby is active-high (low = transceivers on);
-// termination stays off until the stored settings are applied.
+// MCP2562FD standby is active-high, so a low leaves the transceivers on.
 static constexpr uint8_t kWflExpanderOutputInit = 0;
 
 // WS2812 chain order: 0 status, 1-4 SW0-SW3, 5 CAN0, 6 CAN1, 7 RS0, 8 RS1.
@@ -68,6 +68,67 @@ inline Vn9dOutput wfl_load_switch_outputs[kLoadSwitchConfigChannels] = {{wfl_loa
 
 // SW0-SW3 state LEDs (chain indices 1-4).
 static constexpr int kWflSwitchLeds[kLoadSwitchConfigChannels] = {1, 2, 3, 4};
+
+static constexpr ScopeEntry kWflSwitchChannels[kLoadSwitchConfigChannels] = {
+    {0, "SW0"}, {1, "SW1"}, {2, "SW2"}, {3, "SW3"}};
+
+// The last request, not the applied state: the tick may not have run yet, and
+// write_status() is where the output's real level travels.
+inline bool wfl_manual_request[kLoadSwitchConfigChannels] = {};
+
+inline constexpr uint8_t kWflDutyPercentMax = 100;
+
+// Every VN9D SPI access runs in the core-loop task; the resulting 40 ms cadence
+// sits inside the chip's 70 ms watchdog ceiling with margin for slot jitter.
+// Raising this drops the chip into fail-safe and opens every output.
+inline constexpr int kWflLoadSwitchTickDivider = 4;
+
+inline constexpr DeviceSetting kWiredFlexLinkSettings[] = {
+    board_row(setting("TERMIF", SettingType::Bool, kHardware, SettingApplies::Live)
+                  .bound({SettingRam::None, nullptr, 1, SettingScope::Interface,
+                          [](uint8_t index, double value) {
+                            esp32hal->set_interface_termination(index, value != 0.0);
+                          }}),
+              "Termination", [](uint8_t index) { return esp32hal->supports_interface_termination(index); }),
+
+    board_row(setting("LSROLE", SettingType::EnumUint, kHardware, SettingApplies::Boot,
+                      (int32_t)LoadSwitchRole::Disabled)
+                  .with_options("loadswitchrole")
+                  .with_range(0, (int32_t)LoadSwitchRole::Highest - 1)
+                  .bound({SettingRam::None, nullptr, 1, SettingScope::LoadSwitchChannel,
+                          [](uint8_t index, double value) {
+                            wfl_load_switch.set_channel_role(index, (LoadSwitchRole)value);
+                          }}),
+              "Role"),
+
+    board_row(setting("LSDUTY", SettingType::Float, kHardware, SettingApplies::Live, kWflDutyPercentMax)
+                  .with_range(0, kWflDutyPercentMax)
+                  .bound({SettingRam::None, nullptr, 1, SettingScope::LoadSwitchChannel,
+                          [](uint8_t index, double value) {
+                            wfl_load_switch.request_duty(
+                                index, (uint16_t)std::lround(value * kLoadSwitchDutyMax / kWflDutyPercentMax));
+                          }}),
+              "Steady-state duty (%)"),
+
+    board_row(setting("LSDIV", SettingType::EnumUint, kHardware, SettingApplies::Live)
+                  .with_options("loadswitchdivisor")
+                  .with_range(0, kLoadSwitchDivisorCodes - 1)
+                  .bound({SettingRam::None, nullptr, 1, SettingScope::LoadSwitchChannel,
+                          [](uint8_t index, double value) {
+                            wfl_load_switch.request_divisor(index, (uint8_t)value);
+                          }}),
+              "PWM divisor"),
+
+    board_row(setting("LSMANUAL", SettingType::Bool, kLive, SettingApplies::Live)
+                  .volatile_storage()
+                  .in_section(kSecLoadSwitch)
+                  .bound({SettingRam::Bool, [](uint8_t index) -> void* { return &wfl_manual_request[index]; }, 1,
+                          SettingScope::LoadSwitchChannel,
+                          [](uint8_t index, double value) { wfl_load_switch.request_manual(index, value != 0.0); }}),
+              "Manual output",
+              [](uint8_t index) { return wfl_load_switch.channel_role(index) == LoadSwitchRole::Manual; }),
+};
+static_assert(fields_valid(kWiredFlexLinkSettings), "a board setting key is invalid, or its range is inverted");
 
 inline constexpr InterfaceDescriptor kWiredFlexLinkInterfaces[] = {
     {InterfaceType::CanNative, "CAN0", comm_interface::CanNative, &wfl_can0_bus},
@@ -115,16 +176,58 @@ class WiredFlexLinkHal : public Esp32Hal {
       return;
     }
     Wire.begin(kWflI2cSdaPin, kWflI2cSclPin);
-    if (!expander_.begin(kWflExpanderConfigMask, kWflExpanderOutputInit)) {
+    if (!expander_.begin(kWflExpanderConfigMask, (uint8_t)(kWflExpanderOutputInit | termination_mask_))) {
       set_event(EVENT_IOEXPANDER_INIT_FAILURE, 0);
       // With the expander down the DI pin state is unknown; leave the VN9D
       // in fail-safe (all outputs open) rather than enabling it.
       set_event(EVENT_LOAD_SWITCH_INIT_FAILURE, 0);
       return;
     }
+    expander_up_ = true;
     if (wfl_load_switch.init()) {
       bind_switched_outputs();
     }
+  }
+
+  virtual void board_tick() {
+    if (++load_switch_slot_ < kWflLoadSwitchTickDivider) {
+      return;
+    }
+    load_switch_slot_ = 0;
+    wfl_load_switch.tick();
+  }
+
+  virtual DeviceSettingList settings() { return device_settings(kWiredFlexLinkSettings); }
+
+  virtual ScopeEntries scope_entries(SettingScope scope) {
+    if (scope == SettingScope::LoadSwitchChannel) {
+      return {kWflSwitchChannels, kLoadSwitchConfigChannels};
+    }
+    return Esp32Hal::scope_entries(scope);
+  }
+
+  virtual void write_status(ResponseWriter& out) {
+    const LoadSwitchStatus& ls_status = wfl_load_switch.status();
+    out.begin_object("load_switch");
+    out.field("device_ok", ls_status.device_ok);
+    out.begin_array("channels");
+    // Every channel is emitted, disabled ones included: the client addresses a
+    // channel by its array index when toggling.
+    for (uint8_t ch = 0; ch < ls_status.channel_count; ch++) {
+      const LoadSwitchChannelStatus& channel = ls_status.channels[ch];
+      out.begin_object();
+      out.field("role_id", static_cast<uint32_t>(channel.role));
+      out.field("role", name_for_load_switch_role(channel.role));
+      out.field("manual", channel.role == LoadSwitchRole::Manual);
+      out.field("on", channel.on);
+      out.field("pending", channel.pending);
+      out.field("pending_on", channel.pending_on);
+      out.field("current_mA", channel.current_mA);
+      out.field("fault", channel.fault || channel.latched_off);
+      out.end_object();
+    }
+    out.end_array();
+    out.end_object();
   }
 
   virtual SwitchedOutputList switched_outputs() { return {output_bindings_, output_binding_count_}; }
@@ -139,11 +242,24 @@ class WiredFlexLinkHal : public Esp32Hal {
     return interface_index < sizeof(kWflTerminationPins) / sizeof(kWflTerminationPins[0]);
   }
 
+  // Stored settings apply before board_init(), so banking into the mask that
+  // seeds the expander's first write is what makes them stick.
   virtual bool set_interface_termination(size_t interface_index, bool enabled) {
     if (!supports_interface_termination(interface_index)) {
       return false;
     }
-    return expander_.write_pin(kWflTerminationPins[interface_index], enabled);
+    const uint8_t bit = (uint8_t)(1u << kWflTerminationPins[interface_index]);
+    if (enabled) {
+      termination_mask_ |= bit;
+    } else {
+      termination_mask_ &= (uint8_t)~bit;
+    }
+    return expander_up_ ? expander_.write_pin(kWflTerminationPins[interface_index], enabled) : true;
+  }
+
+  virtual bool interface_termination(size_t interface_index) {
+    return supports_interface_termination(interface_index) &&
+           (termination_mask_ & (uint8_t)(1u << kWflTerminationPins[interface_index])) != 0;
   }
 
   InterfaceList interfaces() { return make_interface_list(kWiredFlexLinkInterfaces); }
@@ -178,6 +294,9 @@ class WiredFlexLinkHal : public Esp32Hal {
   }
 
   Tca9538 expander_{Wire, kWflExpanderAddress};
+  int load_switch_slot_ = 0;
+  uint8_t termination_mask_ = 0;
+  bool expander_up_ = false;
 };
 
 /* ----- Error checks below, don't change (can't be moved to separate file) ----- */

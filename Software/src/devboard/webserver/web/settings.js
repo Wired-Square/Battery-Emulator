@@ -184,6 +184,7 @@ const HELP = {
     'Publish the discovery configs once after every firmware update. They carry the software version and can gain or change entities between releases.'),
   HADISCTOPIC: t('help.HADISCTOPIC', "MQTT auto discovery base topic (letters, numbers, '_', '-')"),
   ESPNOWENABLED: t('help.ESPNOWENABLED', 'Send battery telemetry to nearby devices over ESP-NOW'),
+  TERMIF: t('help.TERMIF', 'Switch the 120 Ω termination resistor onto the bus'),
   ESPNOWMACS: t('help.ESPNOWMACS',
     'Comma separated list of receiver MAC addresses, e.g. AA:BB:CC:DD:EE:FF, 11:22:33:44:55:66 (max 8). Leave empty to broadcast to every device. Takes effect after a restart.'),
 };
@@ -236,17 +237,23 @@ const skin = SETTINGS_SKINS[skinName] ?? SETTINGS_SKINS.modern;
 
 const LIVE_CATEGORY = 'live';
 
-const DYNAMIC_CATEGORY = 'hardware';
 const INTERFACE_CATEGORY = 'interface';
 const SOURCE_LANGUAGE = 'en';
 const BATTERY_CATEGORY = 'battery';
 const BATTERIES_TITLE = t('ui.batteries', 'Batteries');
 const MAX_BATTERY_SLOTS = 3;
-const TERMINATION_TITLE = t('ui.bus_termination', 'Bus termination');
-const LOAD_SWITCH_TITLE = t('ui.load_switch', 'Load switch');
-const LOAD_SWITCH_NOTE =
-  t('ui.load_switch_note',
-    'Role changes take effect after reboot; duty and divisor apply immediately on save.');
+const BATTERY_SCOPE = 'battery';
+
+const SCOPE_TITLES = {
+  interface: () => t('scope.interface', 'Interfaces'),
+  loadswitchchannel: () => t('scope.loadswitchchannel', 'Load switch'),
+};
+
+const SCOPE_NOTES = {
+  loadswitchchannel: () =>
+    t('ui.load_switch_note',
+      'Role changes take effect after reboot; duty and divisor apply immediately on save.'),
+};
 
 const LIVE_SECTION_TITLES = {
   chargelimits: t('live.chargelimits', 'Charge limits'),
@@ -255,6 +262,7 @@ const LIVE_SECTION_TITLES = {
   recoverymode: t('live.recoverymode', 'Recovery mode'),
   canidcutoff: t('live.canidcutoff', 'CAN ID cutoff'),
   balancing: t('live.balancing', 'Balancing'),
+  loadswitch: t('live.loadswitch', 'Load switch'),
 };
 
 const REBOOT_TO_APPLY =
@@ -281,7 +289,7 @@ let snapshot = {};
 let saveError = null;
 let saveBarEl = null;
 let saveErrorEl = null;
-let dynamicState = { termination: null, loadswitch: null, batteries: null };
+let dynamicState = { batteries: null, scopes: {} };
 let liveErrors = {};
 let dynamicSnapshot = 'null';
 let activeCategory = CATEGORIES[0][0];
@@ -415,14 +423,14 @@ function buildPanel(category) {
   const panel = el('div', 'settings-panel');
   if (category === BATTERY_CATEGORY && dynamicState.batteries) panel.append(buildBatteriesSection());
   (data.schema ?? [])
-    .filter((field) => field.category === category)
+    .filter((field) => field.category === category && !field.scope)
     .forEach((field) => {
       panel.append(fieldRow(field));
       if (field.key === 'HTTPPASS') {
         panel.append(fieldRow({ key: 'HTTPPASSCONFIRM', type: 'string' }));
       }
     });
-  if (category === DYNAMIC_CATEGORY) appendDynamicControls(panel);
+  appendDynamicControls(panel, category);
   if (category === INTERFACE_CATEGORY) appendLanguageControl(panel);
   applyVisibility(panel);
   return panel;
@@ -542,51 +550,77 @@ function buildBatteriesSection() {
   return wrap;
 }
 
-function buildTerminationSection() {
-  const wrap = el('div', 'settings-subsection');
-  wrap.append(el('h3', null, TERMINATION_TITLE));
-  dynamicState.termination.forEach((entry) => {
+// The battery slot is excluded: its entries arrive as dynamic.balancing, not
+// as a section named after the scope.
+function boardScopes(live) {
+  const scopes = [];
+  (data.schema ?? []).forEach((field) => {
+    if (!field.scope || field.scope === BATTERY_SCOPE) return;
+    if ((field.category === LIVE_CATEGORY) !== live) return;
+    if (!scopes.includes(field.scope)) scopes.push(field.scope);
+  });
+  return scopes;
+}
+
+function scopedFields(scope, live) {
+  return (data.schema ?? []).filter(
+    (field) => field.scope === scope && (field.category === LIVE_CATEGORY) === live);
+}
+
+function scopeTitle(scope) {
+  const title = SCOPE_TITLES[scope];
+  return title ? title() : prettify(scope);
+}
+
+function dynFieldRow(field, entry) {
+  const set = (v) => { entry[field.key] = v; };
+  if (field.type === 'bool') {
     const row = el('div', 'field');
     const cb = el('input');
     cb.type = 'checkbox';
-    cb.checked = entry.enabled === true;
-    cb.title = t('ui.termination_help', 'Switch the 120 Ω termination resistor onto the bus');
+    if (HELP[field.key]) cb.title = HELP[field.key];
+    cb.checked = entry[field.key] === true;
     cb.addEventListener('change', () => {
-      entry.enabled = cb.checked;
+      set(cb.checked);
       refreshSaveBar();
     });
-    row.append(el('label', null, tf('ui.interface_termination', '{} termination', entry.name)), cb);
-    wrap.append(row);
-  });
-  return wrap;
+    row.append(el('label', null, labelFor(field)), cb);
+    return row;
+  }
+  if (field.options) {
+    const opts = data.options?.[field.options] ?? CLIENT_OPTIONS[field.options] ?? [];
+    return dynSelectRow(labelFor(field), opts, entry[field.key], set, field.options);
+  }
+  return dynNumberRow(labelFor(field), entry[field.key], set);
 }
 
-function buildLoadSwitchSection() {
+function buildScopeSection(scope) {
   const wrap = el('div', 'settings-subsection');
-  wrap.append(el('h3', null, LOAD_SWITCH_TITLE), el('div', 'muted', LOAD_SWITCH_NOTE));
-  const roles = data.options?.loadswitchrole ?? [];
-  const divisors = data.dynamic?.loadswitch?.divisors ?? [];
-  dynamicState.loadswitch.channels.forEach((ch) => {
-    const group = el('div', 'settings-channel-config');
-    group.append(el('h4', null, `SW${ch.channel}`));
-    group.append(
-      dynSelectRow(t('ui.role', 'Role'), roles, ch.role, (v) => { ch.role = v; }, 'loadswitchrole'),
-      dynNumberRow(t('ui.steady_state_duty', 'Steady-state duty (%)'), ch.duty, (v) => { ch.duty = v; }),
-      dynSelectRow(t('ui.pwm_divisor', 'PWM divisor'), divisors, ch.divisor, (v) => { ch.divisor = v; }),
-    );
-    wrap.append(group);
+  wrap.dataset.section = scope;
+  wrap.append(el('h3', null, scopeTitle(scope)));
+  const note = SCOPE_NOTES[scope];
+  if (note) wrap.append(el('div', 'muted', note()));
+  const fields = scopedFields(scope, false);
+  (dynamicState.scopes[scope] ?? []).forEach((entry) => {
+    const rows = fields.filter((field) => entry[field.key] !== undefined);
+    if (!rows.length) return;
+    const card = el('div', 'settings-channel-config');
+    card.append(el('h4', null, entry.label ?? String(entry.index)));
+    rows.forEach((field) => card.append(dynFieldRow(field, entry)));
+    wrap.append(card);
   });
   return wrap;
 }
 
-function appendDynamicControls(panel) {
-  if (dynamicState.termination) panel.append(buildTerminationSection());
-  if (dynamicState.loadswitch) panel.append(buildLoadSwitchSection());
+function appendDynamicControls(panel, category) {
+  boardScopes(false)
+    .filter((scope) => scopedFields(scope, false).some((field) => field.category === category))
+    .forEach((scope) => panel.append(buildScopeSection(scope)));
 }
 
-// Keeps the render-only `name`; buildDynamic drops it back to the shapes apply_settings_json expects.
+// Keeps the render-only `label`; buildDynamic drops it back to the shapes apply_settings expects.
 function seedDynamic(dyn) {
-  dynamicState = { termination: null, loadswitch: null, batteries: null };
+  dynamicState = { batteries: null, scopes: {} };
   if (Array.isArray(dyn?.batteries)) {
     dynamicState.batteries = dyn.batteries.map((b) => ({
       slot: b.slot,
@@ -595,23 +629,18 @@ function seedDynamic(dyn) {
       contactor_control: b.contactor_control === true,
     }));
   }
-  if (dyn?.termination) {
-    dynamicState.termination = dyn.termination.map((t) => ({
-      index: t.index,
-      name: t.name,
-      enabled: t.enabled === true,
-    }));
-  }
-  if (dyn?.loadswitch?.channels) {
-    dynamicState.loadswitch = {
-      channels: dyn.loadswitch.channels.map((c) => ({
-        channel: c.channel,
-        role: Number(c.role),
-        duty: Number(c.duty),
-        divisor: Number(c.divisor),
-      })),
-    };
-  }
+  boardScopes(false).forEach((scope) => {
+    if (!Array.isArray(dyn?.[scope])) return;
+    const fields = scopedFields(scope, false);
+    dynamicState.scopes[scope] = dyn[scope].map((e) => {
+      const entry = { index: e.index, label: e.label };
+      fields.forEach((field) => {
+        if (e[field.key] === undefined) return;
+        entry[field.key] = field.type === 'bool' ? e[field.key] === true : e[field.key];
+      });
+      return entry;
+    });
+  });
   dynamicSnapshot = JSON.stringify(dynamicState);
   syncBatteryShim();
 }
@@ -621,27 +650,19 @@ function seedDynamic(dyn) {
 function buildDynamic() {
   const base = JSON.parse(dynamicSnapshot);
   const out = {};
-  if (dynamicState.termination) {
-    const changed = dynamicState.termination
-      .filter((t) => {
-        const b = base?.termination?.find((x) => x.index === t.index);
-        return !b || b.enabled !== t.enabled;
-      })
-      .map((t) => ({ index: t.index, enabled: t.enabled }));
-    if (changed.length) out.termination = changed;
-  }
-  if (dynamicState.loadswitch) {
-    const channels = [];
-    dynamicState.loadswitch.channels.forEach((c) => {
-      const b = base?.loadswitch?.channels?.find((x) => x.channel === c.channel);
-      const entry = { channel: c.channel };
-      if (!b || b.role !== c.role) entry.role = c.role;
-      if (!b || b.duty !== c.duty) entry.duty = c.duty;
-      if (!b || b.divisor !== c.divisor) entry.divisor = c.divisor;
-      if (Object.keys(entry).length > 1) channels.push(entry);
+  Object.keys(dynamicState.scopes).forEach((scope) => {
+    const changed = [];
+    dynamicState.scopes[scope].forEach((entry) => {
+      const was = base?.scopes?.[scope]?.find((x) => x.index === entry.index);
+      const delta = { index: entry.index };
+      Object.keys(entry).forEach((key) => {
+        if (key === 'index' || key === 'label') return;
+        if (!was || was[key] !== entry[key]) delta[key] = entry[key];
+      });
+      if (Object.keys(delta).length > 1) changed.push(delta);
     });
-    if (channels.length) out.loadswitch = { channels };
-  }
+    if (changed.length) out[scope] = changed;
+  });
   if (dynamicState.batteries) {
     const changed = dynamicState.batteries
       .filter((b) => {
@@ -704,17 +725,29 @@ function liveSections() {
   return sections;
 }
 
-// A battery-scoped section renders one card per dynamic.balancing entry — the
-// firmware serves entries only for slots a POST would accept.
+// The battery slot keys its entries by slot under a fixed section name; every
+// board scope keys by index under its own. Unifying the two drops the battery
+// cards, which the firmware still serves the old way.
+function scopeEntries(scope) {
+  if (scope === BATTERY_SCOPE) {
+    return (data.dynamic?.balancing ?? []).map((entry) => ({ id: entry.slot, values: entry }));
+  }
+  return (data.dynamic?.[scope] ?? []).map((entry) => ({ id: entry.index, label: entry.label, values: entry }));
+}
+
 function liveCards() {
   return liveSections().flatMap((section) => {
-    if (section.scope !== 'battery') return [{ ...section, key: section.id }];
-    return (data.dynamic?.balancing ?? []).map((entry) => ({
-      ...section,
-      slot: entry.slot,
-      values: entry,
-      key: `${section.id}:${entry.slot}`,
-    }));
+    if (!section.scope) return [{ ...section, key: section.id }];
+    return scopeEntries(section.scope)
+      .filter((entry) => section.fields.some((field) => entry.values[field.key] !== undefined))
+      .map((entry) => ({
+        ...section,
+        slot: section.scope === BATTERY_SCOPE ? entry.id : undefined,
+        index: entry.id,
+        entryLabel: entry.label,
+        values: entry.values,
+        key: `${section.id}:${entry.id}`,
+      }));
   });
 }
 
@@ -732,10 +765,18 @@ function liveErrorText(e) {
 function adoptLiveResult(result) {
   data = result;
   (data.schema ?? []).forEach((field) => {
-    if (field.category !== LIVE_CATEGORY || field.scope === 'battery') return;
+    if (field.category !== LIVE_CATEGORY || field.scope) return;
     state[field.key] = result.values?.[field.key];
     snapshot[field.key] = result.values?.[field.key];
   });
+}
+
+function liveBody(card, field, value) {
+  if (!card.scope) return { values: { [field.key]: value } };
+  if (card.scope === BATTERY_SCOPE) {
+    return { dynamic: { balancing: [{ slot: card.slot, [field.key]: value }] } };
+  }
+  return { dynamic: { [card.scope]: [{ index: card.index, [field.key]: value }] } };
 }
 
 // Repaints only this card from the device's answer: the UI must reflect what
@@ -760,9 +801,7 @@ async function onLiveChange(card, field, ctrl) {
   }
   ctrl.disabled = true;
   try {
-    const body = card.slot === undefined
-      ? { values: { [field.key]: value } }
-      : { dynamic: { balancing: [{ slot: card.slot, [field.key]: value }] } };
+    const body = liveBody(card, field, value);
     adoptLiveResult(await postJson('/api/settings', body));
     delete liveErrors[card.key];
   } catch (e) {
@@ -775,12 +814,16 @@ async function onLiveChange(card, field, ctrl) {
   repaintCard();
 }
 
+function liveCardTitle(card, title) {
+  if (card.entryLabel) return tf('ui.section_for_entry', '{} ({})', title, card.entryLabel);
+  return card.slot > 0 ? tf('ui.section_for_battery', '{} (battery {})', title, card.slot + 1) : title;
+}
+
 function buildLiveSection(card) {
   const wrap = el('div', 'settings-live-section');
   wrap.dataset.section = card.key;
   const title = LIVE_SECTION_TITLES[card.id] ?? prettify(card.id);
-  wrap.append(el('h3', null,
-                 card.slot > 0 ? tf('ui.section_for_battery', '{} (battery {})', title, card.slot + 1) : title));
+  wrap.append(el('h3', null, liveCardTitle(card, title)));
   if (liveErrors[card.key]) wrap.append(el('div', 'settings-error', liveErrors[card.key]));
   card.fields.forEach((field) => {
     const row = el('div', 'field');

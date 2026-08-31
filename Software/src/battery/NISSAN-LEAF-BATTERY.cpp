@@ -1478,9 +1478,10 @@ void NissanLeafBattery::write_advanced_status(AdvancedStatusWriter& out) {
 }
 
 namespace {
-const DeviceSetting kSettings[] = {
-    {{"INTERLOCKREQ", SettingType::Bool, kBattery, SettingApplies::Boot, 0, nullptr}, "Interlock required"},
+constexpr DeviceSetting kSettings[] = {
+    {setting("INTERLOCKREQ", SettingType::Bool, kBattery, SettingApplies::Boot), "Interlock required"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList NissanLeafBattery::settings() {

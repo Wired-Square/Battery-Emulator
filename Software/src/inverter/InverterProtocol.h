@@ -33,12 +33,17 @@ enum class InverterProtocolType {
   Highest
 };
 
-using InverterCapabilities = uint16_t;
+struct InverterCapabilities {
+  uint16_t bits = 0;
+  constexpr InverterCapabilities operator|(InverterCapabilities other) const {
+    return {static_cast<uint16_t>(bits | other.bits)};
+  }
+};
 
 namespace InverterCapability {
-inline constexpr InverterCapabilities PackGeometry = 1 << 0;
-inline constexpr InverterCapabilities ModuleCount = 1 << 1;
-inline constexpr InverterCapabilities ContactorWorkaround = 1 << 2;
+inline constexpr InverterCapabilities PackGeometry{1 << 0};
+inline constexpr InverterCapabilities ModuleCount{1 << 1};
+inline constexpr InverterCapabilities ContactorWorkaround{1 << 2};
 }  // namespace InverterCapability
 
 extern InverterProtocolType user_selected_inverter_protocol;

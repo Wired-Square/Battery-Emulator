@@ -790,9 +790,11 @@ void SungrowInverter::transmit_can(unsigned long currentMillis) {
 }
 
 namespace {
-const DeviceSetting kSettings[] = {
-    {{"INVSUNTYPE", SettingType::EnumUint, kInverter, SettingApplies::Boot, 0, nullptr, "sungrow"}, "Battery model"},
+constexpr DeviceSetting kSettings[] = {
+    {setting("INVSUNTYPE", SettingType::EnumUint, kInverter, SettingApplies::Boot)
+        .with_options("sungrow"), "Battery model"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList SungrowInverter::settings() {

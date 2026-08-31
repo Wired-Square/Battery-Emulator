@@ -398,22 +398,6 @@ void check_reset_reason() {
   }
 }
 
-#ifdef BOARD_HAS_LOAD_SWITCH
-// Every VN9D SPI access runs in the core-loop task; the 40 ms cadence sits
-// inside the chip's 70 ms watchdog ceiling with margin for slot jitter.
-static constexpr int LOAD_SWITCH_TICK_DIVIDER = 4;
-static void service_load_switch() {
-  static int tick_slot = 0;
-  if (++tick_slot < LOAD_SWITCH_TICK_DIVIDER) {
-    return;
-  }
-  tick_slot = 0;
-  if (LoadSwitch* load_switch = esp32hal->load_switch()) {
-    load_switch->tick();
-  }
-}
-#endif
-
 void core_loop(void*) {
   esp_task_wdt_add(NULL);  // Register this task with WDT
   TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -443,9 +427,7 @@ void core_loop(void*) {
       monitor_equipment_stop_button();
       led_exe();
       handle_contactors();  // Take care of startup precharge/contactor closing
-#ifdef BOARD_HAS_LOAD_SWITCH
-      service_load_switch();
-#endif
+      esp32hal->board_tick();
       if (precharge_control_enabled) {
         handle_precharge_control(currentMillis);  //Drive the hia4v1 via PWM
       }
@@ -551,10 +533,6 @@ void setup() {
   // Needs stored settings loaded; must precede init_CAN (transceiver standby
   // is released here on boards that gate it behind an expander).
   esp32hal->board_init();
-
-#ifdef BOARD_HAS_INTERFACE_TERMINATION
-  apply_stored_interface_termination();
-#endif
 
   if (wifi_enabled) {
     xTaskCreatePinnedToCore((TaskFunction_t)&connectivity_loop, "connectivity_loop", 4096, NULL, TASK_CONNECTIVITY_PRIO,

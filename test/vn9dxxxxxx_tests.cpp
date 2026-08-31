@@ -120,8 +120,10 @@ TEST_F(Vn9dTest, WdtbTogglesOnlyOnSocrAndOutctrcrWrites) {
 
 TEST_F(Vn9dTest, EngageHoldDisengageDriveDutyAndSocr) {
   script_init_responses(PC3_VN9D5D20FN);
-  device->set_channel_config(0, LoadSwitchRole::PositiveContactor, 300, 0);
+  device->set_channel_role(0, LoadSwitchRole::PositiveContactor);
+  device->request_duty(0, 300);
   ASSERT_TRUE(device->init());
+  device->tick();
   SPIClass::frames.clear();
 
   device->engage(0);
@@ -153,7 +155,7 @@ TEST_F(Vn9dTest, EngageHoldDisengageDriveDutyAndSocr) {
 
 TEST_F(Vn9dTest, TickFeedsWatchdogReadsTelemetryAndDecodesFaults) {
   script_init_responses(PC3_VN9D5D20FN);
-  device->set_channel_config(0, LoadSwitchRole::Manual, kLoadSwitchDutyMax, 0);
+  device->set_channel_role(0, LoadSwitchRole::Manual);
   ASSERT_TRUE(device->init());
   device->request_manual(0, true);
   SPIClass::frames.clear();
@@ -194,7 +196,7 @@ TEST_F(Vn9dTest, FailSafeReexitAfterWatchdogLapse) {
 
 TEST_F(Vn9dTest, ManualRequestIgnoredOnNonManualChannelAndBootsOff) {
   script_init_responses(PC3_VN9D5D20FN);
-  device->set_channel_config(0, LoadSwitchRole::PositiveContactor, 500, 0);
+  device->set_channel_role(0, LoadSwitchRole::PositiveContactor);
   ASSERT_TRUE(device->init());
   EXPECT_FALSE(device->status().channels[0].on);  // boot OFF
   device->request_manual(0, true);
@@ -205,8 +207,8 @@ TEST_F(Vn9dTest, ManualRequestIgnoredOnNonManualChannelAndBootsOff) {
 
 TEST_F(Vn9dTest, DuplicateContactorRoleDemotedWithEvent) {
   script_init_responses(PC3_VN9D5D20FN);
-  device->set_channel_config(0, LoadSwitchRole::Precharge, 1023, 0);
-  device->set_channel_config(2, LoadSwitchRole::Precharge, 1023, 0);
+  device->set_channel_role(0, LoadSwitchRole::Precharge);
+  device->set_channel_role(2, LoadSwitchRole::Precharge);
   ASSERT_TRUE(device->init());
   EXPECT_EQ(device->channel_role(0), LoadSwitchRole::Precharge);
   EXPECT_EQ(device->channel_role(2), LoadSwitchRole::Disabled);
@@ -216,8 +218,10 @@ TEST_F(Vn9dTest, DuplicateContactorRoleDemotedWithEvent) {
 
 TEST_F(Vn9dTest, Vn9dOutputMapsSwitchedOutputSemantics) {
   script_init_responses(PC3_VN9D5D20FN);
-  device->set_channel_config(1, LoadSwitchRole::NegativeContactor, 250, 0);
+  device->set_channel_role(1, LoadSwitchRole::NegativeContactor);
+  device->request_duty(1, 250);
   ASSERT_TRUE(device->init());
+  device->tick();
   Vn9dOutput output(*device, 1);
   EXPECT_TRUE(output.init("Contactors"));
   output.set(true);
@@ -249,7 +253,7 @@ TEST_F(Vn9dTest, VccUndervoltageDecodedFromOutsrAndClears) {
 
 TEST_F(Vn9dTest, ManualRequestSurfacesPendingUntilTickApplies) {
   script_init_responses(PC3_VN9D5D20FN);
-  device->set_channel_config(0, LoadSwitchRole::Manual, kLoadSwitchDutyMax, 0);
+  device->set_channel_role(0, LoadSwitchRole::Manual);
   ASSERT_TRUE(device->init());
   EXPECT_FALSE(device->status().channels[0].pending);
 

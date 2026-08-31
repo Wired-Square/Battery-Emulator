@@ -130,10 +130,10 @@ TEST_F(WflBoardTest, LoadSwitchBindingsFollowConfiguredRoles) {
   SPIClass::rx_queue.clear();
   gpio_events.clear();
 
-  wfl_load_switch.set_channel_config(0, LoadSwitchRole::PositiveContactor, 1023, 0);
-  wfl_load_switch.set_channel_config(1, LoadSwitchRole::Manual, 500, 0);
-  wfl_load_switch.set_channel_config(2, LoadSwitchRole::BmsPower, 1023, 0);
-  wfl_load_switch.set_channel_config(3, LoadSwitchRole::Disabled, 1023, 0);
+  wfl_load_switch.set_channel_role(0, LoadSwitchRole::PositiveContactor);
+  wfl_load_switch.set_channel_role(1, LoadSwitchRole::Manual);
+  wfl_load_switch.set_channel_role(2, LoadSwitchRole::BmsPower);
+  wfl_load_switch.set_channel_role(3, LoadSwitchRole::Disabled);
 
   for (int i = 0; i < 4; i++) {
     SPIClass::rx_queue.push_back({0x00, 0x00, 0x01});  // parity-valid zero frames

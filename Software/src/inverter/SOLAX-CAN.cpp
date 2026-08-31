@@ -294,10 +294,11 @@ bool SolaxInverter::setup(void) {  // Performs one time setup at startup
 }
 
 namespace {
-const DeviceSetting kSettings[] = {
-    {{"INVBTYPE", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr},
+constexpr DeviceSetting kSettings[] = {
+    {setting("INVBTYPE", SettingType::Uint, kInverter, SettingApplies::Boot),
      "Reported battery type (in decimal)"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList SolaxInverter::settings() {

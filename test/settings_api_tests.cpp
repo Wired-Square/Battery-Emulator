@@ -63,7 +63,7 @@ TEST_F(SettingsApiTest, EmitsScalarsWithCorrectJsonTypes) {
     store.saveBool("MQTTENABLED", true);
     store.saveUInt("MQTTPORT", 8883);
     store.saveString("MQTTSERVER", "broker.local");
-    store.saveUInt("BATTPVMAX", 4125);      // FloatX10 -> 412.5
+    store.saveUInt("BATTPVMAX", 4125);      // DeciUnits -> 412.5
     store.saveUInt("MQTTPUBLISHMS", 7000);  // SecondsToMs -> 7
   }
 
@@ -150,26 +150,26 @@ TEST_F(SettingsApiTest, EveryDeviceRowResolvesToARegisteredOwner) {
 }
 
 TEST_F(SettingsApiTest, EveryDeclaredCapabilityIsClaimedByARow) {
-  BatteryCapabilities battery_declared = 0;
+  uint16_t battery_declared = 0;
   for (size_t i = 0; i < battery_type_settings_count(); i++) {
-    battery_declared |= battery_type_settings_at(i).capabilities;
+    battery_declared |= battery_type_settings_at(i).capabilities.bits;
   }
-  InverterCapabilities inverter_declared = 0;
+  uint16_t inverter_declared = 0;
   for (size_t i = 0; i < inverter_type_settings_count(); i++) {
-    inverter_declared |= inverter_type_settings_at(i).capabilities;
+    inverter_declared |= inverter_type_settings_at(i).capabilities.bits;
   }
 
-  BatteryCapabilities battery_claimed = 0;
-  InverterCapabilities inverter_claimed = 0;
+  uint16_t battery_claimed = 0;
+  uint16_t inverter_claimed = 0;
   for (size_t i = 0; i < setting_count(); i++) {
     const SettingRef ref = setting_at(i);
     if (ref.device == nullptr) {
       continue;
     }
     if (ref.domain == SettingDomain::Battery) {
-      battery_claimed |= ref.device->capability;
+      battery_claimed |= ref.device->capability_bits;
     } else if (ref.domain == SettingDomain::Inverter) {
-      inverter_claimed |= ref.device->capability;
+      inverter_claimed |= ref.device->capability_bits;
     }
   }
 
@@ -481,8 +481,8 @@ TEST_F(SettingsApiTest, EmitsSchemaEntryPerField) {
       case SettingType::EnumUint:
         expected_type = "enum";
         break;
-      case SettingType::FloatX10:
-      case SettingType::SignedFloatX10:
+      case SettingType::DeciUnits:
+      case SettingType::SignedDeciUnits:
       case SettingType::Float:
         expected_type = "float";
         break;
@@ -597,7 +597,7 @@ TEST_F(SettingsApiTest, SecondsToMsTransformOnApply) {
   EXPECT_EQ(store.getUInt("MQTTPUBLISHMS", 0), 5000u);
 }
 
-TEST_F(SettingsApiTest, FloatX10TransformOnApply) {
+TEST_F(SettingsApiTest, DeciUnitsTransformOnApply) {
   BatteryEmulatorSettingsStore store;
   JsonDocument body;
   body["values"]["BATTPVMAX"] = 400.5;
@@ -1700,4 +1700,192 @@ TEST_F(SettingsApiTest, AcceptedApplyCarriesNoErrorKey) {
   const SettingsApplyResult result = apply_settings_body(store, doc);
   ASSERT_TRUE(result.ok) << result.error.c_str();
   EXPECT_EQ(result.error_key, nullptr);
+}
+
+namespace {
+using ST = SettingType;
+using SA = SettingApplies;
+using SS = SettingStorage;
+using SR = SettingRam;
+using SCP = SettingScope;
+
+// A board declaring rows in both scopes, so the scoped machinery is exercised
+// without a load switch or an IO expander.
+bool board_switch_state[2] = {};
+bool board_termination[2] = {};
+
+constexpr ScopeEntry kBoardChannels[] = {{0, "SW0"}, {1, "SW1"}};
+
+const DeviceSetting kBoardSettings[] = {
+    board_row(setting("BTERM", ST::Bool, kHardware, SA::Live)
+        .bound({SR::None, nullptr, 1, SCP::Interface,
+                [](uint8_t index, double value) {
+                  board_termination[index] = value != 0.0;
+                }}),
+              "Termination", [](uint8_t index) { return index == 1; }),
+
+    board_row(setting("BROLE", ST::EnumUint, kHardware, SA::Boot)
+        .with_range(0, 3)
+        .bound({SR::None, nullptr, 1, SCP::LoadSwitchChannel, nullptr}),
+              "Role"),
+
+    board_row(setting("BDUTY", ST::Float, kHardware, SA::Live, 100)
+        .with_range(0, 100)
+        .bound({SR::None, nullptr, 1, SCP::LoadSwitchChannel, nullptr}),
+              "Duty (%)"),
+
+    board_row(setting("BMANUAL", ST::Bool, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecLoadSwitch)
+        .bound({SR::Bool, [](uint8_t index) -> void* { return &board_switch_state[index]; }, 1, SCP::LoadSwitchChannel,
+                nullptr}),
+              "Manual output", [](uint8_t index) { return index == 1; }),
+};
+
+class BoardSettingsHal : public LilyGoHal {
+ public:
+  DeviceSettingList settings() override { return device_settings(kBoardSettings); }
+
+  ScopeEntries scope_entries(SettingScope scope) override {
+    if (scope == SettingScope::LoadSwitchChannel) {
+      return {kBoardChannels, 2};
+    }
+    return LilyGoHal::scope_entries(scope);
+  }
+
+  void write_status(ResponseWriter& out) override { out.field("stub", true); }
+};
+
+struct BoardHalScope {
+  BoardSettingsHal hal;
+  Esp32Hal* saved = esp32hal;
+  BoardHalScope() {
+    esp32hal = &hal;
+    board_switch_state[0] = false;
+    board_switch_state[1] = false;
+    board_termination[0] = false;
+    board_termination[1] = false;
+  }
+  ~BoardHalScope() { esp32hal = saved; }
+};
+}  // namespace
+
+TEST_F(SettingsApiTest, BoardRowsJoinTheSchemaWithoutOwnership) {
+  BoardHalScope board;
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(settings_json(reader));
+
+  bool found = false;
+  for (JsonObjectConst row : doc["schema"].as<JsonArrayConst>()) {
+    if (std::strcmp(row["key"].as<const char*>(), "BROLE") != 0) {
+      continue;
+    }
+    found = true;
+    EXPECT_STREQ(row["scope"].as<const char*>(), "loadswitchchannel");
+    EXPECT_STREQ(row["label"].as<const char*>(), "Role");
+    // One board per image, so a board row names no owners and no domain.
+    EXPECT_FALSE(row.containsKey("owners"));
+    EXPECT_FALSE(row.containsKey("domain"));
+  }
+  EXPECT_TRUE(found);
+
+  // Scoped rows carry no top-level scalar: their values live under dynamic.
+  EXPECT_FALSE(doc["values"].as<JsonObjectConst>().containsKey("BROLE"));
+}
+
+TEST_F(SettingsApiTest, ScopeEntriesEnumerateWhileAppliesToSelects) {
+  BoardHalScope board;
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(settings_json(reader));
+
+  JsonArrayConst channels = doc["dynamic"]["loadswitchchannel"];
+  ASSERT_EQ(channels.size(), 2u);
+  EXPECT_EQ(channels[0]["index"].as<int>(), 0);
+  EXPECT_STREQ(channels[0]["label"].as<const char*>(), "SW0");
+  EXPECT_EQ(channels[0]["BROLE"].as<uint32_t>(), 0u);
+  EXPECT_FLOAT_EQ(channels[0]["BDUTY"].as<float>(), 100.0f);
+  // applies_to selects channel 1 only; the scope still enumerated both.
+  EXPECT_FALSE(channels[0].as<JsonObjectConst>().containsKey("BMANUAL"));
+  EXPECT_TRUE(channels[1].as<JsonObjectConst>().containsKey("BMANUAL"));
+
+  JsonArrayConst interfaces = doc["dynamic"]["interface"];
+  EXPECT_EQ(interfaces.size(), esp32hal->interfaces().count);
+  EXPECT_FALSE(interfaces[0].as<JsonObjectConst>().containsKey("BTERM"));
+  EXPECT_TRUE(interfaces[1].as<JsonObjectConst>().containsKey("BTERM"));
+}
+
+TEST_F(SettingsApiTest, ScopedApplyDerivesTheIndexedNvsKey) {
+  BoardHalScope board;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["dynamic"]["loadswitchchannel"][0]["index"] = 1;
+  body["dynamic"]["loadswitchchannel"][0]["BROLE"] = 2;
+  body["dynamic"]["loadswitchchannel"][0]["BDUTY"] = 40.5;
+  body["dynamic"]["interface"][0]["index"] = 1;
+  body["dynamic"]["interface"][0]["BTERM"] = true;
+
+  const auto r = apply_settings_body(store, body);
+  ASSERT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_EQ(store.getUInt("BROLE1", 99), 2u);
+  EXPECT_FLOAT_EQ(store.getFloat("BDUTY1", 0.0f), 40.5f);
+  EXPECT_TRUE(store.getBool("BTERM1", false));
+  // A boot-applied row asks for a reboot; a live one applies and does not.
+  EXPECT_TRUE(r.reboot_required);
+  EXPECT_TRUE(board_termination[1]);
+}
+
+TEST_F(SettingsApiTest, ScopedApplyRejectsUnknownIndexAndOutOfRange) {
+  BoardHalScope board;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["dynamic"]["loadswitchchannel"][0]["index"] = 7;  // not in the scope
+  body["dynamic"]["loadswitchchannel"][0]["BROLE"] = 1;
+  body["dynamic"]["loadswitchchannel"][1]["index"] = 0;
+  body["dynamic"]["loadswitchchannel"][1]["BDUTY"] = 140.0;  // above max
+  body["dynamic"]["interface"][0]["index"] = 0;              // applies_to says no
+  body["dynamic"]["interface"][0]["BTERM"] = true;
+
+  const auto r = apply_settings_body(store, body);
+  ASSERT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_FALSE(store.settingExists("BROLE7"));
+  EXPECT_FALSE(store.settingExists("BDUTY0"));
+  EXPECT_FALSE(store.settingExists("BTERM0"));
+  EXPECT_FALSE(board_termination[0]);
+}
+
+TEST_F(SettingsApiTest, ScopedLiveRowAppliesWithoutTouchingNvs) {
+  BoardHalScope board;
+  BatteryEmulatorSettingsStore store;
+  JsonDocument body;
+  body["dynamic"]["loadswitchchannel"][0]["index"] = 1;
+  body["dynamic"]["loadswitchchannel"][0]["BMANUAL"] = true;
+
+  const auto r = apply_settings_body(store, body);
+  ASSERT_TRUE(r.ok) << r.error.c_str();
+  EXPECT_TRUE(board_switch_state[1]);
+  EXPECT_FALSE(board_switch_state[0]);
+  EXPECT_FALSE(store.settingExists("BMANUAL1"));
+  EXPECT_FALSE(r.reboot_required);
+}
+
+TEST_F(SettingsApiTest, StoredBoardSettingsApplyAtBootAndClampToDefault) {
+  BoardHalScope board;
+  {
+    BatteryEmulatorSettingsStore store;
+    store.saveBool("BTERM1", true);
+    store.saveUInt("BROLE1", 99);  // above max -> the default is applied instead
+  }
+  BatteryEmulatorSettingsStore store(true);
+  apply_stored_board_settings(store);
+  EXPECT_TRUE(board_termination[1]);
+  EXPECT_FALSE(board_termination[0]);
+}
+
+TEST_F(SettingsApiTest, BoardlessImageEmitsNoScopedSections) {
+  NullHalScope null_hal;
+  BatteryEmulatorSettingsStore reader(true);
+  const JsonDocument doc = parse_values(settings_json(reader));
+
+  EXPECT_FALSE(doc["dynamic"].as<JsonObjectConst>().containsKey("loadswitchchannel"));
+  EXPECT_FALSE(doc["dynamic"].as<JsonObjectConst>().containsKey("interface"));
 }

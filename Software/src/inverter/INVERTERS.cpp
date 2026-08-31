@@ -72,7 +72,7 @@ struct InverterTypeInfo {
   const char* name;
   InverterProtocol* (*make)(const char*);  // nullptr => not constructible (None)
   InverterProtocol::SettingsHook settings = nullptr;
-  InverterCapabilities capabilities = 0;
+  InverterCapabilities capabilities = {};
 };
 
 // A row's make<T> must construct the class its id and name denote — the pairing is convention, not compiler-checked.

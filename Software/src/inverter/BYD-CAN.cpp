@@ -209,10 +209,11 @@ void BydCanInverter::enable_shunt() {
 }
 
 namespace {
-const DeviceSetting kSettings[] = {
-    {{"DEYEBYD", SettingType::Bool, kInverter, SettingApplies::Boot, 0, nullptr},
+constexpr DeviceSetting kSettings[] = {
+    {setting("DEYEBYD", SettingType::Bool, kInverter, SettingApplies::Boot),
      "Deye avoid over/undercharge fix"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList BydCanInverter::settings() {

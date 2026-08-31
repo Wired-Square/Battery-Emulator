@@ -42,6 +42,8 @@ struct InterfaceList {
   size_t count;
 };
 
+inline constexpr size_t kMaxInterfaceDescriptors = 8;
+
 inline constexpr uint32_t INTERFACE_INDEX_MASK = 0xFF;
 inline constexpr uint32_t INTERFACE_TYPE_SHIFT = 8;
 inline constexpr uint32_t INTERFACE_TYPE_MASK = 0x7F;
@@ -53,6 +55,7 @@ inline constexpr uint32_t INTERFACE_SCHEMA_VERSION = 2;
 template <size_t N>
 constexpr InterfaceList make_interface_list(const InterfaceDescriptor (&arr)[N]) {
   static_assert(N <= INTERFACE_INDEX_MASK + 1, "descriptor index must fit the packed index field");
+  static_assert(N <= kMaxInterfaceDescriptors, "raise kMaxInterfaceDescriptors: fixed-size views would truncate");
   return {arr, N};
 }
 

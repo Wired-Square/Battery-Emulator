@@ -191,10 +191,11 @@ bool BydModbusInverter::setup(void) {  // Performs one time setup at startup ove
 }
 
 namespace {
-const DeviceSetting kSettings[] = {
-    {{"PRIMOGEN24", SettingType::Bool, kInverter, SettingApplies::Boot, 0, nullptr},
+constexpr DeviceSetting kSettings[] = {
+    {setting("PRIMOGEN24", SettingType::Bool, kInverter, SettingApplies::Boot),
      "Fronius Primo, 450V maxvoltage cap"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList BydModbusInverter::settings() {

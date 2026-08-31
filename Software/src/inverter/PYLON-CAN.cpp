@@ -257,13 +257,14 @@ bool PylonInverter::setup() {
 }
 
 namespace {
-const DeviceSetting kSettings[] = {
-    {{"PYLONSEND", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr}, "Pylon, send group (0-1)"},
-    {{"PYLONOFFSET", SettingType::Bool, kInverter, SettingApplies::Boot, 0, nullptr}, "Pylon, 30k offset"},
-    {{"PYLONORDER", SettingType::Bool, kInverter, SettingApplies::Boot, 0, nullptr}, "Pylon, invert byteorder"},
-    {{"PYLONBRAND", SettingType::EnumUint, kInverter, SettingApplies::Boot, 0, nullptr, "pylonbrand"},
+constexpr DeviceSetting kSettings[] = {
+    {setting("PYLONSEND", SettingType::Uint, kInverter, SettingApplies::Boot), "Pylon, send group (0-1)"},
+    {setting("PYLONOFFSET", SettingType::Bool, kInverter, SettingApplies::Boot), "Pylon, 30k offset"},
+    {setting("PYLONORDER", SettingType::Bool, kInverter, SettingApplies::Boot), "Pylon, invert byteorder"},
+    {setting("PYLONBRAND", SettingType::EnumUint, kInverter, SettingApplies::Boot).with_options("pylonbrand"),
      "Pylon, manufacturer name"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList PylonInverter::settings() {

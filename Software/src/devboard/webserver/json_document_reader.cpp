@@ -33,6 +33,14 @@ DocumentValue member(JsonObjectConst object, const char* key) {
 
 }  // namespace
 
+bool JsonRequestDocument::parse(uint8_t* body, size_t length, const char* scalar_map) {
+  if (deserializeJson(document_, body, length) != DeserializationError::Ok) {
+    return false;
+  }
+  reader_ = JsonDocumentReader(document_.as<JsonVariantConst>(), scalar_map);
+  return true;
+}
+
 JsonDocumentReader::JsonDocumentReader(JsonVariantConst root, const char* scalar_map) : root_(root) {
   scalars_ = scalar_map == nullptr ? root.as<JsonObjectConst>() : root[scalar_map].as<JsonObjectConst>();
 }

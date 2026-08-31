@@ -229,17 +229,18 @@ namespace {
 using ST = SettingType;
 using SA = SettingApplies;
 
-const DeviceSetting kSettings[] = {
-    {{"DALYPWRPCT", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
+constexpr DeviceSetting kSettings[] = {
+    {setting("DALYPWRPCT", ST::Uint, kBattery, SA::Boot, 50).with_range(1, 10000),
      "Power limit per percent SOC above 80 / below 20 (W/pct)"},
-    {{"DALYPWRDV", ST::Uint, kBattery, SA::Boot, 50, nullptr, nullptr, 1, 10000},
+    {setting("DALYPWRDV", ST::Uint, kBattery, SA::Boot, 50).with_range(1, 10000),
      "Max power per dV distance from minimum voltage (W/dV)"},
-    {{"DALYDVSTART", ST::Uint, kBattery, SA::Boot, 20, nullptr, nullptr, 1, 200},
+    {setting("DALYDVSTART", ST::Uint, kBattery, SA::Boot, 20).with_range(1, 200),
      "Voltage difference for start of voltage based discharge limit (dV)"},
-    {{"DALYPWRDEG", ST::Uint, kBattery, SA::Boot, 60, nullptr, nullptr, 1, 10000},
+    {setting("DALYPWRDEG", ST::Uint, kBattery, SA::Boot, 60).with_range(1, 10000),
      "Power change per °C above/below 0°C (W/°C)"},
-    {{"DALYPWR0C", ST::Uint, kBattery, SA::Boot, 800, nullptr, nullptr, 0, 100000}, "Power at 0°C (W)"},
+    {setting("DALYPWR0C", ST::Uint, kBattery, SA::Boot, 800).with_range(0, 100000), "Power at 0°C (W)"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList DalyBms::settings() {

@@ -102,7 +102,7 @@ struct BatteryTypeInfo {
   BusRequirement bus;
   Battery* (*make)(const BatterySlotContext&);  // null for None (no driver class)
   Battery::SettingsHook settings = nullptr;
-  BatteryCapabilities capabilities = 0;
+  BatteryCapabilities capabilities = {};
 };
 
 static constexpr BatteryTypeInfo kBatteryRegistry[] = {

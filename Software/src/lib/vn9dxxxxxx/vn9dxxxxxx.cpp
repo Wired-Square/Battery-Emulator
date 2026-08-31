@@ -174,13 +174,11 @@ bool Vn9d::init() {
   return true;
 }
 
-void Vn9d::set_channel_config(uint8_t channel, LoadSwitchRole role, uint16_t duty, uint8_t divisor_code) {
+void Vn9d::set_channel_role(uint8_t channel, LoadSwitchRole role) {
   if (channel >= kLoadSwitchMaxChannels) {
     return;
   }
   config_[channel].role = role < LoadSwitchRole::Highest ? role : LoadSwitchRole::Disabled;
-  config_[channel].duty = duty <= kLoadSwitchDutyMax ? duty : kLoadSwitchDutyMax;
-  config_[channel].divisor_code = divisor_code < kLoadSwitchDivisorCodes ? divisor_code : 0;
   status_.channels[channel].role = config_[channel].role;
 }
 

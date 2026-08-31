@@ -328,9 +328,10 @@ void PylonBattery::write_advanced_status(AdvancedStatusWriter& out) {
 }
 
 namespace {
-const DeviceSetting kSettings[] = {
-    {{"PYLONBAUD", SettingType::Uint, kBattery, SettingApplies::Boot, 500, nullptr}, "Pylon CAN baudrate (kbps)"},
+constexpr DeviceSetting kSettings[] = {
+    {setting("PYLONBAUD", SettingType::Uint, kBattery, SettingApplies::Boot, 500), "Pylon CAN baudrate (kbps)"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList PylonBattery::settings() {

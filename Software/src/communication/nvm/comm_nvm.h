@@ -32,30 +32,6 @@ void erase_phy_cal_data();
 
 void clear_wifi_sta_settings();
 
-// NVM key for one interface's termination toggle, keyed by descriptor index
-// (stable: per-board descriptor lists are append-only).
-inline String interface_termination_key(size_t interface_index) {
-  return String("TERMIF") + String(static_cast<unsigned>(interface_index));
-}
-
-#ifdef BOARD_HAS_LOAD_SWITCH
-inline String load_switch_role_key(uint8_t channel) {
-  return String("LSROLE") + String(channel);
-}
-inline String load_switch_duty_key(uint8_t channel) {
-  return String("LSDUTY") + String(channel);
-}
-inline String load_switch_divisor_key(uint8_t channel) {
-  return String("LSDIV") + String(channel);
-}
-#endif
-
-#ifdef BOARD_HAS_INTERFACE_TERMINATION
-// Requires board_init() to have run first (the expander must be up on
-// boards that switch termination through one).
-void apply_stored_interface_termination();
-#endif
-
 // Wraps the Preferences object begin/end calls, so that the scope of this object
 // runs them automatically (via constructor/destructor).
 class BatteryEmulatorSettingsStore {
@@ -104,6 +80,19 @@ class BatteryEmulatorSettingsStore {
   void removeKey(const char* name) {
     if (settings.isKey(name)) {
       settings.remove(name);
+      settingsUpdated = true;
+    }
+  }
+
+  float getFloat(const char* name, float defaultValue) {
+    return settings.isKey(name) ? settings.getFloat(name, defaultValue) : defaultValue;
+  }
+
+  void saveFloat(const char* name, float value) {
+    // isKey() check instead of a sentinel default: saving a value equal to the
+    // sentinel into a missing key must not be skipped.
+    if (!settings.isKey(name) || getFloat(name, 0) != value) {
+      settings.putFloat(name, value);
       settingsUpdated = true;
     }
   }

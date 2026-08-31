@@ -9,6 +9,7 @@
 #include "../../datalayer/datalayer_extended.h"
 #include "../../devboard/mqtt/mqtt.h"
 #include "../../devboard/utils/logging.h"
+#include "../../devboard/webserver/settings_api.h"
 #include "../../devboard/webserver/webserver.h"
 #include "../../devboard/wifi/wifi.h"
 #include "../../inverter/INVERTERS.h"
@@ -231,25 +232,7 @@ void init_stored_settings() {
     }
   }
 
-#ifdef BOARD_HAS_LOAD_SWITCH
-  if (LoadSwitch* load_switch = esp32hal->load_switch()) {
-    for (uint8_t ch = 0; ch < kLoadSwitchConfigChannels; ch++) {
-      uint32_t role = settings.getUInt(load_switch_role_key(ch).c_str(), (uint32_t)LoadSwitchRole::Disabled);
-      if (role >= (uint32_t)LoadSwitchRole::Highest) {
-        role = (uint32_t)LoadSwitchRole::Disabled;
-      }
-      uint32_t duty = settings.getUInt(load_switch_duty_key(ch).c_str(), kLoadSwitchDutyMax);
-      if (duty > kLoadSwitchDutyMax) {
-        duty = kLoadSwitchDutyMax;
-      }
-      uint32_t divisor = settings.getUInt(load_switch_divisor_key(ch).c_str(), 0);
-      if (divisor >= kLoadSwitchDivisorCodes) {
-        divisor = 0;
-      }
-      load_switch->set_channel_config(ch, (LoadSwitchRole)role, (uint16_t)duty, (uint8_t)divisor);
-    }
-  }
-#endif
+  apply_stored_board_settings(settings);
 
   precharge_control_enabled = settings.getBool("EXTPRECHARGE", false);
   precharge_inverter_normally_open_contactor = settings.getBool("NOINVDISC", false);
@@ -361,14 +344,3 @@ void erase_phy_cal_data() {
   }
 }
 
-#ifdef BOARD_HAS_INTERFACE_TERMINATION
-void apply_stored_interface_termination() {
-  BatteryEmulatorSettingsStore settings(true);
-  InterfaceList list = esp32hal->interfaces();
-  for (size_t i = 0; i < list.count; i++) {
-    if (esp32hal->supports_interface_termination(i)) {
-      esp32hal->set_interface_termination(i, settings.getBool(interface_termination_key(i).c_str(), false));
-    }
-  }
-}
-#endif

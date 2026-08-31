@@ -44,6 +44,7 @@ class Preferences {
   size_t putInt(const char* key, int32_t value) { return put(key, value); }
   size_t putUInt(const char* key, uint32_t value) { return put(key, value); }
   size_t putBool(const char* key, bool value) { return put(key, value); }
+  size_t putFloat(const char* key, float value) { return put(key, value); }
   size_t putString(const char* key, const char* value) { return put(key, String(value)); }
   size_t putString(const char* key, String value) { return put(key, value); }
 
@@ -55,6 +56,7 @@ class Preferences {
   int32_t getInt(const char* key, int32_t defaultValue = 0) { return get(key, defaultValue); }
   uint32_t getUInt(const char* key, uint32_t defaultValue = 0) { return get(key, defaultValue); }
   bool getBool(const char* key, bool defaultValue = false) { return get(key, defaultValue); }
+  float getFloat(const char* key, float defaultValue = 0.0f) { return get(key, defaultValue); }
 
   size_t getString(const char* key, char* value, size_t maxLen) {
     if (maxLen == 0) {
@@ -74,7 +76,7 @@ class Preferences {
   static void resetAllForTests() { store().clear(); }
 
  private:
-  using Value = std::variant<int32_t, uint32_t, bool, String>;
+  using Value = std::variant<int32_t, uint32_t, bool, float, String>;
   using Namespace = std::map<std::string, Value>;
 
   static std::map<std::string, Namespace>& store() {

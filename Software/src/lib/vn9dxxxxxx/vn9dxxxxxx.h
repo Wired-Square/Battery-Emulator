@@ -104,7 +104,7 @@ class Vn9d : public LoadSwitch {
   // leaves the device in fail-safe with all outputs open.
   bool init();
 
-  void set_channel_config(uint8_t channel, LoadSwitchRole role, uint16_t duty, uint8_t divisor_code) override;
+  void set_channel_role(uint8_t channel, LoadSwitchRole role) override;
   void tick() override;
   const LoadSwitchStatus& status() override { return status_; }
   uint32_t pwm_clock_hz() const override { return kVn9dPwmClockHz; }

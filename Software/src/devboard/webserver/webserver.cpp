@@ -14,7 +14,6 @@
 #include "../../datalayer/datalayer.h"
 #include "../../devboard/safety/safety.h"
 #include "../../inverter/INVERTERS.h"
-#include "../../lib/bblanchon-ArduinoJson/ArduinoJson.h"
 #include "../../system_settings.h"
 #include "../sdcard/sdcard.h"
 #include "../utils/events.h"
@@ -266,13 +265,12 @@ static void def_json_post_with_auth(const char* uri,
         if (index + len != total) {
           return;
         }
-        JsonDocument doc;
-        if (deserializeJson(doc, json_post_body, total) != DeserializationError::Ok) {
+        JsonRequestDocument document;
+        if (!document.parse(json_post_body, total, scalar_map)) {
           json_post_owner = nullptr;
           return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad JSON");
         }
-        JsonDocumentReader reader(doc.as<JsonVariantConst>(), scalar_map);
-        handler(request, reader);
+        handler(request, document.reader());
         json_post_owner = nullptr;
       });
 }
@@ -449,28 +447,6 @@ void init_webserver() {
         });
       },
       "values");
-
-#ifdef BOARD_HAS_LOAD_SWITCH
-  def_json_post_with_auth("/api/loadswitch", [](AsyncWebServerRequest* request, const DocumentReader& body) {
-    LoadSwitch* load_switch = esp32hal->load_switch();
-    const DocumentValue channel_value = body.value("channel");
-    const DocumentValue on = body.value("on");
-    if (load_switch == nullptr || !channel_value.is_integer_in(INT32_MIN, INT32_MAX) || !on.is_bool()) {
-      return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Bad Request");
-    }
-    int channel = static_cast<int>(channel_value.integer);
-    // channel_count, not kLoadSwitchMaxChannels: request_manual() would accept a
-    // channel the tick never drains, stranding pending set forever.
-    if (channel < 0 || channel >= load_switch->status().channel_count ||
-        load_switch->status().channels[channel].role != LoadSwitchRole::Manual) {
-      return request->send(HTTP_STATUS_BAD_REQUEST, "text/plain", "Invalid channel");
-    }
-    load_switch->request_manual((uint8_t)channel, on.as_bool());
-    // Answers with pending set: the tick has not run, so the client is told the
-    // request is in flight rather than shown the value it asked for.
-    send_streamed(request, CONTENT_TYPE_JSON, write_state);
-  });
-#endif
 
   // Viewing the CAN log implies logging should run; enabling here matches the
   // legacy page's view side effect. Entering fresh (logging was off) clears the
@@ -675,7 +651,6 @@ void write_capabilities(ResponseWriter& out) {
 #endif
 #endif
 
-  BatteryEmulatorSettingsStore settings(true);
   InterfaceList list = esp32hal->interfaces();
   out.begin_array("interfaces");
   for (size_t i = 0; i < list.count; i++) {
@@ -686,7 +661,7 @@ void write_capabilities(ResponseWriter& out) {
     bool termination_capable = esp32hal->supports_interface_termination(i);
     out.field("termination_capable", termination_capable);
     if (termination_capable) {
-      out.field("termination", settings.getBool(interface_termination_key(i).c_str(), false));
+      out.field("termination", esp32hal->interface_termination(i));
     }
     out.end_object();
   }
@@ -848,31 +823,11 @@ void write_state(ResponseWriter& out) {
   add_state_events(out);
   out.end_object();
 
-#ifdef BOARD_HAS_LOAD_SWITCH
-  if (LoadSwitch* load_switch = esp32hal->load_switch()) {
-    const LoadSwitchStatus& ls_status = load_switch->status();
-    out.begin_object("load_switch");
-    out.field("device_ok", ls_status.device_ok);
-    out.begin_array("channels");
-    // Every channel is emitted, disabled ones included: the client addresses a
-    // channel by its array index when toggling.
-    for (uint8_t ch = 0; ch < ls_status.channel_count; ch++) {
-      const LoadSwitchChannelStatus& channel = ls_status.channels[ch];
-      out.begin_object();
-      out.field("role_id", static_cast<uint32_t>(channel.role));
-      out.field("role", name_for_load_switch_role(channel.role));
-      out.field("manual", channel.role == LoadSwitchRole::Manual);
-      out.field("on", channel.on);
-      out.field("pending", channel.pending);
-      out.field("pending_on", channel.pending_on);
-      out.field("current_mA", channel.current_mA);
-      out.field("fault", channel.fault || channel.latched_off);
-      out.end_object();
-    }
-    out.end_array();
+  if (esp32hal != nullptr) {
+    out.begin_object("board");
+    esp32hal->write_status(out);
     out.end_object();
   }
-#endif
 
   out.end_object();
 }

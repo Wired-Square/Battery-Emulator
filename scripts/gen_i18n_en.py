@@ -19,6 +19,7 @@ DASHBOARD_JS = "Software/src/devboard/webserver/web/dashboard.js"
 SETTINGS_API = "Software/src/devboard/webserver/settings_api.cpp"
 DRIVER_DIR = "Software/src/battery"
 DEVICE_SETTING_DIRS = ("Software/src/battery", "Software/src/inverter")
+BOARD_SETTING_DIR = "Software/src/devboard/hal"
 ADVANCED_API = "Software/src/devboard/webserver/advanced_api.cpp"
 WEB_DIR = "Software/src/devboard/webserver/web"
 OUT_FILE = "translations/en.json"
@@ -51,8 +52,12 @@ SHELL_ATTR_MARKER = re.compile(r'(\w[\w-]*)="([^"]*)"[^>]*data-i18n-attr="\1:([^
 # TL() marks a driver label or section title as English prose rather than a
 # signal name. The slug must match slugify() in advanced.js.
 TL_CALL = re.compile(r'\bTL\(\s*((?:"(?:[^"\\\\]|\\\\.)*"\s*)+)\)')
+# The gap may not cross another setting( or a table terminator: a labelless
+# central row would otherwise take the next label it finds, which is the first
+# label of the following table or a static_assert message.
 DEVICE_SETTING_LABEL = re.compile(
-    r'\{\{"([A-Za-z0-9_]+)",\s*(?:ST|SettingType)::.*?\}\s*,\s*("(?:[^"\\\\]|\\\\.)*")', re.S)
+    r'setting\("([A-Za-z0-9_]+)",\s*(?:ST|SettingType)::(?:(?!setting\(|\};).)*?\)\s*,\s*("(?:[^"\\\\]|\\\\.)*")',
+    re.S)
 SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 SLUG_RUNS = re.compile(r"_+")
 
@@ -165,6 +170,7 @@ def collect(repo_root: Path) -> dict:
     settings_sources = [root / SETTINGS_API]
     for directory in DEVICE_SETTING_DIRS:
         settings_sources.extend(sorted((root / directory).glob("*.cpp")))
+    settings_sources.extend(sorted((root / BOARD_SETTING_DIR).glob("hw_*.h")))
     for path in settings_sources:
         strings.update(device_setting_labels(path.read_text(encoding=SOURCE_ENCODING)))
     marked = [p for p in sorted((root / DRIVER_DIR).rglob("*")) if p.suffix in (".h", ".cpp")]

@@ -29,6 +29,9 @@ struct SettingRef {
 size_t setting_count();
 SettingRef setting_at(size_t index);
 
+// Must run before board_init(): a board's own bring-up reads what this applies.
+void apply_stored_board_settings(BatteryEmulatorSettingsStore& store);
+
 // Writes the settings payload: {"values":{...}} scalars, {"options":{...}}
 // enum/map pick-lists, {"schema":[...]} the field list (key, category, widget
 // type, options-key) the client renders from, and, when a HAL is present, the

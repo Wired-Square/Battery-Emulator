@@ -80,7 +80,7 @@ constexpr int32_t kPptPerPercent = 100;
 constexpr int32_t kDeciPerUnit = 10;
 constexpr int32_t kMsPerMinute = 60000;
 
-void seed_slot_capacities(uint8_t) {
+void seed_slot_capacities(uint8_t, double) {
   for (uint8_t slot = 0; slot < kMaxBatterySlots; slot++) {
     datalayer.battery_slot(slot).info.total_capacity_Wh = datalayer.battery.settings.user_set_total_capacity_Wh;
   }
@@ -130,8 +130,35 @@ struct BatterySlotKeys {
 };
 constexpr const char* kBatteriesPath = "dynamic.batteries";
 constexpr const char* kBalancingPath = "dynamic.balancing";
-constexpr const char* kTerminationPath = "dynamic.termination";
-constexpr const char* kLoadSwitchChannelsPath = "dynamic.loadswitch.channels";
+constexpr const char* kDynamicPrefix = "dynamic.";
+
+// Names both the schema row's "scope" and the dynamic section carrying its
+// entries. Global has no section, so it must answer null, not "".
+const char* scope_name(SettingScope scope) {
+  switch (scope) {
+    case SCP::BatterySlot:
+      return "battery";
+    case SCP::Interface:
+      return "interface";
+    case SCP::LoadSwitchChannel:
+      return "loadswitchchannel";
+    case SCP::Global:
+    case SCP::Highest:
+      break;
+  }
+  return nullptr;
+}
+
+// Reproduces the keys comm_nvm wrote by hand: TERMIF0, LSROLE0, LSDUTY0, LSDIV0.
+String scoped_key(const SettingField& field, uint8_t index) {
+  return field.live.scope == SCP::Global ? String(field.key)
+                                         : String(field.key) + String(static_cast<unsigned>(index));
+}
+
+bool in_bounds(const SettingField& field, double value) {
+  return (field.min_value == kNoMin || value >= field.min_value) &&
+         (field.max_value == kNoMax || value <= field.max_value);
+}
 
 constexpr BatterySlotKeys kBatterySlotKeys[kMaxBatterySlots] = {
     {0, "BATTTYPE", "BATTCOMM", "CNTCTRL"},
@@ -140,432 +167,260 @@ constexpr BatterySlotKeys kBatterySlotKeys[kMaxBatterySlots] = {
 };
 }  // namespace
 
-const SettingField kSettingFields[] = {
-    {"WEBAUTH", ST::Bool, kWebauth, SA::Boot, 0, nullptr},
-    {"HTTPUSER", ST::StringVal, kWebauth, SA::Boot, 0, "admin"},
-    {"HTTPPASS", ST::StringVal, kWebauth, SA::Boot, 0, ""},
+constexpr SettingField kSettingFields[] = {
+    setting("WEBAUTH", ST::Bool, kWebauth, SA::Boot),
+    setting("HTTPUSER", ST::StringVal, kWebauth, SA::Boot).with_text("admin"),
+    setting("HTTPPASS", ST::StringVal, kWebauth, SA::Boot).with_text(""),
 
-    {"WEBUI", ST::StringVal, kInterface, SA::Live, 0, kDefaultUiShell, "webui"},
+    setting("WEBUI", ST::StringVal, kInterface, SA::Live).with_text(kDefaultUiShell).with_options("webui"),
 
-    {"SSID", ST::StringVal, kNetwork, SA::Boot, 0, ""},
-    {"PASSWORD", ST::StringVal, kNetwork, SA::Boot, 0, ""},
+    setting("SSID", ST::StringVal, kNetwork, SA::Boot).with_text(""),
+    setting("PASSWORD", ST::StringVal, kNetwork, SA::Boot).with_text(""),
 
-    {"BATTCHEM", ST::EnumUint, kBattery, SA::Boot, 1, nullptr, "chemistry"},
+    setting("BATTCHEM", ST::EnumUint, kBattery, SA::Boot, 1).with_options("chemistry"),
 
-    {"INVTYPE", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "inverter"},
-    {"INVCOMM", ST::InterfacePacked, kInverter, SA::Boot, 0, nullptr},
-    {"INVOFFGRID", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"LOWPASSFILTER", ST::Bool, kInverter, SA::Boot, 0, nullptr},
-    {"CHGTAPERSOC", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    setting("INVTYPE", ST::EnumUint, kInverter, SA::Boot).with_options("inverter"),
+    setting("INVCOMM", ST::InterfacePacked, kInverter, SA::Boot),
+    setting("INVOFFGRID", ST::Bool, kInverter, SA::Boot),
+    setting("LOWPASSFILTER", ST::Bool, kInverter, SA::Boot),
+    setting("CHGTAPERSOC", ST::Bool, kInverter, SA::Boot),
     // Stored as start SOC in whole percent; comm_nvm derives the pptt band from it.
-    {"CHGTAPERSTART", ST::Uint, kInverter, SA::Boot, 95, nullptr, nullptr, 50, 99},
-    {"CHGTAPERFLOOR", ST::Uint, kInverter, SA::Boot, 0, nullptr, nullptr, 0, 2000},
-    {"SLOWCANINV", ST::Bool, kInverter, SA::Boot, 0, nullptr},
+    setting("CHGTAPERSTART", ST::Uint, kInverter, SA::Boot, 95).with_range(50, 99),
+    setting("CHGTAPERFLOOR", ST::Uint, kInverter, SA::Boot).with_range(0, 2000),
+    setting("SLOWCANINV", ST::Bool, kInverter, SA::Boot),
 
     // CTOFFSET is a string to keep its sign; CTATTEN uses the boot default 3, not the
     // form's 0, so an unsaved device's full-set POST leaves the attenuation unchanged.
-    {"CHGTYPE", ST::EnumUint, kOptional, SA::Boot, 0, nullptr, "charger"},
-    {"CHGCOMM", ST::InterfacePacked, kOptional, SA::Boot, 0, nullptr},
-    {"SHUNTTYPE", ST::EnumUint, kOptional, SA::Boot, 0, nullptr, "shunt"},
-    {"SHUNTCOMM", ST::InterfacePacked, kOptional, SA::Boot, 0, nullptr},
-    {"CTOFFSET", ST::FloatString, kOptional, SA::Boot, 0, "-1.0"},
-    {"CTVNOM", ST::Uint, kOptional, SA::Boot, 40, nullptr, nullptr, 0, 500},
-    {"CTANOM", ST::Uint, kOptional, SA::Boot, 100, nullptr, nullptr, 0, 200},
-    {"CTATTEN", ST::EnumUint, kOptional, SA::Boot, 3, nullptr, "attenuation"},
-    {"CTINVERT", ST::Bool, kOptional, SA::Boot, 0, nullptr},
+    setting("CHGTYPE", ST::EnumUint, kOptional, SA::Boot).with_options("charger"),
+    setting("CHGCOMM", ST::InterfacePacked, kOptional, SA::Boot),
+    setting("SHUNTTYPE", ST::EnumUint, kOptional, SA::Boot).with_options("shunt"),
+    setting("SHUNTCOMM", ST::InterfacePacked, kOptional, SA::Boot),
+    setting("CTOFFSET", ST::FloatString, kOptional, SA::Boot).with_text("-1.0"),
+    setting("CTVNOM", ST::Uint, kOptional, SA::Boot, 40).with_range(0, 500),
+    setting("CTANOM", ST::Uint, kOptional, SA::Boot, 100).with_range(0, 200),
+    setting("CTATTEN", ST::EnumUint, kOptional, SA::Boot, 3).with_options("attenuation"),
+    setting("CTINVERT", ST::Bool, kOptional, SA::Boot),
 
     // Board-gated rows sit inside the same #ifdef that gates them in comm_nvm.cpp.
-    {"CANFDASCAN", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    setting("CANFDASCAN", ST::Bool, kHardware, SA::Boot),
 #if defined(HW_LILYGO2CAN) || defined(HW_STARK)
-    {"CANFD2ASCAN", ST::Bool, kHardware, SA::Boot, 0, nullptr},
+    setting("CANFD2ASCAN", ST::Bool, kHardware, SA::Boot),
 #endif
-    {"EQSTOP", ST::EnumUint, kHardware, SA::Boot, 0, nullptr, "button"},
-    {"PRECHGMS", ST::Uint, kHardware, SA::Boot, 100, nullptr, nullptr, 1, 65000},
-    {"NCCONTACTOR", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"PWMCNTCTRL", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"PWMFREQ", ST::Uint, kHardware, SA::Boot, 20000, nullptr, nullptr, 1, 65000},
-    {"PWMHOLD", ST::Uint, kHardware, SA::Boot, 250, nullptr, nullptr, 1, 1023},
-    {"PERBMSRESET", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"PERBMSRESETH", ST::EnumUint, kHardware, SA::Boot, 24, nullptr, "bmsresetinterval"},
-    {"PERBMSDEFSOC", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"PERBMSSKIPBAL", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"EXTPRECHARGE", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"MAXPRETIME", ST::Uint, kHardware, SA::Boot, 15000, nullptr},
-    {"MAXPREFREQ", ST::Uint, kHardware, SA::Boot, 34000, nullptr},
-    {"NOINVDISC", ST::Bool, kHardware, SA::Boot, 0, nullptr},
-    {"LEDMODE", ST::EnumUint, kHardware, SA::Boot, 0, nullptr, "ledmode"},
+    setting("EQSTOP", ST::EnumUint, kHardware, SA::Boot).with_options("button"),
+    setting("PRECHGMS", ST::Uint, kHardware, SA::Boot, 100).with_range(1, 65000),
+    setting("NCCONTACTOR", ST::Bool, kHardware, SA::Boot),
+    setting("PWMCNTCTRL", ST::Bool, kHardware, SA::Boot),
+    setting("PWMFREQ", ST::Uint, kHardware, SA::Boot, 20000).with_range(1, 65000),
+    setting("PWMHOLD", ST::Uint, kHardware, SA::Boot, 250).with_range(1, 1023),
+    setting("PERBMSRESET", ST::Bool, kHardware, SA::Boot),
+    setting("PERBMSRESETH", ST::EnumUint, kHardware, SA::Boot, 24).with_options("bmsresetinterval"),
+    setting("PERBMSDEFSOC", ST::Bool, kHardware, SA::Boot),
+    setting("PERBMSSKIPBAL", ST::Bool, kHardware, SA::Boot),
+    setting("EXTPRECHARGE", ST::Bool, kHardware, SA::Boot),
+    setting("MAXPRETIME", ST::Uint, kHardware, SA::Boot, 15000),
+    setting("MAXPREFREQ", ST::Uint, kHardware, SA::Boot, 34000),
+    setting("NOINVDISC", ST::Bool, kHardware, SA::Boot),
+    setting("LEDMODE", ST::EnumUint, kHardware, SA::Boot).with_options("ledmode"),
 
-    {"WIFIAPENABLED", ST::Bool, kConnectivity, SA::Boot, 1, nullptr},
-    {"APPASSWORD", ST::StringVal, kConnectivity, SA::Boot, 0, "123456789"},
-    {"WIFICHANNEL", ST::Uint, kConnectivity, SA::Boot, 0, nullptr, nullptr, 0, 14},
-    {"HOSTNAME", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"STATICIP", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"LOCALIP", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"GATEWAY", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"SUBNET", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"DNS", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"ESPNOWENABLED", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"ESPNOWMACS", ST::StringVal, kConnectivity, SA::Boot, 0, "", nullptr, kNoMin, 180},
-    {"MQTTENABLED", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"MQTTSERVER", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"MQTTPORT", ST::Uint, kConnectivity, SA::Boot, 1883, nullptr, nullptr, 1, 65535},
-    {"MQTTUSER", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"MQTTPASSWORD", ST::StringVal, kConnectivity, SA::Boot, 0, ""},
-    {"MQTTTIMEOUT", ST::Uint, kConnectivity, SA::Boot, 2000, nullptr, nullptr, 1, 60000},
-    {"MQTTPUBLISHMS", ST::SecondsToMs, kConnectivity, SA::Boot, 5, nullptr, nullptr, 1, 300},
-    {"MQTTCELLV", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"MQTTHEAP", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"REMBMSRESET", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"HADISC", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"HADISCFWU", ST::Bool, kConnectivity, SA::Boot, 0, nullptr},
-    {"HADISCTOPIC", ST::StringVal, kConnectivity, SA::Boot, 0, "homeassistant"},
+    setting("WIFIAPENABLED", ST::Bool, kConnectivity, SA::Boot, 1),
+    setting("APPASSWORD", ST::StringVal, kConnectivity, SA::Boot).with_text("123456789"),
+    setting("WIFICHANNEL", ST::Uint, kConnectivity, SA::Boot).with_range(0, 14),
+    setting("HOSTNAME", ST::StringVal, kConnectivity, SA::Boot).with_text(""),
+    setting("STATICIP", ST::Bool, kConnectivity, SA::Boot),
+    setting("LOCALIP", ST::StringVal, kConnectivity, SA::Boot).with_text(""),
+    setting("GATEWAY", ST::StringVal, kConnectivity, SA::Boot).with_text(""),
+    setting("SUBNET", ST::StringVal, kConnectivity, SA::Boot).with_text(""),
+    setting("DNS", ST::StringVal, kConnectivity, SA::Boot).with_text(""),
+    setting("ESPNOWENABLED", ST::Bool, kConnectivity, SA::Boot),
+    setting("ESPNOWMACS", ST::StringVal, kConnectivity, SA::Boot).with_text("").with_range(kNoMin, 180),
+    setting("MQTTENABLED", ST::Bool, kConnectivity, SA::Boot),
+    setting("MQTTSERVER", ST::StringVal, kConnectivity, SA::Boot).with_text(""),
+    setting("MQTTPORT", ST::Uint, kConnectivity, SA::Boot, 1883).with_range(1, 65535),
+    setting("MQTTUSER", ST::StringVal, kConnectivity, SA::Boot).with_text(""),
+    setting("MQTTPASSWORD", ST::StringVal, kConnectivity, SA::Boot).with_text(""),
+    setting("MQTTTIMEOUT", ST::Uint, kConnectivity, SA::Boot, 2000).with_range(1, 60000),
+    setting("MQTTPUBLISHMS", ST::SecondsToMs, kConnectivity, SA::Boot, 5).with_range(1, 300),
+    setting("MQTTCELLV", ST::Bool, kConnectivity, SA::Boot),
+    setting("MQTTHEAP", ST::Bool, kConnectivity, SA::Boot),
+    setting("REMBMSRESET", ST::Bool, kConnectivity, SA::Boot),
+    setting("HADISC", ST::Bool, kConnectivity, SA::Boot),
+    setting("HADISCFWU", ST::Bool, kConnectivity, SA::Boot),
+    setting("HADISCTOPIC", ST::StringVal, kConnectivity, SA::Boot).with_text("homeassistant"),
 
-    {"PERFPROFILE", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"MEASURECPUTEMP", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"CPUTEMPOFFSET", ST::Int, kDebug, SA::Boot, 0, nullptr},
-    {"CANLOGUSB", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"USBENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"WEBENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"CANLOGSD", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"SDLOGENABLED", ST::Bool, kDebug, SA::Boot, 0, nullptr},
+    setting("PERFPROFILE", ST::Bool, kDebug, SA::Boot),
+    setting("MEASURECPUTEMP", ST::Bool, kDebug, SA::Boot),
+    setting("CPUTEMPOFFSET", ST::Int, kDebug, SA::Boot),
+    setting("CANLOGUSB", ST::Bool, kDebug, SA::Boot),
+    setting("USBENABLED", ST::Bool, kDebug, SA::Boot),
+    setting("WEBENABLED", ST::Bool, kDebug, SA::Boot),
+    setting("CANLOGSD", ST::Bool, kDebug, SA::Boot),
+    setting("SDLOGENABLED", ST::Bool, kDebug, SA::Boot),
 #ifndef SMALL_FLASH_DEVICE
     // Gate matches the comm_nvm reads and the syslog client.
-    {"SYSLOGEN", ST::Bool, kDebug, SA::Boot, 0, nullptr},
-    {"SYSLOGIP", ST::StringVal, kDebug, SA::Boot, 0, ""},
-    {"SYSLOGPORT", ST::Uint, kDebug, SA::Boot, 514, nullptr, nullptr, 1, 65535},
-    {"SYSLOGFAC", ST::Uint, kDebug, SA::Boot, 1, nullptr, nullptr, 0, 23},
+    setting("SYSLOGEN", ST::Bool, kDebug, SA::Boot),
+    setting("SYSLOGIP", ST::StringVal, kDebug, SA::Boot).with_text(""),
+    setting("SYSLOGPORT", ST::Uint, kDebug, SA::Boot, 514).with_range(1, 65535),
+    setting("SYSLOGFAC", ST::Uint, kDebug, SA::Boot, 1).with_range(0, 23),
 #endif
 
-    {"BATTERY_WH_MAX",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::U32, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_total_capacity_Wh; }, 1, SCP::Global,
-      seed_slot_capacities}},
-    {"USE_SCALED_SOC",
-     ST::Bool,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer.battery.settings.soc_scaling_active; }}},
-    {"MAXPERCENTAGE",
-     ST::FloatX10,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_percentage; }, kPptPerPercent}},
-    {"MINPERCENTAGE",
-     ST::SignedFloatX10,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::I16, [](uint8_t) -> void* { return &datalayer.battery.settings.min_percentage; }, kPptPerPercent}},
-    {"MAXCHARGEAMP",
-     ST::FloatX10,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_charge_dA; }, kDeciPerUnit}},
-    {"MAXDISCHARGEAMP",
-     ST::FloatX10,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_discharge_dA; }, kDeciPerUnit}},
-    {"USEVOLTLIMITS",
-     ST::Bool,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_voltage_limits_active; }}},
-    {"TARGETCHVOLT",
-     ST::FloatX10,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_charge_voltage_dV; },
-      kDeciPerUnit}},
-    {"TARGETDISCHVOLT",
-     ST::FloatX10,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_discharge_voltage_dV; },
-      kDeciPerUnit}},
-    {"BMSRESETDUR",
-     ST::SecondsToMs,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Nvs,
-     kSecChargeLimits,
-     {SR::U32, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_bms_reset_duration_ms; },
-      kMillisecondsPerSecond}},
+    setting("BATTERY_WH_MAX", ST::Uint, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::U32, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_total_capacity_Wh; }, 1,
+                SCP::Global,seed_slot_capacities}),
+    setting("USE_SCALED_SOC", ST::Bool, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::Bool, [](uint8_t) -> void* { return &datalayer.battery.settings.soc_scaling_active; }}),
+    setting("MAXPERCENTAGE", ST::DeciUnits, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_percentage; }, kPptPerPercent}),
+    setting("MINPERCENTAGE", ST::SignedDeciUnits, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::I16, [](uint8_t) -> void* { return &datalayer.battery.settings.min_percentage; }, kPptPerPercent}),
+    setting("MAXCHARGEAMP", ST::DeciUnits, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_charge_dA; },
+                kDeciPerUnit}),
+    setting("MAXDISCHARGEAMP", ST::DeciUnits, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_discharge_dA; },
+                kDeciPerUnit}),
+    setting("USEVOLTLIMITS", ST::Bool, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::Bool, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_voltage_limits_active; }}),
+    setting("TARGETCHVOLT", ST::DeciUnits, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_charge_voltage_dV; },
+                kDeciPerUnit}),
+    setting("TARGETDISCHVOLT", ST::DeciUnits, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer.battery.settings.max_user_set_discharge_voltage_dV; },
+                kDeciPerUnit}),
+    setting("BMSRESETDUR", ST::SecondsToMs, kLive, SA::Live)
+        .in_section(kSecChargeLimits)
+        .bound({SR::U32, [](uint8_t) -> void* { return &datalayer.battery.settings.user_set_bms_reset_duration_ms; },
+                kMillisecondsPerSecond}),
 
-    {"hv_enabled",
-     ST::Bool,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecCharger,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_HV_enabled; }}},
-    {"aux12v_enabled",
-     ST::Bool,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecCharger,
-     {SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_aux12V_enabled; }}},
-    {"setpoint_v",
-     ST::Float,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecCharger,
-     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_VDC; }}},
-    {"setpoint_a",
-     ST::Float,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecCharger,
-     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC; }}},
-    {"end_a",
-     ST::Float,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecCharger,
-     {SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC_END; }}},
+    setting("hv_enabled", ST::Bool, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecCharger)
+        .bound({SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_HV_enabled; }}),
+    setting("aux12v_enabled", ST::Bool, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecCharger)
+        .bound({SR::Bool, [](uint8_t) -> void* { return &datalayer.charger.charger_aux12V_enabled; }}),
+    setting("setpoint_v", ST::Float, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecCharger)
+        .bound({SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_VDC; }}),
+    setting("setpoint_a", ST::Float, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecCharger)
+        .bound({SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC; }}),
+    setting("end_a", ST::Float, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecCharger)
+        .bound({SR::F32, [](uint8_t) -> void* { return &datalayer.charger.charger_setpoint_HV_IDC_END; }}),
 
-    {"recovery_mode",
-     ST::Bool,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecRecovery,
-     {SR::Bool,
-      [](uint8_t) -> void* { return &datalayer.battery.settings.user_requests_forced_charging_recovery_mode; }}},
+    setting("recovery_mode", ST::Bool, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecRecovery)
+        .bound({SR::Bool,
+                [](uint8_t) -> void*{
+                  return &datalayer.battery.settings.user_requests_forced_charging_recovery_mode;
+                }}),
 
-    {"cutoff",
-     ST::Uint,
-     kLive,
-     SA::Live,
-     0,
-     nullptr,
-     nullptr,
-     kNoMin,
-     kNoMax,
-     SS::Volatile,
-     kSecCanIdCutoff,
-     {SR::U16, [](uint8_t) -> void* { return &user_selected_CAN_ID_cutoff_filter; }}},
+    setting("cutoff", ST::Uint, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecCanIdCutoff)
+        .bound({SR::U16, [](uint8_t) -> void* { return &user_selected_CAN_ID_cutoff_filter; }}),
 };
 
 const size_t kSettingFieldCount = sizeof(kSettingFields) / sizeof(kSettingFields[0]);
+static_assert(fields_valid(kSettingFields), "a setting key is empty or too long for NVS, or its range is inverted");
+static_assert(keys_unique(kSettingFields), "two settings share a key");
 
 namespace {
-const DeviceSetting kFamilySettingFields[] = {
-    {{"BATTPVMAX", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
-     "Battery max design voltage (V)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::DesignVoltages},
-    {{"BATTPVMIN", ST::FloatX10, kBattery, SA::Boot, 0, nullptr},
-     "Battery min design voltage (V)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::DesignVoltages},
-    {{"BATTCVMAX", ST::Uint, kBattery, SA::Boot, 0, nullptr},
-     "Cell max design voltage (mV)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::DesignVoltages},
-    {{"BATTCVMIN", ST::Uint, kBattery, SA::Boot, 0, nullptr},
-     "Cell min design voltage (mV)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::DesignVoltages},
-    {{"SOCESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-     "Use estimated SOC",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::EstimatedSoc},
-    {{"CHGESTIMATED", ST::Bool, kBattery, SA::Boot, 0, nullptr},
-     "Use estimated charge/discharge limits",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::EstimatedChargeLimits},
-    {{"CHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
-     "Manual charging power, watt",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::EstimatedLimits},
-    {{"DCHGPOWER", ST::Uint, kBattery, SA::Boot, 1000, nullptr, nullptr, 0, 65000},
-     "Manual discharge power, watt",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::EstimatedLimits},
-    {{"INVCELLS", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-     "Reported cell count (0 for default)",
-     kAnySlot,
-     SettingDomain::Inverter,
-     InverterCapability::PackGeometry},
-    {{"INVMODULES", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-     "Reported module count (0 for default)",
-     kAnySlot,
-     SettingDomain::Inverter,
-     InverterCapability::ModuleCount},
-    {{"INVCELLSPER", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-     "Reported cells per module (0 for default)",
-     kAnySlot,
-     SettingDomain::Inverter,
-     InverterCapability::PackGeometry},
-    {{"INVVLEVEL", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-     "Reported voltage level (0 for default)",
-     kAnySlot,
-     SettingDomain::Inverter,
-     InverterCapability::PackGeometry},
-    {{"INVCAPACITY", ST::Uint, kInverter, SA::Boot, 0, nullptr},
-     "Reported Ah capacity (0 for default)",
-     kAnySlot,
-     SettingDomain::Inverter,
-     InverterCapability::PackGeometry},
-    {{"INVICNT", ST::EnumUint, kInverter, SA::Boot, 0, nullptr, "contactor"},
-     "Inverter Contactor Workaround",
-     kAnySlot,
-     SettingDomain::Inverter,
-     InverterCapability::ContactorWorkaround},
-    {{"max_time_min", ST::Float, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
-      {SR::U32, [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_time_ms; },
-       kMsPerMinute, SCP::BatterySlot}},
-     "Balancing max time (min)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::ForcedBalancing | BatteryCapability::UserBalancing},
-    {{"max_cell_mv", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
-      {SR::U16,
-       [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_cell_voltage_mV; }, 1,
-       SCP::BatterySlot}},
-     "Max cell voltage (mV)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::ForcedBalancing},
-    {{"max_dev_mv", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
-      {SR::U16,
-       [](uint8_t slot)
-           -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_deviation_cell_voltage_mV; },
-       1, SCP::BatterySlot}},
-     "Max cell deviation (mV)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::ForcedBalancing},
-    {{"max_pack_v", ST::Float, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
-      {SR::U16,
-       [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_max_pack_voltage_dV; },
-       kDeciPerUnit, SCP::BatterySlot}},
-     "Max pack voltage (V)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::ForcedBalancing},
-    {{"float_power_w", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBalancing,
-      {SR::U16, [](uint8_t slot) -> void* { return &datalayer.battery_slot(slot).settings.balancing_float_power_W; }, 1,
-       SCP::BatterySlot}},
-     "Float power (W)",
-     kAnySlot,
-     SettingDomain::Battery,
-     BatteryCapability::ForcedBalancing},
+constexpr DeviceSetting battery_row(SettingField field, const char* label, BatteryCapabilities capability) {
+  return {field, label, kAnySlot, SettingDomain::Battery, capability.bits, nullptr};
+}
+
+constexpr DeviceSetting inverter_row(SettingField field, const char* label, InverterCapabilities capability) {
+  return {field, label, kAnySlot, SettingDomain::Inverter, capability.bits, nullptr};
+}
+
+constexpr DeviceSetting kFamilySettingFields[] = {
+    battery_row(setting("BATTPVMAX", ST::DeciUnits, kBattery, SA::Boot), "Battery max design voltage (V)",
+                BatteryCapability::DesignVoltages),
+    battery_row(setting("BATTPVMIN", ST::DeciUnits, kBattery, SA::Boot), "Battery min design voltage (V)",
+                BatteryCapability::DesignVoltages),
+    battery_row(setting("BATTCVMAX", ST::Uint, kBattery, SA::Boot), "Cell max design voltage (mV)",
+                BatteryCapability::DesignVoltages),
+    battery_row(setting("BATTCVMIN", ST::Uint, kBattery, SA::Boot), "Cell min design voltage (mV)",
+                BatteryCapability::DesignVoltages),
+    battery_row(setting("SOCESTIMATED", ST::Bool, kBattery, SA::Boot), "Use estimated SOC",
+                BatteryCapability::EstimatedSoc),
+    battery_row(setting("CHGESTIMATED", ST::Bool, kBattery, SA::Boot), "Use estimated charge/discharge limits",
+                BatteryCapability::EstimatedChargeLimits),
+    battery_row(setting("CHGPOWER", ST::Uint, kBattery, SA::Boot, 1000).with_range(0, 65000),
+                "Manual charging power, watt", BatteryCapability::EstimatedLimits),
+    battery_row(setting("DCHGPOWER", ST::Uint, kBattery, SA::Boot, 1000).with_range(0, 65000),
+                "Manual discharge power, watt", BatteryCapability::EstimatedLimits),
+    inverter_row(setting("INVCELLS", ST::Uint, kInverter, SA::Boot), "Reported cell count (0 for default)",
+                 InverterCapability::PackGeometry),
+    inverter_row(setting("INVMODULES", ST::Uint, kInverter, SA::Boot), "Reported module count (0 for default)",
+                 InverterCapability::ModuleCount),
+    inverter_row(setting("INVCELLSPER", ST::Uint, kInverter, SA::Boot),
+                 "Reported cells per module (0 for default)", InverterCapability::PackGeometry),
+    inverter_row(setting("INVVLEVEL", ST::Uint, kInverter, SA::Boot), "Reported voltage level (0 for default)",
+                 InverterCapability::PackGeometry),
+    inverter_row(setting("INVCAPACITY", ST::Uint, kInverter, SA::Boot), "Reported Ah capacity (0 for default)",
+                 InverterCapability::PackGeometry),
+    inverter_row(setting("INVICNT", ST::EnumUint, kInverter, SA::Boot).with_options("contactor"),
+                 "Inverter Contactor Workaround", InverterCapability::ContactorWorkaround),
+    battery_row(setting("max_time_min", ST::Float, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBalancing)
+        .bound({SR::U32,
+                [](uint8_t slot) -> void*{
+                  return &datalayer.battery_slot(slot).settings.balancing_max_time_ms;
+                },kMsPerMinute,SCP::BatterySlot}),
+                "Balancing max time (min)", BatteryCapability::ForcedBalancing | BatteryCapability::UserBalancing),
+    battery_row(setting("max_cell_mv", ST::Uint, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBalancing)
+        .bound({SR::U16,
+                [](uint8_t slot) -> void*{
+                  return &datalayer.battery_slot(slot).settings.balancing_max_cell_voltage_mV;
+                },1,SCP::BatterySlot}),
+                "Max cell voltage (mV)", BatteryCapability::ForcedBalancing),
+    battery_row(setting("max_dev_mv", ST::Uint, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBalancing)
+        .bound({SR::U16,
+                [](uint8_t slot) -> void*{
+                  return &datalayer.battery_slot(slot).settings.balancing_max_deviation_cell_voltage_mV;
+                },1,SCP::BatterySlot}),
+                "Max cell deviation (mV)", BatteryCapability::ForcedBalancing),
+    battery_row(setting("max_pack_v", ST::Float, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBalancing)
+        .bound({SR::U16,
+                [](uint8_t slot) -> void*{
+                  return &datalayer.battery_slot(slot).settings.balancing_max_pack_voltage_dV;
+                },kDeciPerUnit,SCP::BatterySlot}),
+                "Max pack voltage (V)", BatteryCapability::ForcedBalancing),
+    battery_row(setting("float_power_w", ST::Uint, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBalancing)
+        .bound({SR::U16,
+                [](uint8_t slot) -> void*{
+                  return &datalayer.battery_slot(slot).settings.balancing_float_power_W;
+                },1,SCP::BatterySlot}),
+                "Float power (W)", BatteryCapability::ForcedBalancing),
 };
 
 constexpr size_t kFamilySettingFieldCount = sizeof(kFamilySettingFields) / sizeof(kFamilySettingFields[0]);
+static_assert(fields_valid(kFamilySettingFields), "a family setting key is invalid, or its range is inverted");
 
 DeviceSettingSource device_source_at(SettingDomain domain, size_t index) {
   return domain == SettingDomain::Battery ? battery_type_settings_at(index).settings
@@ -577,8 +432,8 @@ size_t device_type_count(SettingDomain domain) {
 }
 
 uint16_t device_capabilities_at(SettingDomain domain, size_t index) {
-  return domain == SettingDomain::Battery ? battery_type_settings_at(index).capabilities
-                                          : inverter_type_settings_at(index).capabilities;
+  return domain == SettingDomain::Battery ? battery_type_settings_at(index).capabilities.bits
+                                          : inverter_type_settings_at(index).capabilities.bits;
 }
 
 uint32_t device_type_id_at(SettingDomain domain, size_t index) {
@@ -607,6 +462,29 @@ size_t domain_row_count(SettingDomain domain) {
   return total;
 }
 
+DeviceSettingList board_settings() {
+  return esp32hal != nullptr ? esp32hal->settings() : DeviceSettingList{};
+}
+
+bool scope_has_rows(SettingScope scope) {
+  const DeviceSettingList board = board_settings();
+  for (size_t i = 0; i < board.count; i++) {
+    if (board.data[i].field.live.scope == scope) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool scope_has_index(const ScopeEntries& entries, uint8_t index) {
+  for (size_t i = 0; i < entries.count; i++) {
+    if (entries.data[i].index == index) {
+      return true;
+    }
+  }
+  return false;
+}
+
 SettingRef domain_row_at(SettingDomain domain, size_t index) {
   const size_t type_count = device_type_count(domain);
   for (size_t i = 0; i < type_count; i++) {
@@ -626,7 +504,7 @@ SettingRef domain_row_at(SettingDomain domain, size_t index) {
 
 size_t setting_count() {
   return kSettingFieldCount + kFamilySettingFieldCount + domain_row_count(SettingDomain::Battery) +
-         domain_row_count(SettingDomain::Inverter);
+         domain_row_count(SettingDomain::Inverter) + board_settings().count;
 }
 
 SettingRef setting_at(size_t index) {
@@ -643,7 +521,18 @@ SettingRef setting_at(size_t index) {
   if (index < battery_rows) {
     return domain_row_at(SettingDomain::Battery, index);
   }
-  return domain_row_at(SettingDomain::Inverter, index - battery_rows);
+  index -= battery_rows;
+  const size_t inverter_rows = domain_row_count(SettingDomain::Inverter);
+  if (index < inverter_rows) {
+    return domain_row_at(SettingDomain::Inverter, index);
+  }
+  index -= inverter_rows;
+  const DeviceSettingList board = board_settings();
+  if (index < board.count) {
+    const DeviceSetting& row = board.data[index];
+    return {&row.field, &row, nullptr, SettingDomain::None};
+  }
+  return {nullptr, nullptr, nullptr, SettingDomain::None};
 }
 
 namespace {
@@ -749,13 +638,17 @@ void emit_device_ownership(ResponseWriter& out, const DeviceSetting& row, Settin
   if (row.slot != kAnySlot) {
     out.field("slot", row.slot);
   }
+  if (domain == SettingDomain::None) {
+    return;
+  }
   out.field("domain", domain_name(domain));
   out.begin_array("owners");
   const size_t type_count = device_type_count(domain);
   for (size_t i = 0; i < type_count; i++) {
     const bool owned = source != nullptr
                            ? device_source_at(domain, i) == source
-                           : row.capability != 0 && (device_capabilities_at(domain, i) & row.capability) != 0;
+                           : row.capability_bits != 0 &&
+                                 (device_capabilities_at(domain, i) & row.capability_bits) != 0;
     if (owned) {
       out.element(device_type_id_at(domain, i));
     }
@@ -776,8 +669,8 @@ const char* widget_type_name(SettingType type) {
       return "string";
     case ST::EnumUint:
       return "enum";
-    case ST::FloatX10:
-    case ST::SignedFloatX10:
+    case ST::DeciUnits:
+    case ST::SignedDeciUnits:
     case ST::Float:
       return "float";
     case ST::FloatString:
@@ -837,7 +730,7 @@ void write_live(const SettingField& field, uint8_t slot, double json_value) {
       break;
   }
   if (field.live.on_apply != nullptr) {
-    field.live.on_apply(slot);
+    field.live.on_apply(slot, json_value);
   }
 }
 
@@ -847,8 +740,8 @@ void emit_live_value(ResponseWriter& out, const SettingField& field, uint8_t slo
     case ST::Bool:
       out.field(field.key, value != 0.0);
       break;
-    case ST::FloatX10:
-    case ST::SignedFloatX10:
+    case ST::DeciUnits:
+    case ST::SignedDeciUnits:
     case ST::Float:
       out.field(field.key, value);
       break;
@@ -856,6 +749,90 @@ void emit_live_value(ResponseWriter& out, const SettingField& field, uint8_t slo
       out.field(field.key, static_cast<int64_t>(std::llround(value)));
       break;
   }
+}
+
+void emit_scoped_value(ResponseWriter& out, const SettingField& field, uint8_t index,
+                       BatteryEmulatorSettingsStore& store) {
+  if (field.live.kind != SR::None) {
+    emit_live_value(out, field, index);
+    return;
+  }
+  const String key = scoped_key(field, index);
+  switch (field.type) {
+    case ST::Bool:
+      out.field(field.key, store.getBool(key.c_str(), field.default_int != 0));
+      break;
+    case ST::Uint:
+    case ST::EnumUint:
+      out.field(field.key, store.getUInt(key.c_str(), static_cast<uint32_t>(field.default_int)));
+      break;
+    case ST::Int:
+      out.field(field.key, store.getInt(key.c_str(), field.default_int));
+      break;
+    case ST::Float:
+      out.field(field.key, store.getFloat(key.c_str(), static_cast<float>(field.default_int)));
+      break;
+    case ST::DeciUnits:
+    case ST::SignedDeciUnits:
+    case ST::StringVal:
+    case ST::FloatString:
+    case ST::SecondsToMs:
+    case ST::InterfacePacked:
+      break;
+  }
+}
+
+// Live rows route through write_live, which runs on_apply itself.
+bool apply_scoped_value(BatteryEmulatorSettingsStore& store, const SettingField& field, uint8_t index,
+                        const DocumentValue& value) {
+  const double number = field.type == ST::Bool ? (value.as_bool() ? 1.0 : 0.0) : value.as_number();
+  if (!in_bounds(field, number)) {
+    return false;
+  }
+  if (field.live.kind != SR::None) {
+    write_live(field, index, number);
+    return false;
+  }
+  const String key = scoped_key(field, index);
+  bool changed = false;
+  switch (field.type) {
+    case ST::Bool: {
+      const bool new_value = number != 0.0;
+      changed = store.getBool(key.c_str(), field.default_int != 0) != new_value;
+      store.saveBool(key.c_str(), new_value);
+      break;
+    }
+    case ST::Uint:
+    case ST::EnumUint: {
+      const uint32_t new_value = static_cast<uint32_t>(std::llround(number));
+      changed = store.getUInt(key.c_str(), static_cast<uint32_t>(field.default_int)) != new_value;
+      store.saveUInt(key.c_str(), new_value);
+      break;
+    }
+    case ST::Int: {
+      const int32_t new_value = static_cast<int32_t>(std::llround(number));
+      changed = store.getInt(key.c_str(), field.default_int) != new_value;
+      store.saveInt(key.c_str(), new_value);
+      break;
+    }
+    case ST::Float: {
+      const float new_value = static_cast<float>(number);
+      changed = store.getFloat(key.c_str(), static_cast<float>(field.default_int)) != new_value;
+      store.saveFloat(key.c_str(), new_value);
+      break;
+    }
+    case ST::DeciUnits:
+    case ST::SignedDeciUnits:
+    case ST::StringVal:
+    case ST::FloatString:
+    case ST::SecondsToMs:
+    case ST::InterfacePacked:
+      return false;
+  }
+  if (field.applies == SA::Live && field.live.on_apply != nullptr) {
+    field.live.on_apply(index, number);
+  }
+  return field.applies == SA::Boot && changed;
 }
 
 void emit_asset_name_options(SettingOptionSink& sink, const char* options_key, AssetNameSpec spec) {
@@ -940,20 +917,80 @@ void emit_all_options(SettingOptionSink& sink) {
   emit_map_options(sink, "ledmode", led_modes);
   emit_map_options(sink, "bmsresetinterval", bms_reset_intervals);
 
-#ifdef BOARD_HAS_LOAD_SWITCH
-  // Enum order (Disabled first, unsorted), matching the legacy per-channel select.
-  sink.begin_list("loadswitchrole");
-  for (uint32_t r = 0; r < static_cast<uint32_t>(LoadSwitchRole::Highest); r++) {
-    const char* name = name_for_load_switch_role(static_cast<LoadSwitchRole>(r));
-    if (name == nullptr || name[0] == '\0') {
-      continue;
+  if (esp32hal != nullptr) {
+    if (LoadSwitch* load_switch = esp32hal->load_switch()) {
+      // Enum order (Disabled first, unsorted), matching the legacy per-channel select.
+      sink.begin_list("loadswitchrole");
+      for (uint32_t r = 0; r < static_cast<uint32_t>(LoadSwitchRole::Highest); r++) {
+        const char* name = name_for_load_switch_role(static_cast<LoadSwitchRole>(r));
+        if (name == nullptr || name[0] == '\0') {
+          continue;
+        }
+        sink.option(static_cast<int32_t>(r), name, 0);
+      }
+      sink.end_list();
+
+      sink.begin_list("loadswitchdivisor");
+      for (uint8_t d = 0; d < kLoadSwitchDivisorCodes; d++) {
+        const String label = String("÷") + String(load_switch_divisor_ratio(d)) + " (" +
+                             String(load_switch_pwm_frequency_hz(load_switch->pwm_clock_hz(), d)) + " Hz)";
+        sink.option(d, label.c_str(), 0);
+      }
+      sink.end_list();
     }
-    sink.option(static_cast<int32_t>(r), name, 0);
   }
-  sink.end_list();
-#endif
 
   emit_asset_name_options(sink, "webui", kUiShellSpec);
+}
+
+void apply_stored_board_settings(BatteryEmulatorSettingsStore& store) {
+  if (esp32hal == nullptr) {
+    return;
+  }
+  static const ScopeEntry kGlobalEntry = {0, nullptr};
+  const DeviceSettingList board = esp32hal->settings();
+  for (size_t r = 0; r < board.count; r++) {
+    const DeviceSetting& row = board.data[r];
+    const SettingField& field = row.field;
+    if (field.live.on_apply == nullptr || field.storage == SS::Volatile) {
+      continue;
+    }
+    const ScopeEntries entries = field.live.scope == SCP::Global ? ScopeEntries{&kGlobalEntry, 1}
+                                                                : esp32hal->scope_entries(field.live.scope);
+    for (size_t e = 0; e < entries.count; e++) {
+      const uint8_t index = entries.data[e].index;
+      if (row.applies_to != nullptr && !row.applies_to(index)) {
+        continue;
+      }
+      const String key = scoped_key(field, index);
+      double value = field.default_int;
+      switch (field.type) {
+        case ST::Bool:
+          value = store.getBool(key.c_str(), field.default_int != 0) ? 1.0 : 0.0;
+          break;
+        case ST::Uint:
+        case ST::EnumUint:
+          value = store.getUInt(key.c_str(), static_cast<uint32_t>(field.default_int));
+          break;
+        case ST::Int:
+          value = store.getInt(key.c_str(), field.default_int);
+          break;
+        case ST::Float:
+          value = store.getFloat(key.c_str(), static_cast<float>(field.default_int));
+          break;
+        case ST::DeciUnits:
+        case ST::SignedDeciUnits:
+        case ST::StringVal:
+        case ST::FloatString:
+        case ST::SecondsToMs:
+        case ST::InterfacePacked:
+          continue;
+      }
+      // Only a hand-edited NVS holds an out-of-range value; clamping it to the
+      // bound would apply a setting the schema never offered.
+      field.live.on_apply(index, in_bounds(field, value) ? value : field.default_int);
+    }
+  }
 }
 
 void write_settings(ResponseWriter& out, BatteryEmulatorSettingsStore& store, bool reboot_required) {
@@ -963,10 +1000,11 @@ void write_settings(ResponseWriter& out, BatteryEmulatorSettingsStore& store, bo
   const size_t total_settings = setting_count();
   for (size_t i = 0; i < total_settings; i++) {
     const SettingField& field = *setting_at(i).field;
+    if (field.live.scope != SCP::Global) {
+      continue;
+    }
     if (field.live.kind != SR::None) {
-      if (field.live.scope == SCP::Global) {
-        emit_live_value(out, field, 0);
-      }
+      emit_live_value(out, field, 0);
       continue;
     }
     switch (field.type) {
@@ -985,14 +1023,17 @@ void write_settings(ResponseWriter& out, BatteryEmulatorSettingsStore& store, bo
         out.field(field.key,
                   is_password_key(field.key) ? "" : store.getString(field.key, field.default_str).c_str());
         break;
-      case ST::FloatX10:
+      case ST::DeciUnits:
         out.field(field.key,
                   store.getUInt(field.key, static_cast<uint32_t>(field.default_int)) / kDeciUnitsPerUnit);
         break;
-      case ST::SignedFloatX10:
+      case ST::SignedDeciUnits:
         out.field(field.key, store.getInt(field.key, field.default_int) / kDeciUnitsPerUnit);
         break;
       case ST::Float:
+        if (field.storage != SS::Volatile) {
+          out.field(field.key, store.getFloat(field.key, static_cast<float>(field.default_int)));
+        }
         break;
       case ST::SecondsToMs:
         out.field(field.key,
@@ -1048,8 +1089,8 @@ void write_settings(ResponseWriter& out, BatteryEmulatorSettingsStore& store, bo
     }
     out.field("options", options);  // null const char* serialises as JSON null
     out.field("section", field.section);
-    if (field.live.scope == SCP::BatterySlot) {
-      out.field("scope", "battery");
+    if (const char* scope = scope_name(field.live.scope)) {
+      out.field("scope", scope);
     }
     if (field.min_value != kNoMin) {
       out.field("min", field.min_value);
@@ -1120,55 +1161,32 @@ void write_settings(ResponseWriter& out, BatteryEmulatorSettingsStore& store, bo
   }
   out.end_array();
 
-#ifdef BOARD_HAS_INTERFACE_TERMINATION
   if (esp32hal != nullptr) {
-    InterfaceList list = esp32hal->interfaces();
-    out.begin_array("termination");
-    for (size_t i = 0; i < list.count; i++) {
-      if (!esp32hal->supports_interface_termination(i)) {
+    const DeviceSettingList board = board_settings();
+    for (uint8_t s = 0; s < static_cast<uint8_t>(SCP::Highest); s++) {
+      const SettingScope scope = static_cast<SettingScope>(s);
+      const ScopeEntries entries = esp32hal->scope_entries(scope);
+      if (entries.count == 0 || !scope_has_rows(scope)) {
         continue;
       }
-      out.begin_object();
-      out.field("index", i);
-      out.field("name", descriptor_name(list.data[i]));
-      out.field("enabled", store.getBool(interface_termination_key(i).c_str(), false));
-      out.end_object();
-    }
-    out.end_array();
-  }
-#endif
-
-#ifdef BOARD_HAS_LOAD_SWITCH
-  if (esp32hal != nullptr) {
-    if (LoadSwitch* load_switch = esp32hal->load_switch()) {
-      out.begin_object("loadswitch");
-      out.begin_array("channels");
-      for (uint8_t ch = 0; ch < kLoadSwitchConfigChannels; ch++) {
-        // LSDUTY persists raw 10-bit duty; the client works in percent.
-        uint32_t duty = store.getUInt(load_switch_duty_key(ch).c_str(), kLoadSwitchDutyMax);
+      out.begin_array(scope_name(scope));
+      for (size_t e = 0; e < entries.count; e++) {
+        const ScopeEntry& entry = entries.data[e];
         out.begin_object();
-        out.field("channel", ch);
-        out.field("role",
-                  store.getUInt(load_switch_role_key(ch).c_str(), static_cast<uint32_t>(LoadSwitchRole::Disabled)));
-        out.field("duty", (duty * 100 + kLoadSwitchDutyMax / 2) / kLoadSwitchDutyMax);
-        out.field("divisor", store.getUInt(load_switch_divisor_key(ch).c_str(), 0));
+        out.field("index", entry.index);
+        out.field("label", entry.label);
+        for (size_t r = 0; r < board.count; r++) {
+          const DeviceSetting& row = board.data[r];
+          if (row.field.live.scope != scope || (row.applies_to != nullptr && !row.applies_to(entry.index))) {
+            continue;
+          }
+          emit_scoped_value(out, row.field, entry.index, store);
+        }
         out.end_object();
       }
       out.end_array();
-      out.begin_array("divisors");
-      for (uint8_t d = 0; d < kLoadSwitchDivisorCodes; d++) {
-        String label = String("÷") + String(load_switch_divisor_ratio(d)) + " (" +
-                       String(load_switch_pwm_frequency_hz(load_switch->pwm_clock_hz(), d)) + " Hz)";
-        out.begin_object();
-        out.field("v", d);
-        out.field("n", label.c_str());
-        out.end_object();
-      }
-      out.end_array();
-      out.end_object();
     }
   }
-#endif
   out.end_object();
 
   if (esp32hal != nullptr) {
@@ -1270,8 +1288,8 @@ bool value_matches_type(SettingType type, const DocumentValue& value) {
     case ST::StringVal:
     case ST::FloatString:
       return value.is_string();
-    case ST::FloatX10:
-    case ST::SignedFloatX10:
+    case ST::DeciUnits:
+    case ST::SignedDeciUnits:
     case ST::Float:
       return value.is_number();
   }
@@ -1320,7 +1338,7 @@ SettingsApplyResult apply_settings(BatteryEmulatorSettingsStore& store, const Do
   std::vector<OptionMembershipSink::Check> option_checks;
   for (size_t i = 0; i < total_settings; i++) {
     const SettingField& field = *setting_at(i).field;
-    if (field.options_key == nullptr || field.live.scope == SCP::BatterySlot) {
+    if (field.options_key == nullptr || field.live.scope != SCP::Global) {
       continue;
     }
     const DocumentValue value = body.value(field.key);
@@ -1496,7 +1514,7 @@ SettingsApplyResult apply_settings(BatteryEmulatorSettingsStore& store, const Do
   for (size_t i = 0; i < total_settings; i++) {
     const SettingField& field = *setting_at(i).field;
     const bool gates_reboot = field.applies == SA::Boot;
-    if (field.live.scope == SCP::BatterySlot) {
+    if (field.live.scope != SCP::Global) {
       continue;
     }
     const DocumentValue value = body.value(field.key);
@@ -1548,7 +1566,7 @@ SettingsApplyResult apply_settings(BatteryEmulatorSettingsStore& store, const Do
         store.saveUInt(field.key, new_value);
         break;
       }
-      case ST::FloatX10: {
+      case ST::DeciUnits: {
         const uint32_t new_value =
             static_cast<uint32_t>(std::lround(static_cast<float>(value.as_number()) * kDeciUnitsPerUnit));
         reboot_required |=
@@ -1556,15 +1574,20 @@ SettingsApplyResult apply_settings(BatteryEmulatorSettingsStore& store, const Do
         store.saveUInt(field.key, new_value);
         break;
       }
-      case ST::SignedFloatX10: {
+      case ST::SignedDeciUnits: {
         const int32_t new_value =
             static_cast<int32_t>(std::lround(static_cast<float>(value.as_number()) * kDeciUnitsPerUnit));
         reboot_required |= gates_reboot && (store.getInt(field.key, field.default_int) != new_value);
         store.saveInt(field.key, new_value);
         break;
       }
-      case ST::Float:
+      case ST::Float: {
+        const float new_value = static_cast<float>(value.as_number());
+        reboot_required |=
+            gates_reboot && (store.getFloat(field.key, static_cast<float>(field.default_int)) != new_value);
+        store.saveFloat(field.key, new_value);
         break;
+      }
       case ST::StringVal:
       case ST::FloatString: {
         const char* new_value = value.as_text();
@@ -1628,76 +1651,43 @@ SettingsApplyResult apply_settings(BatteryEmulatorSettingsStore& store, const Do
     }
   }
 
-#ifdef BOARD_HAS_INTERFACE_TERMINATION
   if (esp32hal != nullptr) {
-    const size_t termination_rows = body.rows(kTerminationPath);
-    for (size_t row = 0; row < termination_rows; row++) {
-      const DocumentRow entry(body, kTerminationPath, row);
-      const size_t index = static_cast<size_t>(entry.value("index").integer);
-      // Omitted/non-bool enabled must preserve, never wipe (bool-wipe fix); an
-      // index the HAL cannot terminate would otherwise write a garbage NVS key.
-      const DocumentValue enabled_value = entry.value("enabled");
-      if (!enabled_value.is_bool() || !esp32hal->supports_interface_termination(index)) {
+    const DeviceSettingList board = board_settings();
+    for (uint8_t s = 0; s < static_cast<uint8_t>(SCP::Highest); s++) {
+      const SettingScope scope = static_cast<SettingScope>(s);
+      const ScopeEntries entries = esp32hal->scope_entries(scope);
+      if (entries.count == 0 || !scope_has_rows(scope)) {
         continue;
       }
-      const bool enabled = enabled_value.as_bool();
-      const String key = interface_termination_key(index);
-      if (store.getBool(key.c_str(), false) != enabled) {
-        store.saveBool(key.c_str(), enabled);
-        esp32hal->set_interface_termination(index, enabled);
-      }
-    }
-  }
-#endif
-
-#ifdef BOARD_HAS_LOAD_SWITCH
-  if (esp32hal != nullptr) {
-    if (LoadSwitch* load_switch = esp32hal->load_switch()) {
-      const size_t channel_rows = body.rows(kLoadSwitchChannelsPath);
-      for (size_t row = 0; row < channel_rows; row++) {
-        const DocumentRow channel(body, kLoadSwitchChannelsPath, row);
-        const uint8_t ch = static_cast<uint8_t>(channel.value("channel").integer);
-        // A phantom channel would write out-of-range LSROLE/LSDUTY keys and set
-        // reboot_required before the HAL rejects the request.
-        if (ch >= kLoadSwitchConfigChannels) {
+      const String path = String(kDynamicPrefix) + scope_name(scope);
+      const size_t scoped_rows = body.rows(path.c_str());
+      for (size_t row = 0; row < scoped_rows; row++) {
+        const DocumentRow entry(body, path.c_str(), row);
+        const DocumentValue index_value = entry.value("index");
+        if (!index_value.is_integer_in(0, UINT8_MAX)) {
           continue;
         }
-        const DocumentValue role_value = channel.value("role");
-        if (!role_value.missing()) {
-          const uint32_t role = static_cast<uint32_t>(role_value.integer);
-          if (role < static_cast<uint32_t>(LoadSwitchRole::Highest)) {
-            reboot_required |= store.getUInt(load_switch_role_key(ch).c_str(),
-                                             static_cast<uint32_t>(LoadSwitchRole::Disabled)) != role;
-            store.saveUInt(load_switch_role_key(ch).c_str(), role);
-          }
+        const uint8_t index = static_cast<uint8_t>(index_value.integer);
+        // An index the scope does not enumerate would otherwise write a garbage NVS key.
+        if (!scope_has_index(entries, index)) {
+          continue;
         }
-        const DocumentValue duty_value = channel.value("duty");
-        if (!duty_value.missing()) {
-          uint32_t duty_pct = static_cast<uint32_t>(duty_value.integer);
-          if (duty_pct > kPercentMax) {
-            duty_pct = kPercentMax;
+        for (size_t r = 0; r < board.count; r++) {
+          const DeviceSetting& board_row = board.data[r];
+          if (board_row.field.live.scope != scope ||
+              (board_row.applies_to != nullptr && !board_row.applies_to(index))) {
+            continue;
           }
-          const uint32_t duty = (duty_pct * kLoadSwitchDutyMax + kPercentMax / 2) / kPercentMax;
-          if (store.getUInt(load_switch_duty_key(ch).c_str(), kLoadSwitchDutyMax) != duty) {
-            store.saveUInt(load_switch_duty_key(ch).c_str(), duty);
-            load_switch->request_duty(ch, static_cast<uint16_t>(duty));
+          const DocumentValue value = entry.value(board_row.field.key);
+          // Omitted or wrong-typed preserves, never wipes (the bool-wipe invariant).
+          if (value.missing() || !value_matches_type(board_row.field.type, value)) {
+            continue;
           }
-        }
-        const DocumentValue divisor_value = channel.value("divisor");
-        if (!divisor_value.missing()) {
-          uint32_t divisor = static_cast<uint32_t>(divisor_value.integer);
-          if (divisor >= kLoadSwitchDivisorCodes) {
-            divisor = 0;
-          }
-          if (store.getUInt(load_switch_divisor_key(ch).c_str(), 0) != divisor) {
-            store.saveUInt(load_switch_divisor_key(ch).c_str(), divisor);
-            load_switch->request_divisor(ch, static_cast<uint8_t>(divisor));
-          }
+          reboot_required |= apply_scoped_value(store, board_row.field, index, value);
         }
       }
     }
   }
-#endif
 
   for (size_t row = 0; row < balancing_rows; row++) {
     const DocumentRow entry(body, kBalancingPath, row);

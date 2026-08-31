@@ -1505,48 +1505,66 @@ using SR = SettingRam;
 constexpr int32_t kDriftMin = 1;
 constexpr int32_t kDriftMax = 20;
 
-void mirror_keep_iso_disabled(uint8_t) {
+void mirror_keep_iso_disabled(uint8_t, double) {
   datalayer_extended.bydAtto3_2.keep_iso_disabled = datalayer_extended.bydAtto3.keep_iso_disabled;
 }
 
-const DeviceSetting kSettings[] = {
-    {{"BYDAUTOCALEN", ST::Bool, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Nvs, kSecBydCal,
-      {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_enabled; }}},
+constexpr DeviceSetting kSettings[] = {
+    {setting("BYDAUTOCALEN", ST::Bool, kLive, SA::Live)
+        .in_section(kSecBydCal)
+        .bound({SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_enabled; }}),
      "Auto-calibrate SOC (battery 1)",
      0},
-    {{"BYDAUTOCALDRIFT", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kDriftMin, kDriftMax, SS::Nvs, kSecBydCal,
-      {SR::U8, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_drift_percent; }}},
+    {setting("BYDAUTOCALDRIFT", ST::Uint, kLive, SA::Live)
+        .with_range(kDriftMin, kDriftMax)
+        .in_section(kSecBydCal)
+        .bound({SR::U8,
+                [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.auto_calibrate_soc_drift_percent; }}),
      "Drift (%) (battery 1)",
      0},
-    {{"BYDAUTOCALEN2", ST::Bool, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Nvs, kSecBydCal,
-      {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_enabled; }}},
+    {setting("BYDAUTOCALEN2", ST::Bool, kLive, SA::Live)
+        .in_section(kSecBydCal)
+        .bound({SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_enabled; }}),
      "Auto-calibrate SOC (battery 2)",
      1},
-    {{"BYDAUTOCALDRFT2", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kDriftMin, kDriftMax, SS::Nvs, kSecBydCal,
-      {SR::U8, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_drift_percent; }}},
+    {setting("BYDAUTOCALDRFT2", ST::Uint, kLive, SA::Live)
+        .with_range(kDriftMin, kDriftMax)
+        .in_section(kSecBydCal)
+        .bound({SR::U8,
+                [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.auto_calibrate_soc_drift_percent; }}),
      "Drift (%) (battery 2)",
      1},
-    {{"BYDKEEPISOOFF", ST::Bool, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Nvs, kSecBydCal,
-      {SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.keep_iso_disabled; }, 1,
-       SettingScope::Global, mirror_keep_iso_disabled}},
+    {setting("BYDKEEPISOOFF", ST::Bool, kLive, SA::Live)
+        .in_section(kSecBydCal)
+        .bound({SR::Bool, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.keep_iso_disabled; }, 1,
+                SettingScope::Global,mirror_keep_iso_disabled}),
      "Keep isolation monitoring disabled"},
-    {{"cal_target_soc", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBydCal,
-      {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetSOC; }}},
+    {setting("cal_target_soc", ST::Uint, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBydCal)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetSOC; }}),
      "Calibration target SOC (battery 1)",
      0},
-    {{"cal_target_ah", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBydCal,
-      {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetAH; }}},
+    {setting("cal_target_ah", ST::Uint, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBydCal)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3.calibrationTargetAH; }}),
      "Calibration target Ah (battery 1)",
      0},
-    {{"cal_target_soc2", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBydCal,
-      {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetSOC; }}},
+    {setting("cal_target_soc2", ST::Uint, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBydCal)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetSOC; }}),
      "Calibration target SOC (battery 2)",
      1},
-    {{"cal_target_ah2", ST::Uint, kLive, SA::Live, 0, nullptr, nullptr, kNoMin, kNoMax, SS::Volatile, kSecBydCal,
-      {SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetAH; }}},
+    {setting("cal_target_ah2", ST::Uint, kLive, SA::Live)
+        .volatile_storage()
+        .in_section(kSecBydCal)
+        .bound({SR::U16, [](uint8_t) -> void* { return &datalayer_extended.bydAtto3_2.calibrationTargetAH; }}),
      "Calibration target Ah (battery 2)",
      1},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList BydAttoBattery::settings() {

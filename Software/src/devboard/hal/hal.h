@@ -9,6 +9,8 @@
 #include "../../../src/devboard/utils/events.h"
 #include "../../../src/devboard/utils/logging.h"
 #include "../../../src/devboard/utils/types.h"
+#include "../webserver/response_writer.h"
+#include "../webserver/settings_field.h"
 #include "interface_descriptor.h"
 #include "SwitchedOutput.h"
 #include "LoadSwitch.h"
@@ -37,9 +39,31 @@ class Esp32Hal {
   // communication interface initialises.
   virtual void board_init() {}
 
+  virtual void board_tick() {}
+
   // Software-switchable bus termination, keyed by descriptor index.
   virtual bool supports_interface_termination(size_t /*interface_index*/) { return false; }
   virtual bool set_interface_termination(size_t /*interface_index*/, bool /*enabled*/) { return false; }
+  virtual bool interface_termination(size_t /*interface_index*/) { return false; }
+
+  virtual DeviceSettingList settings() { return {}; }
+  virtual void write_status(ResponseWriter& /*out*/) {}
+
+  // Never filter here: applicability is a per-row question, answered by
+  // DeviceSetting::applies_to reading this live HAL. A second row in the same
+  // scope with different applicability cannot be expressed once these are merged.
+  virtual ScopeEntries scope_entries(SettingScope scope) {
+    if (scope != SettingScope::Interface) {
+      return {};
+    }
+    static ScopeEntry entries[kMaxInterfaceDescriptors];
+    InterfaceList list = interfaces();
+    const size_t count = list.count < kMaxInterfaceDescriptors ? list.count : kMaxInterfaceDescriptors;
+    for (size_t i = 0; i < count; i++) {
+      entries[i] = {static_cast<uint8_t>(i), descriptor_name(list.data[i])};
+    }
+    return {entries, count};
+  }
 
   template <typename... Pins>
   bool alloc_pins(const char* name, Pins... pins) {

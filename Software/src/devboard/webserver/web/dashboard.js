@@ -1,4 +1,4 @@
-import { postJson, repaint, skinName, deviceCapabilities, t, tf, uptimeText } from '/app.js';
+import { getJson, postJson, repaint, skinName, deviceCapabilities, t, tf, uptimeText } from '/app.js';
 
 const EMPTY = '—';
 const WH_PER_KWH = 1000;
@@ -111,7 +111,8 @@ function loadSwitchCard(ls) {
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         try {
-          repaint(await postJson('/api/loadswitch', { channel: i, on: !ch.on }));
+          await postJson('/api/settings', { dynamic: { loadswitchchannel: [{ index: i, LSMANUAL: !ch.on }] } });
+          repaint(await getJson('/api/state'));
         } finally {
           btn.disabled = false;
         }
@@ -302,9 +303,9 @@ function modelModern(state) {
     blocks.push({ id: 'events', section: 'events', title: t('ui.events', 'Events'), kind: 'rows',
       rows: ROW.events(state.events) });
   }
-  if (state.load_switch) {
+  if (state.board?.load_switch) {
     blocks.push({ id: 'loadswitch', section: 'loadswitch', kind: 'component',
-      build: () => loadSwitchCard(state.load_switch) });
+      build: () => loadSwitchCard(state.board.load_switch) });
   }
   return blocks;
 }
@@ -331,9 +332,9 @@ function modelLegacy(state) {
   if (state.events) {
     blocks.push({ id: 'events', section: 'events', kind: 'rows', rows: ROW.events(state.events) });
   }
-  if (state.load_switch) {
+  if (state.board?.load_switch) {
     blocks.push({ id: 'loadswitch', section: 'loadswitch', kind: 'component',
-      build: () => loadSwitchCard(state.load_switch) });
+      build: () => loadSwitchCard(state.board.load_switch) });
   }
   blocks.push({ id: 'actions', section: 'actions', kind: 'component', build: () => actionsCard(sys) });
   return blocks;

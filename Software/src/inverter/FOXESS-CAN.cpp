@@ -612,14 +612,15 @@ bool FoxessCanInverter::setup(void) {  // Performs one time setup at startup
 }
 
 namespace {
-const DeviceSetting kSettings[] = {
-    {{"FOXESSTYPE", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr},
+constexpr DeviceSetting kSettings[] = {
+    {setting("FOXESSTYPE", SettingType::Uint, kInverter, SettingApplies::Boot),
      "FoxESS battery type (0 for default)"},
-    {{"FOXESSSUBTYPE", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr},
+    {setting("FOXESSSUBTYPE", SettingType::Uint, kInverter, SettingApplies::Boot),
      "FoxESS battery subtype (0 for default)"},
-    {{"FOXESSMODULES", SettingType::Uint, kInverter, SettingApplies::Boot, 0, nullptr},
+    {setting("FOXESSMODULES", SettingType::Uint, kInverter, SettingApplies::Boot),
      "FoxESS module count (0 for default)"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList FoxessCanInverter::settings() {

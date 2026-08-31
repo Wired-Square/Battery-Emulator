@@ -3288,14 +3288,19 @@ namespace {
 using ST = SettingType;
 using SA = SettingApplies;
 
-const DeviceSetting kSettings[] = {
-    {{"DIGITALHVIL", ST::Bool, kBattery, SA::Boot, 0, nullptr}, "Digital HVIL (2024+)"},
-    {{"GTWRHD", ST::Bool, kBattery, SA::Boot, kTeslaGtwRightHandDriveDefault, nullptr}, "Right hand drive"},
-    {{"GTWCOUNTRY", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwCountryDefault, nullptr, "country"}, "Country code"},
-    {{"GTWMAPREG", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwMapRegionDefault, nullptr, "mapregion"}, "Map region"},
-    {{"GTWCHASSIS", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwChassisTypeDefault, nullptr, "chassis"}, "Chassis type"},
-    {{"GTWPACK", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwPackEnergyDefault, nullptr, "pack"}, "Pack type"},
+constexpr DeviceSetting kSettings[] = {
+    {setting("DIGITALHVIL", ST::Bool, kBattery, SA::Boot), "Digital HVIL (2024+)"},
+    {setting("GTWRHD", ST::Bool, kBattery, SA::Boot, kTeslaGtwRightHandDriveDefault), "Right hand drive"},
+    {setting("GTWCOUNTRY", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwCountryDefault)
+        .with_options("country"), "Country code"},
+    {setting("GTWMAPREG", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwMapRegionDefault)
+        .with_options("mapregion"), "Map region"},
+    {setting("GTWCHASSIS", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwChassisTypeDefault)
+        .with_options("chassis"), "Chassis type"},
+    {setting("GTWPACK", ST::EnumUint, kBattery, SA::Boot, kTeslaGtwPackEnergyDefault)
+        .with_options("pack"), "Pack type"},
 };
+static_assert(fields_valid(kSettings), "a driver setting key is invalid, or its range is inverted");
 }  // namespace
 
 DeviceSettingList TeslaBattery::settings() {

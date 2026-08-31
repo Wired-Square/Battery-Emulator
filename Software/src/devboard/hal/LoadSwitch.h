@@ -77,7 +77,7 @@ struct LoadSwitchStatus {
 // BOARD_HAS_LOAD_SWITCH without carrying the driver still link.
 class LoadSwitch {
  public:
-  virtual void set_channel_config(uint8_t channel, LoadSwitchRole role, uint16_t duty, uint8_t divisor_code) = 0;
+  virtual void set_channel_role(uint8_t channel, LoadSwitchRole role) = 0;
   virtual void tick() = 0;
   virtual const LoadSwitchStatus& status() = 0;
   // Output frequency = this clock / divisor ratio.
