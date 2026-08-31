@@ -277,11 +277,9 @@ void init_events(void) {
   events.entries[EVENT_PERIODIC_BMS_RESET_FAILURE].level = EVENT_LEVEL_WARNING;
   events.entries[EVENT_GPIO_CONFLICT].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_IOEXPANDER_INIT_FAILURE].level = EVENT_LEVEL_ERROR;
-#ifdef BOARD_HAS_LOAD_SWITCH
   events.entries[EVENT_LOAD_SWITCH_FAULT].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_LOAD_SWITCH_INIT_FAILURE].level = EVENT_LEVEL_ERROR;
   events.entries[EVENT_LOAD_SWITCH_ROLE_CONFLICT].level = EVENT_LEVEL_WARNING;
-#endif
   events.entries[EVENT_GPIO_NOT_DEFINED].level = EVENT_LEVEL_ERROR;
 }
 
@@ -604,14 +602,12 @@ String get_event_message_string(EVENTS_ENUM_TYPE event) {
              "' requires a GPIO pin that isn't configured. Please define a valid pin number in your settings.";
     case EVENT_IOEXPANDER_INIT_FAILURE:
       return "IO expander initialization failed. CAN transceivers and bus termination are inoperative. Check hardware.";
-#ifdef BOARD_HAS_LOAD_SWITCH
     case EVENT_LOAD_SWITCH_FAULT:
       return "Load switch reports a hardware fault on a contactor output. Investigate wiring and load before reboot.";
     case EVENT_LOAD_SWITCH_INIT_FAILURE:
       return "Load switch initialisation failed. Load switch outputs are disabled for this session. Check hardware.";
     case EVENT_LOAD_SWITCH_ROLE_CONFLICT:
       return "Duplicate load switch role: this channel runs as Disabled. First channel with the role wins.";
-#endif
     default:
       return "";
   }

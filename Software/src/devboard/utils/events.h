@@ -11,18 +11,6 @@ struct InterfaceDescriptor;
 #define GENERATE_ENUM(ENUM) ENUM,
 #define GENERATE_STRING(STRING) #STRING,
 
-// Load-switch events exist only on boards that carry the hardware; their
-// table entries and name/message strings otherwise cost flash on boards
-// that can never raise them.
-#ifdef BOARD_HAS_LOAD_SWITCH
-#define EVENTS_ENUM_TYPE_LOAD_SWITCH(XX) \
-  XX(EVENT_LOAD_SWITCH_FAULT)            \
-  XX(EVENT_LOAD_SWITCH_INIT_FAILURE)     \
-  XX(EVENT_LOAD_SWITCH_ROLE_CONFLICT)
-#else
-#define EVENTS_ENUM_TYPE_LOAD_SWITCH(XX)
-#endif
-
 #define EVENTS_ENUM_TYPE(XX)              \
   XX(EVENT_CANMCP2518FD_INIT_FAILURE)     \
   XX(EVENT_CANMCP2515_INIT_FAILURE)       \
@@ -158,7 +146,9 @@ struct InterfaceDescriptor;
   XX(EVENT_GPIO_NOT_DEFINED)              \
   XX(EVENT_GPIO_CONFLICT)                 \
   XX(EVENT_IOEXPANDER_INIT_FAILURE)       \
-  EVENTS_ENUM_TYPE_LOAD_SWITCH(XX)        \
+  XX(EVENT_LOAD_SWITCH_FAULT)             \
+  XX(EVENT_LOAD_SWITCH_INIT_FAILURE)      \
+  XX(EVENT_LOAD_SWITCH_ROLE_CONFLICT)     \
   XX(EVENT_NOF_EVENTS)
 
 typedef enum { EVENTS_ENUM_TYPE(GENERATE_ENUM) } EVENTS_ENUM_TYPE;
