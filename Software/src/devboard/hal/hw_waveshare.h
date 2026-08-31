@@ -102,6 +102,10 @@ class WaveshareS3Rs485CanHal : public Esp32Hal {
 
   virtual SwitchedOutputList switched_outputs() { return make_switched_output_list(kWaveshareOutputs); }
 
+  virtual bool configure_rs485_half_duplex(Rs485Port& port) {
+    return rs485_configure_half_duplex(port.uart_num(), port.pins());
+  }
+
   InterfaceList interfaces() { return make_interface_list(kWaveshareInterfaces); }
 };
 

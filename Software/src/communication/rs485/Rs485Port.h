@@ -17,10 +17,21 @@ struct Rs485PortPins {
   gpio_num_t de;
 };
 
+// Defined here but only emitted into images whose board overrides
+// configure_rs485_half_duplex(); moving it to a .cpp links the UART driver's
+// pin and mode calls into every board instead.
+inline bool rs485_configure_half_duplex(uart_port_t uart_num, const Rs485PortPins& pins) {
+  return uart_set_pin(uart_num, pins.tx, pins.rx, pins.de, UART_PIN_NO_CHANGE) == ESP_OK &&
+         uart_set_mode(uart_num, UART_MODE_RS485_HALF_DUPLEX) == ESP_OK;
+}
+
 class Rs485Port {
  public:
   Rs485Port(HardwareSerial& serial, uart_port_t uart_num, Rs485PortPins pins)
       : serial_(serial), uart_num_(uart_num), pins_(pins) {}
+
+  uart_port_t uart_num() const { return uart_num_; }
+  const Rs485PortPins& pins() const { return pins_; }
 
   // Claims the DE pin and parks it in receive state before any protocol
   // owns the port.

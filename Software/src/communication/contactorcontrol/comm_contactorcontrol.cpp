@@ -143,7 +143,6 @@ void handle_contactors() {
     handle_BMSpower();  // Some batteries need to be periodically power cycled
   }
 
-#ifdef BOARD_HAS_LOAD_SWITCH
   // A hardware fault on any bound output (VDS/power-limit/thermal or
   // latch-off on a VN9D channel) feeds the same FAULT latch as any other
   // ERROR event; GPIO outputs never report one.
@@ -153,7 +152,6 @@ void handle_contactors() {
       set_event(EVENT_LOAD_SWITCH_FAULT, (uint8_t)i);
     }
   }
-#endif
 
   if (contactor_control_enabled_double_battery) {
     handle_contactors_battery2();

@@ -262,6 +262,10 @@ class WiredFlexLinkHal : public Esp32Hal {
            (termination_mask_ & (uint8_t)(1u << kWflTerminationPins[interface_index])) != 0;
   }
 
+  virtual bool configure_rs485_half_duplex(Rs485Port& port) {
+    return rs485_configure_half_duplex(port.uart_num(), port.pins());
+  }
+
   InterfaceList interfaces() { return make_interface_list(kWiredFlexLinkInterfaces); }
 
  private:

@@ -31,6 +31,10 @@ class DFRobotEdge101Hal : public Esp32Hal {
  public:
   const char* name() { return "DFRobot Edge101 IOT Controller"; }
 
+  virtual bool configure_rs485_half_duplex(Rs485Port& port) {
+    return rs485_configure_half_duplex(port.uart_num(), port.pins());
+  }
+
   InterfaceList interfaces() { return make_interface_list(kDFRobotEdge101Interfaces); }
 
   // microSD (SPI)

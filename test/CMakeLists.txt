@@ -63,7 +63,7 @@ include_directories("${source_dir}/googletest/include"
 include_directories(emul)
 
 # For eModBus
-add_compile_definitions(ESP32 HW_LILYGO COMMON_IMAGE BOARD_HAS_LOAD_SWITCH)
+add_compile_definitions(ESP32 HW_LILYGO COMMON_IMAGE)
 
 # add the executable
 add_executable(tests

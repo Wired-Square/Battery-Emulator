@@ -54,7 +54,11 @@ class HardwareSerial : public Stream {
   // Your existing methods
   uint32_t baudRate() { return 9600; }
   void begin(unsigned long baud, uint32_t config = SERIAL_8N1, int8_t rxPin = -1, int8_t txPin = -1,
-             bool invert = false, unsigned long timeout_ms = 20000UL, uint8_t rxfifo_full_thrhd = 120) {}
+             bool invert = false, unsigned long timeout_ms = 20000UL, uint8_t rxfifo_full_thrhd = 120) {
+    begun = true;
+  }
+  void end() { begun = false; }
+  bool begun = false;
   void setTxBufferSize(uint16_t size) {}
   void setRxBufferSize(uint16_t size) {}
   bool setRxFIFOFull(uint8_t fifoBytes) { return false; }

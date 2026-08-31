@@ -9,7 +9,6 @@ void Rs485Port::preinit() {
   if (pins_.de == GPIO_NUM_NC) {
     return;
   }
-#ifdef BOARD_HAS_RS485_DE
   if (!esp32hal->alloc_pins("RS485 DE", pins_.de)) {
     DEBUG_PRINTF("RS485 failed to allocate DE pin\n");
     return;
@@ -20,30 +19,28 @@ void Rs485Port::preinit() {
   // is transmitting and deasserts it after the last bit was sent.
   pinMode(pins_.de, OUTPUT);
   digitalWrite(pins_.de, LOW);
-#else
-  DEBUG_PRINTF("RS485 DE pin wired but BOARD_HAS_RS485_DE is not defined for this env\n");
-#endif
 }
 
 bool Rs485Port::begin(const char* owner, uint32_t baud, uint32_t config) {
+  // Before the UART starts, so a port whose DE pin was never claimed is refused
+  // without leaving a running transceiver that cannot release the bus.
+  if (pins_.de != GPIO_NUM_NC && !de_available_) {
+    DEBUG_PRINTF("RS485 DE pin unavailable, refusing to open the port\n");
+    return false;
+  }
+
   if (!esp32hal->alloc_pins(owner, pins_.rx, pins_.tx)) {
     return false;
   }
 
   serial_.begin(baud, config, pins_.rx, pins_.tx);
 
-  if (de_available_) {
-#ifdef BOARD_HAS_RS485_DE
-    // Configured after serial_.begin(), because begin() configures the UART
-    // pins.
-    const esp_err_t pin_result = uart_set_pin(uart_num_, pins_.tx, pins_.rx, pins_.de, UART_PIN_NO_CHANGE);
-    const esp_err_t mode_result = uart_set_mode(uart_num_, UART_MODE_RS485_HALF_DUPLEX);
-    if (pin_result != ESP_OK || mode_result != ESP_OK) {
-      DEBUG_PRINTF("RS485 UART half-duplex setup failed, pin_result=%d, mode_result=%d\n",
-                   static_cast<int>(pin_result), static_cast<int>(mode_result));
-      return false;
-    }
-#endif
+  // Programmed after serial_.begin(), which reassigns the UART pins. The port is
+  // closed again on failure because callers are not obliged to read this return.
+  if (de_available_ && !esp32hal->configure_rs485_half_duplex(*this)) {
+    DEBUG_PRINTF("RS485 half-duplex setup failed, closing the port\n");
+    serial_.end();
+    return false;
   }
 
   return true;

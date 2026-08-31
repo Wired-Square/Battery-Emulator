@@ -72,9 +72,9 @@ struct LoadSwitchStatus {
   LoadSwitchChannelStatus channels[kLoadSwitchMaxChannels];
 };
 
-// Generic base only (the CanBus.h principle): shared code reaches the
-// board's load switch through this seam, so images whose env defines
-// BOARD_HAS_LOAD_SWITCH without carrying the driver still link.
+// Generic base only (the CanBus.h principle): shared code reaches the board's
+// load switch through this seam, so an image built without the driver source
+// still links.
 class LoadSwitch {
  public:
   virtual void set_channel_role(uint8_t channel, LoadSwitchRole role) = 0;

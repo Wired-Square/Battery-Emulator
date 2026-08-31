@@ -41,6 +41,10 @@ class Esp32Hal {
 
   virtual void board_tick() {}
 
+  // Half-duplex direction control for a port that wires a DE pin. Answering
+  // false refuses the port rather than letting it run full duplex.
+  virtual bool configure_rs485_half_duplex(Rs485Port& /*port*/) { return false; }
+
   // Software-switchable bus termination, keyed by descriptor index.
   virtual bool supports_interface_termination(size_t /*interface_index*/) { return false; }
   virtual bool set_interface_termination(size_t /*interface_index*/, bool /*enabled*/) { return false; }
@@ -118,9 +122,6 @@ class Esp32Hal {
   }
 
   // Board-owned multichannel load switch; nullptr when the board has none.
-  // Generic seam: BOARD_HAS_LOAD_SWITCH code must reach the device only
-  // through this, so envs that gate the feature on without the driver
-  // source still link.
   virtual LoadSwitch* load_switch() { return nullptr; }
 
   // Output pins to latch at their driven level across a firmware-initiated reset/OTA
