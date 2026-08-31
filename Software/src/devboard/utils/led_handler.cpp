@@ -21,11 +21,9 @@
 
 static constexpr uint32_t COLOR_OFF = 0;
 
-#if defined(BOARD_HAS_INTERFACE_ACTIVITY_LEDS) || defined(BOARD_HAS_LOAD_SWITCH)
 // Hold a traffic LED lit after a frame so the ~20 ms render cadence in the
 // core loop cannot miss a single-frame blink.
 static constexpr uint32_t LED_ACTIVITY_HOLD_MS = 50;
-#endif
 
 static LED* led = nullptr;
 
@@ -138,18 +136,12 @@ void LED::exe(void) {
 
   render_indicators(indicator_color);
 
-#ifdef BOARD_HAS_INTERFACE_ACTIVITY_LEDS
   render_interface_activity();
-#endif
-
-#ifdef BOARD_HAS_LOAD_SWITCH
   render_load_switch_channels();
-#endif
 
   pixels.show();  // This sends the updated pixel color to the hardware.
 }
 
-#ifdef BOARD_HAS_INTERFACE_ACTIVITY_LEDS
 void LED::render_interface_activity(void) {
   InterfaceList list = esp32hal->interfaces();
   for (size_t i = 0; i < list.count; i++) {
@@ -166,7 +158,6 @@ void LED::render_interface_activity(void) {
     pixels.setPixelColor(led_index, active ? COLOR_BLUE(max_brightness) : COLOR_OFF);
   }
 }
-#endif
 
 // Indicator LEDs mirror the STATUS LED's color, at a fixed (non-animated) brightness.
 void LED::render_indicators(uint32_t color) {
@@ -255,7 +246,6 @@ uint8_t LED::up_down(uint16_t middle_point_scaled) {
   return CONSTRAIN(brightness, 0, max_brightness);
 }
 
-#ifdef BOARD_HAS_LOAD_SWITCH
 void LED::render_load_switch_channels(void) {
   LoadSwitch* load_switch = esp32hal->load_switch();
   if (load_switch == nullptr) {
@@ -276,4 +266,3 @@ void LED::render_load_switch_channels(void) {
     pixels.setPixelColor(led_index, color);
   }
 }
-#endif

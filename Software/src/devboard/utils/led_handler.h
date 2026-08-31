@@ -35,12 +35,8 @@ class LED {
   void flow_run(void);
   void heartbeat_run(void);
   void render_indicators(uint32_t color);
-#ifdef BOARD_HAS_INTERFACE_ACTIVITY_LEDS
   void render_interface_activity(void);
-#endif
-#ifdef BOARD_HAS_LOAD_SWITCH
   void render_load_switch_channels(void);
-#endif
 
   uint8_t up_down(uint16_t middle_point_f);
   uint16_t LED_PERIOD_MS = 3000;
